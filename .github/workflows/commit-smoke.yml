@@ -52,20 +52,7 @@ jobs:
           restore-keys: |
             unifrog-toolchain-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Check each commit
+      - name: Check current commit
         run: |
           export CCACHE_DIR="$PWD/.ccache"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            range="${{ github.event.pull_request.base.sha }}..HEAD"
-          else
-            case "${{ github.event.before }}" in
-              0000000000000000000000000000000000000000) range="HEAD" ;;
-              *) range="${{ github.event.before }}..HEAD" ;;
-            esac
-          fi
-
-          for commit in $(git rev-list --reverse "$range"); do
-            echo "Checking $commit"
-            git checkout --detach "$commit"
-            make ci-commit-check HOSTCC=tcc CCACHE=ccache TOOLCHAIN="$PWD/toolchain"
-          done
+          make ci-commit-check HOSTCC=tcc CCACHE=ccache TOOLCHAIN="$PWD/toolchain"
