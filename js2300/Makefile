@@ -32,9 +32,23 @@ OBJECTS := \
 	$(BUILD)/libm.o \
 	$(BUILD)/cutils.o
 
-.PHONY: all clean check
+.PHONY: all help clean check print-config
 
 all: $(TARGET)
+
+help:
+	@echo "JS2300 runtime:"
+	@echo "  make -C js2300 check        Build and verify libjs2300.a"
+	@echo "  make -C js2300 clean        Remove js2300 build outputs"
+	@echo "  make -C js2300 print-config"
+
+print-config:
+	@echo "TOOLCHAIN=$(TOOLCHAIN)"
+	@echo "MQUICKJS_DIR=$(MQUICKJS_DIR)"
+	@echo "BUILD=$(BUILD)"
+	@echo "OUT=$(OUT)"
+	@echo "TARGET=$(TARGET)"
+	@echo "HOSTCC=$(HOSTCC)"
 
 check: $(TARGET)
 	@test -s $(TARGET)

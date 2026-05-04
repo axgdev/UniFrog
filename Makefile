@@ -1,3 +1,4 @@
+# User-facing path defaults. Override these in untracked config.mk.
 TOOLCHAIN ?= /opt/mipsel-mti-elf
 TOOLCHAIN_UNAME_M := $(shell uname -m)
 TOOLCHAIN_HOST_ARCH := $(if $(filter aarch64 arm64,$(TOOLCHAIN_UNAME_M)),arm64,$(if $(filter x86_64 amd64,$(TOOLCHAIN_UNAME_M)),x86_64,$(TOOLCHAIN_UNAME_M)))
@@ -454,63 +455,65 @@ SHELL_APP_OBJECTS += $(DTB_OBJ)
 endif
 
 .DELETE_ON_ERROR:
-.PHONY: all clean distclean rebuild refresh-sd refresh-sd-clean sd-zip deps deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores ci-deps ci-toolchain ci-commit-check ci-sd-zip check asdcheck fastboot fastboot-check layout-check doctor size install dtb lib sdk js2300-check frontend-check frontend-package core-package help FORCE
+COMMON_TARGETS := all help doctor deps check clean distclean rebuild
+SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores
+PACKAGE_TARGETS := frontend-package core-package sd-zip install refresh-sd refresh-sd-clean
+VERIFY_TARGETS := asdcheck fastboot-check layout-check js2300-check frontend-check
+ADVANCED_TARGETS := sdk dtb lib fastboot size ci-deps ci-toolchain ci-commit-check ci-sd-zip print-config
+.PHONY: $(COMMON_TARGETS) $(SETUP_TARGETS) $(PACKAGE_TARGETS) $(VERIFY_TARGETS) $(ADVANCED_TARGETS) FORCE
 
 all: $(ASD) $(OUT)/unifrog.bin core-package
 
 help:
-	@echo "$(APP) build targets:"
-	@echo "  make              Build $(ASD), $(OUT)/unifrog.bin, and staged JS UI"
-	@echo "  make check        Build and verify $(ASD), fastboot payload, and JS UI"
-	@echo "  make sdk          Build the SDK kernel library from source"
-	@echo "  make deps         Fetch external build inputs into $(DEPS)"
-	@echo "  make deps-alpine  Install Alpine host packages"
-	@echo "  make deps-ubuntu  Print Ubuntu host package command"
-	@echo "  make deps-sdk     Initialize the HCRTOS SDK submodule"
-	@echo "  make js2300-check Check the JS2300 runtime"
-	@echo "  make frontend-check"
-	@echo "                    Check the editable JavaScript frontend"
-	@echo "  make frontend-package"
-	@echo "                    Stage JavaScript UI files under output/sdcard/unifrog"
-	@echo "  make core-package"
-	@echo "                    Stage external core artifacts under output/sdcard/unifrog/cores"
-	@echo "  make asdcheck     Verify $(ASD) LCFG header and CRC"
-	@echo "  make fastboot     Build tiny stage-1 $(FASTBOOT_ASD) and raw unifrog.bin"
-	@echo "                    FASTBOOT_PAYLOAD=shell|full selects payload"
-	@echo "  make fastboot-check"
-	@echo "                    Build and verify the stage-1 fastboot image"
-	@echo "  make layout-check Verify allocatable no-load reservations are heap-owned"
-	@echo "  make doctor       Check required host/cross build tools"
-	@echo "                    Also checks that external dependencies are present"
-	@echo "  make dtb          Build embedded device tree blob"
-	@echo "  make lib          Build $(LIBUNIFROG)"
-	@echo "  make size         Print output sizes"
-	@echo "  make install      Copy fastboot BIOS, firmware/unifrog.bin, and JS UI to SDCARD=/media/mmcblk0"
-	@echo "  make refresh-sd   Incrementally build, install all SD files, and sync"
-	@echo "  make refresh-sd-clean"
-	@echo "                    Clean rebuild, install all SD files, and sync"
-	@echo "  make sd-zip       Build a ready-to-extract SD card ZIP at SDZIP=output/UniFrog-sdcard.zip"
-	@echo "  make ci-sd-zip    Run the local equivalent of the GitHub SD-card ZIP build"
-	@echo "                    Uses fetched dependencies and fast ZIP compression"
-	@echo "  make ci-commit-check"
-	@echo "                    Fast per-commit compile smoke test used by GitHub Actions"
-	@echo "  make rebuild      Clean, then build"
-	@echo "  make clean        Remove generated files"
-	@echo "  make distclean    Remove generated files and editor/test leftovers"
-	@echo "  make JOBS=1       Force serial build"
-	@echo "  make SDK=/path    Use an external HCRTOS SDK checkout"
-	@echo "  make CORES=/path  Use an external core build recipe"
-	@echo "  make CORE_SOURCE_ROOT=/path"
-	@echo "                    Use external direct core source checkouts"
-	@echo "  make MQUICKJS_DIR=/path"
-	@echo "                    Override the bundled MQuickJS checkout for JS2300"
-	@echo "  make TOOLCHAIN=/path/to/mipsel-mti-elf"
-	@echo "  make EMBED_DTB=0  Use the SDK DTB instead of the local DTS"
-	@echo "  make HOSTCC=tcc   Build the host packer with tcc"
-	@echo "  make OPT_FAST=-O3 Build shared hot paths with another fast optimization"
-	@echo "  make OPT_AUDIO=-Os"
-	@echo "                    Keep audio-sensitive objects on the measured-safe path"
-	@echo "  make V=1          Show full compiler/linker commands"
+	@echo "$(APP) common workflow:"
+	@echo "  make deps          Fetch SDK submodule and external source inputs"
+	@echo "  make doctor        Check toolchain, SDK, and fetched inputs"
+	@echo "  make               Build $(ASD), $(OUT)/unifrog.bin, and SD files"
+	@echo "  make check         Build and verify firmware, fastboot, JS, and layout"
+	@echo ""
+	@echo "Setup:"
+	@echo "  make deps-alpine   Install Alpine host packages"
+	@echo "  make deps-ubuntu   Print Ubuntu host package command"
+	@echo "  make deps-sdk      Initialize only the HCRTOS SDK submodule"
+	@echo "  make deps-cores    Fetch only libretro core sources"
+	@echo ""
+	@echo "Packaging and device:"
+	@echo "  make sd-zip        Build $(SDZIP)"
+	@echo "  make install       Copy firmware and SD files to SDCARD=$(SDCARD)"
+	@echo "  make refresh-sd    Build, install, and sync SD files"
+	@echo ""
+	@echo "Focused checks:"
+	@echo "  make js2300-check frontend-check layout-check asdcheck"
+	@echo "  make -C cores help"
+	@echo "  make -C frontend help"
+	@echo "  make -C js2300 help"
+	@echo ""
+	@echo "Cleanup:"
+	@echo "  make clean         Remove generated files"
+	@echo "  make distclean     Also remove sub-build outputs"
+	@echo ""
+	@echo "Config:"
+	@echo "  make print-config  Show current paths and tools"
+	@echo "  make V=1           Show full compiler/linker commands"
+	@echo "  Override paths in untracked config.mk, or on the command line."
+
+print-config:
+	@echo "TOOLCHAIN=$(TOOLCHAIN)"
+	@echo "SDK=$(SDK)"
+	@echo "DEPS=$(DEPS)"
+	@echo "CORES=$(CORES)"
+	@echo "CORE_SOURCE_ROOT=$(CORE_SOURCE_ROOT)"
+	@echo "CORE_SUPPORT_ROOT=$(CORE_SUPPORT_ROOT)"
+	@echo "JS2300=$(JS2300)"
+	@echo "FRONTEND=$(FRONTEND)"
+	@echo "MQUICKJS_DIR=$(MQUICKJS_DIR)"
+	@echo "HOSTCC=$(HOSTCC)"
+	@echo "DTC=$(DTC)"
+	@echo "CCACHE=$(if $(CCACHE),$(CCACHE),disabled)"
+	@echo "ARCH_CFLAGS=$(ARCH_CFLAGS)"
+	@echo "OPT_SIZE=$(OPT_SIZE)"
+	@echo "OPT_FAST=$(OPT_FAST)"
+	@echo "OPT_AUDIO=$(OPT_AUDIO)"
 
 deps: deps-sdk deps-mquickjs deps-cores
 
@@ -567,20 +570,7 @@ doctor:
 	@test -f "$(JS2300)/Makefile" || { echo "missing JS2300 source: $(JS2300)"; exit 1; }
 	@test -f "$(FRONTEND)/Makefile" || { echo "missing frontend source: $(FRONTEND)"; exit 1; }
 	@test -f "$(MQUICKJS_DIR)/mquickjs.c" || { echo "missing MQuickJS checkout: $(MQUICKJS_DIR)"; exit 1; }
-	@echo "HOSTCC=$(HOSTCC)"
-	@echo "DTC=$(DTC)"
-	@echo "SDK=$(SDK)"
-	@echo "CORES=$(CORES)"
-	@echo "CORE_SOURCE_ROOT=$(CORE_SOURCE_ROOT)"
-	@echo "CORE_SUPPORT_ROOT=$(CORE_SUPPORT_ROOT)"
-	@echo "JS2300=$(JS2300)"
-	@echo "FRONTEND=$(FRONTEND)"
-	@echo "MQUICKJS_DIR=$(MQUICKJS_DIR)"
-	@echo "ARCH_CFLAGS=$(ARCH_CFLAGS)"
-	@echo "CCACHE=$(if $(CCACHE),$(CCACHE),disabled)"
-	@echo "OPT_SIZE=$(OPT_SIZE)"
-	@echo "OPT_FAST=$(OPT_FAST)"
-	@echo "OPT_AUDIO=$(OPT_AUDIO)"
+	$(Q)$(MAKE) --no-print-directory print-config
 	@echo "GCC_LIBDIR=$(GCC_LIBDIR)"
 	@echo "OK"
 
