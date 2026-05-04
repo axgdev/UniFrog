@@ -2,6 +2,8 @@
 /.deps/
 /output/
 /build/
+/js2300/build/
+/js2300/output/
 /config.mk
 /asdpack
 /bisrv*.asd
