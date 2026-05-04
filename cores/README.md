@@ -23,6 +23,8 @@ make -C cores init                  Fetch pinned sources and apply patches
 make -C cores                       Build every configured core archive
 make -C cores check                 Verify clean patched checkouts
 make -C cores core-status           Show source checkout status
+make -C cores pin-status MODE=tag   Compare manifest pins to latest refs
+make -C cores upgrade-pins MODE=tag Update manifest pins only
 make -C cores diff-core CORE=gpsp   Show UniFrog patch delta for one core
 make -C cores log-core CORE=gpsp    Show UniFrog patch commits for one core
 make -C cores update-core CORE=gpsp Refresh one patched checkout

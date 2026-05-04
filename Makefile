@@ -13,8 +13,9 @@ JS2300 ?= js2300
 FRONTEND ?= frontend
 MQUICKJS_DIR ?= $(DEPS)/mquickjs
 MQUICKJS_URL ?= https://github.com/bellard/mquickjs.git
-MQUICKJS_REF ?= main
+MQUICKJS_REF ?= ee50431eac9b14b99f722b537ec4cac0c8dd75ab
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+PIN_MODE ?= $(if $(MODE),$(MODE),head)
 
 -include config.mk
 
@@ -455,7 +456,7 @@ SHELL_APP_OBJECTS += $(DTB_OBJ)
 endif
 
 .DELETE_ON_ERROR:
-COMMON_TARGETS := all help setup doctor deps repo-check quick-check check verify clean distclean rebuild
+COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild
 SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores
 PACKAGE_TARGETS := frontend-package core-package sd-zip install refresh-sd refresh-sd-clean
 VERIFY_TARGETS := asdcheck fastboot-check layout-check js2300-check frontend-check
@@ -474,6 +475,8 @@ help:
 	@echo "  make               Build $(ASD), $(OUT)/unifrog.bin, and SD files"
 	@echo "  make verify        Build and verify firmware, fastboot, JS, and layout"
 	@echo "  make deps          Same as make setup"
+	@echo "  make deps-status   Show pinned deps vs latest MODE=head or MODE=tag"
+	@echo "  make upgrade-deps  Bump pins and fetch deps, MODE=head or MODE=tag"
 	@echo "  make check         Same as make verify"
 	@echo ""
 	@echo "Setup:"
@@ -537,12 +540,82 @@ deps-mquickjs:
 	@mkdir -p $(DEPS)
 	@if test -d "$(MQUICKJS_DIR)/.git"; then \
 		echo "  FETCH   $(MQUICKJS_DIR)"; \
-		git -C "$(MQUICKJS_DIR)" fetch --depth 1 origin "$(MQUICKJS_REF)"; \
-		git -C "$(MQUICKJS_DIR)" checkout -q FETCH_HEAD; \
+		git -C "$(MQUICKJS_DIR)" remote set-url origin "$(MQUICKJS_URL)"; \
 	else \
 		echo "  CLONE   $(MQUICKJS_URL)"; \
-		git clone --depth 1 --branch "$(MQUICKJS_REF)" "$(MQUICKJS_URL)" "$(MQUICKJS_DIR)"; \
+		rm -rf "$(MQUICKJS_DIR)"; \
+		git init -q "$(MQUICKJS_DIR)"; \
+		git -C "$(MQUICKJS_DIR)" remote add origin "$(MQUICKJS_URL)"; \
+	fi; \
+	if ! git -C "$(MQUICKJS_DIR)" cat-file -e "$(MQUICKJS_REF)^{commit}" 2>/dev/null; then \
+		git -C "$(MQUICKJS_DIR)" fetch --depth 1 --filter=blob:none origin "$(MQUICKJS_REF)"; \
+	fi; \
+	git -C "$(MQUICKJS_DIR)" checkout -q "$(MQUICKJS_REF)"; \
+	git -C "$(MQUICKJS_DIR)" reset --hard -q "$(MQUICKJS_REF)"; \
+	git -C "$(MQUICKJS_DIR)" clean -fdx -q
+
+deps-status:
+	@set -e; \
+	mode="$(PIN_MODE)"; \
+	case "$$mode" in head|tag) ;; *) echo "MODE must be head or tag"; exit 1;; esac; \
+	resolve_ref() { \
+		url="$$1"; mode="$$2"; \
+		if test "$$mode" = tag; then \
+			tag=$$(git ls-remote --tags --sort='version:refname' "$$url" 'refs/tags/v[0-9]*' 'refs/tags/[0-9]*' 2>/dev/null | \
+				awk '$$2 !~ /\^\{\}$$/ && $$2 ~ /^refs\/tags\/v?[0-9]+([.][0-9]+)*$$/ { sub("refs/tags/", "", $$2); tag=$$2 } END { print tag }'); \
+			if test -n "$$tag"; then \
+				ref=$$(git ls-remote --tags "$$url" "refs/tags/$$tag" "refs/tags/$$tag^{}" | \
+					awk '$$2 ~ /\^\{\}$$/ { peeled=$$1 } $$2 !~ /\^\{\}$$/ { direct=$$1 } END { print peeled ? peeled : direct }'); \
+				printf '%s tag %s\n' "$$ref" "$$tag"; \
+				return; \
+			fi; \
+		fi; \
+		branch=$$(git ls-remote --symref "$$url" HEAD | awk '/^ref:/ { sub("refs/heads/", "", $$2); print $$2; exit }'); \
+		ref=$$(git ls-remote "$$url" HEAD | awk '/^[0-9a-f]/ { print $$1; exit }'); \
+		printf '%s head %s\n' "$$ref" "$${branch:-HEAD}"; \
+	}; \
+	set -- $$(resolve_ref "$(MQUICKJS_URL)" "$$mode"); \
+	printf '%-16s pinned=%s latest=%s source=%s:%s\n' mquickjs "$(MQUICKJS_REF)" "$$1" "$$2" "$$3"
+	$(Q)$(MAKE) -C $(CORES) pin-status PIN_MODE=$(PIN_MODE) \
+		CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT)) \
+		CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT))
+
+upgrade-pins:
+	@set -e; \
+	mode="$(PIN_MODE)"; \
+	case "$$mode" in head|tag) ;; *) echo "MODE must be head or tag"; exit 1;; esac; \
+	resolve_ref() { \
+		url="$$1"; mode="$$2"; \
+		if test "$$mode" = tag; then \
+			tag=$$(git ls-remote --tags --sort='version:refname' "$$url" 'refs/tags/v[0-9]*' 'refs/tags/[0-9]*' 2>/dev/null | \
+				awk '$$2 !~ /\^\{\}$$/ && $$2 ~ /^refs\/tags\/v?[0-9]+([.][0-9]+)*$$/ { sub("refs/tags/", "", $$2); tag=$$2 } END { print tag }'); \
+			if test -n "$$tag"; then \
+				ref=$$(git ls-remote --tags "$$url" "refs/tags/$$tag" "refs/tags/$$tag^{}" | \
+					awk '$$2 ~ /\^\{\}$$/ { peeled=$$1 } $$2 !~ /\^\{\}$$/ { direct=$$1 } END { print peeled ? peeled : direct }'); \
+				printf '%s tag %s\n' "$$ref" "$$tag"; \
+				return; \
+			fi; \
+		fi; \
+		branch=$$(git ls-remote --symref "$$url" HEAD | awk '/^ref:/ { sub("refs/heads/", "", $$2); print $$2; exit }'); \
+		ref=$$(git ls-remote "$$url" HEAD | awk '/^[0-9a-f]/ { print $$1; exit }'); \
+		printf '%s head %s\n' "$$ref" "$${branch:-HEAD}"; \
+	}; \
+	set -- $$(resolve_ref "$(MQUICKJS_URL)" "$$mode"); \
+	new=$$1; kind=$$2; label=$$3; old="$(MQUICKJS_REF)"; \
+	if test -z "$$new"; then echo "mquickjs: unable to resolve latest $$mode"; exit 1; fi; \
+	if test "$$new" != "$$old"; then \
+		sed -i.bak "s|^MQUICKJS_REF ?= .*|MQUICKJS_REF ?= $$new|" Makefile; \
+		rm -f Makefile.bak; \
+		echo "  PIN     mquickjs $$old -> $$new ($$kind $$label)"; \
+	else \
+		echo "  PIN     mquickjs already $$old ($$kind $$label)"; \
 	fi
+	$(Q)$(MAKE) -C $(CORES) upgrade-pins PIN_MODE=$(PIN_MODE) \
+		CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT)) \
+		CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT))
+
+upgrade-deps: upgrade-pins
+	$(Q)$(MAKE) --no-print-directory deps PIN_MODE=$(PIN_MODE)
 
 deps-support:
 	$(Q)$(MAKE) -C $(CORES) support-init $(CORE_MAKE_ARGS)

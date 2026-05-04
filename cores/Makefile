@@ -5,6 +5,7 @@ JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || ec
 CCACHE ?=
 CCACHE_PREFIX := $(if $(CCACHE),$(CCACHE) )
 Q := $(if $(V),,@)
+PIN_MODE ?= $(if $(MODE),$(MODE),head)
 
 include manifest.mk
 
@@ -280,8 +281,9 @@ CHD_SUPPORT_OBJECTS := \
 CORE_TARGETS := gambatte gpsp picodrive snes9x2005 snes9x2002 quicknes \
 	fceumm gearboy pce-fast qpsx pmp-video
 SUPPORT_TARGETS := libretro-common chd-support
-MAINTAIN_TARGETS := support-init init doctor core-status diff-core log-core \
-	update-core check clean status help print-config
+MAINTAIN_TARGETS := support-init init doctor core-status pin-status \
+	upgrade-pins diff-core log-core update-core check clean status help \
+	print-config
 
 .PHONY: all $(CORE_TARGETS) $(SUPPORT_TARGETS) $(MAINTAIN_TARGETS)
 
@@ -300,6 +302,8 @@ help:
 	@echo ""
 	@echo "Patch maintenance:"
 	@echo "  make -C cores core-status"
+	@echo "  make -C cores pin-status MODE=head"
+	@echo "  make -C cores upgrade-pins MODE=tag"
 	@echo "  make -C cores diff-core CORE=gpsp"
 	@echo "  make -C cores log-core CORE=gpsp"
 	@echo "  make -C cores update-core CORE=gpsp"
@@ -451,6 +455,86 @@ core-status:
 		commit=$${rest%%|*}; \
 		head=$$(git -C "$$dir" rev-parse --short HEAD); \
 		echo "$$name upstream=$$commit head=$$head dir=$$dir"; \
+	done
+
+pin-status:
+	@set -e; \
+	mode="$(PIN_MODE)"; \
+	case "$$mode" in head|tag) ;; *) echo "MODE must be head or tag"; exit 1;; esac; \
+	resolve_ref() { \
+		url="$$1"; mode="$$2"; \
+		if test "$$mode" = tag; then \
+			tag=$$(git ls-remote --tags --sort='version:refname' "$$url" 'refs/tags/v[0-9]*' 'refs/tags/[0-9]*' 2>/dev/null | \
+				awk '$$2 !~ /\^\{\}$$/ && $$2 ~ /^refs\/tags\/v?[0-9]+([.][0-9]+)*$$/ { sub("refs/tags/", "", $$2); tag=$$2 } END { print tag }'); \
+			if test -n "$$tag"; then \
+				ref=$$(git ls-remote --tags "$$url" "refs/tags/$$tag" "refs/tags/$$tag^{}" | \
+					awk '$$2 ~ /\^\{\}$$/ { peeled=$$1 } $$2 !~ /\^\{\}$$/ { direct=$$1 } END { print peeled ? peeled : direct }'); \
+				printf '%s tag %s\n' "$$ref" "$$tag"; \
+				return; \
+			fi; \
+		fi; \
+		branch=$$(git ls-remote --symref "$$url" HEAD | awk '/^ref:/ { sub("refs/heads/", "", $$2); print $$2; exit }'); \
+		ref=$$(git ls-remote "$$url" HEAD | awk '/^[0-9a-f]/ { print $$1; exit }'); \
+		printf '%s head %s\n' "$$ref" "$${branch:-HEAD}"; \
+	}; \
+	for spec in $(SUPPORT_SPECS) $(CORE_SPECS); do \
+		name=$${spec%%|*}; rest=$${spec#*|}; \
+		dir=$${rest%%|*}; rest=$${rest#*|}; \
+		url=$${rest%%|*}; rest=$${rest#*|}; \
+		commit=$${rest%%|*}; \
+		set -- $$(resolve_ref "$$url" "$$mode"); \
+		if test "$$mode" = tag && test "$$2" = tag; then \
+			head_ref=$$(git ls-remote "$$url" HEAD | awk '/^[0-9a-f]/ { print $$1; exit }'); \
+			if test "$$commit" = "$$head_ref" && test "$$1" != "$$commit"; then \
+				printf '%-16s pinned=%s latest=%s source=head:%s latest_tag=%s\n' "$$name" "$$commit" "$$commit" "$${head_ref:+current}" "$$3"; \
+				continue; \
+			fi; \
+		fi; \
+		printf '%-16s pinned=%s latest=%s source=%s:%s\n' "$$name" "$$commit" "$$1" "$$2" "$$3"; \
+	done
+
+upgrade-pins:
+	@set -e; \
+	mode="$(PIN_MODE)"; \
+	case "$$mode" in head|tag) ;; *) echo "MODE must be head or tag"; exit 1;; esac; \
+	resolve_ref() { \
+		url="$$1"; mode="$$2"; \
+		if test "$$mode" = tag; then \
+			tag=$$(git ls-remote --tags --sort='version:refname' "$$url" 'refs/tags/v[0-9]*' 'refs/tags/[0-9]*' 2>/dev/null | \
+				awk '$$2 !~ /\^\{\}$$/ && $$2 ~ /^refs\/tags\/v?[0-9]+([.][0-9]+)*$$/ { sub("refs/tags/", "", $$2); tag=$$2 } END { print tag }'); \
+			if test -n "$$tag"; then \
+				ref=$$(git ls-remote --tags "$$url" "refs/tags/$$tag" "refs/tags/$$tag^{}" | \
+					awk '$$2 ~ /\^\{\}$$/ { peeled=$$1 } $$2 !~ /\^\{\}$$/ { direct=$$1 } END { print peeled ? peeled : direct }'); \
+				printf '%s tag %s\n' "$$ref" "$$tag"; \
+				return; \
+			fi; \
+		fi; \
+		branch=$$(git ls-remote --symref "$$url" HEAD | awk '/^ref:/ { sub("refs/heads/", "", $$2); print $$2; exit }'); \
+		ref=$$(git ls-remote "$$url" HEAD | awk '/^[0-9a-f]/ { print $$1; exit }'); \
+		printf '%s head %s\n' "$$ref" "$${branch:-HEAD}"; \
+	}; \
+	for spec in $(SUPPORT_SPECS) $(CORE_SPECS); do \
+		name=$${spec%%|*}; rest=$${spec#*|}; \
+		dir=$${rest%%|*}; rest=$${rest#*|}; \
+		url=$${rest%%|*}; rest=$${rest#*|}; \
+		old=$${rest%%|*}; \
+		set -- $$(resolve_ref "$$url" "$$mode"); \
+		new=$$1; kind=$$2; label=$$3; \
+		if test -z "$$new"; then echo "$$name: unable to resolve latest $$mode"; exit 1; fi; \
+		if test "$$mode" = tag && test "$$kind" = tag; then \
+			head_ref=$$(git ls-remote "$$url" HEAD | awk '/^[0-9a-f]/ { print $$1; exit }'); \
+			if test "$$old" = "$$head_ref" && test "$$new" != "$$old"; then \
+				echo "  PIN     $$name already at upstream HEAD $$old (latest tag $$label is older)"; \
+				continue; \
+			fi; \
+		fi; \
+		if test "$$new" != "$$old"; then \
+			sed -i.bak "/'$$name|/s|$$old|$$new|" manifest.mk; \
+			rm -f manifest.mk.bak; \
+			echo "  PIN     $$name $$old -> $$new ($$kind $$label)"; \
+		else \
+			echo "  PIN     $$name already $$old ($$kind $$label)"; \
+		fi; \
 	done
 
 diff-core:
