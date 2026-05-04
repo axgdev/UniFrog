@@ -29,6 +29,7 @@ static const JSPropDef js2300_c_function_decl[] = {
    JS_CFUNC_SPECIAL_DEF("js2300_system_av_output", 1, generic_params, js2300_system_av_output),
    JS_CFUNC_SPECIAL_DEF("js2300_system_action", 1, generic_params, js2300_system_action),
    JS_CFUNC_SPECIAL_DEF("js2300_fs_list", 1, generic_params, js2300_fs_list),
+   JS_CFUNC_SPECIAL_DEF("js2300_fs_index", 3, generic_params, js2300_fs_index),
    JS_CFUNC_SPECIAL_DEF("js2300_fs_read_text", 1, generic_params, js2300_fs_read_text),
    JS_CFUNC_SPECIAL_DEF("js2300_fs_write_text", 2, generic_params, js2300_fs_write_text),
    JS_PROP_END,

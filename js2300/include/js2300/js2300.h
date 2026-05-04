@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 #define JS2300_API_VERSION_MAJOR 0u
-#define JS2300_API_VERSION_MINOR 5u
+#define JS2300_API_VERSION_MINOR 6u
 #define JS2300_API_VERSION_PATCH 0u
 
 #define JS2300_API_VERSION_ENCODE(major, minor, patch) \
@@ -51,6 +51,15 @@ struct js2300_fs_entry {
    uint8_t is_dir;
 };
 
+struct js2300_fs_index_result {
+   uint32_t games;
+   uint32_t media;
+   uint32_t files;
+   uint32_t dirs;
+   uint32_t truncated;
+   uint32_t ms;
+};
+
 struct js2300_host {
    uint32_t size;
    void *opaque;
@@ -82,6 +91,10 @@ struct js2300_host {
    int (*fs_write_text)(void *opaque, const char *path,
                         const char *text, size_t size);
    int (*font_load)(void *opaque, const char *path);
+   int (*fs_index)(void *opaque, const char *root,
+                   const char *game_index_path,
+                   const char *media_index_path,
+                   struct js2300_fs_index_result *result);
 };
 
 struct js2300_runtime;
