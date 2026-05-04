@@ -33,11 +33,11 @@ Do not commit `config.mk`.
 Fetched dependencies live under `.deps/` and are not committed:
 
 - `.deps/mquickjs`
-- `.deps/unifrog-cores`
+- `.deps/cores`
 
-The `.deps/unifrog-cores` checkout is a compatibility bridge for the current
-core build. The intended direction is to replace it with direct core manifests
-and UniFrog overlays in this repository.
+Core sources are fetched directly from `cores/manifest.mk`. The manifest names
+the source branch for each core and `make deps-cores` updates those checkouts
+without adding Git submodules to the app repository.
 
 ## Public History
 
