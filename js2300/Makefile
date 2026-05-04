@@ -4,6 +4,7 @@ BUILD ?= build
 OUT ?= output
 TARGET := $(OUT)/libjs2300.a
 MQUICKJS_DIR ?= libs/mquickjs
+MQUICKJS_ATOM_ALIGN ?= 256
 MQUICKJS_ATOM_ALIGN_PATCH ?=
 MQUICKJS_TCC_PATCH ?= ../patches/mquickjs/0001-use-portable-int-overflow-checks.patch
 MQUICKJS_BUILD := $(BUILD)/mquickjs
@@ -53,15 +54,15 @@ $(MQUICKJS_PREPARE_STAMP): $(MQUICKJS_DIR)/mquickjs.c $(MQUICKJS_DIR)/mquickjs_b
 	@if test -f "$(MQUICKJS_TCC_PATCH)" && command -v patch >/dev/null 2>&1; then \
 		patch -d "$(MQUICKJS_BUILD)" -p1 < "$(MQUICKJS_TCC_PATCH)"; \
 	fi
-	@if grep -q '^#define ATOM_ALIGN 64$$' "$(MQUICKJS_BUILD)/mquickjs_build.c"; then \
+	@if grep -q '^#define ATOM_ALIGN ' "$(MQUICKJS_BUILD)/mquickjs_build.c"; then \
 		if test -n "$(MQUICKJS_ATOM_ALIGN_PATCH)" && test -f "$(MQUICKJS_ATOM_ALIGN_PATCH)" && command -v patch >/dev/null 2>&1; then \
 			patch -d "$(MQUICKJS_BUILD)" -p1 < "$(MQUICKJS_ATOM_ALIGN_PATCH)"; \
 		else \
-			sed -i 's/^#define ATOM_ALIGN 64$$/#define ATOM_ALIGN 128/' "$(MQUICKJS_BUILD)/mquickjs_build.c"; \
+			sed -i 's/^#define ATOM_ALIGN .*/#define ATOM_ALIGN $(MQUICKJS_ATOM_ALIGN)/' "$(MQUICKJS_BUILD)/mquickjs_build.c"; \
 		fi; \
 	fi
-	@if ! grep -q '^#define ATOM_ALIGN 128$$' "$(MQUICKJS_BUILD)/mquickjs_build.c"; then \
-		echo "error: JS2300 requires MQuickJS ATOM_ALIGN 128"; exit 1; \
+	@if ! grep -q '^#define ATOM_ALIGN $(MQUICKJS_ATOM_ALIGN)$$' "$(MQUICKJS_BUILD)/mquickjs_build.c"; then \
+		echo "error: JS2300 requires MQuickJS ATOM_ALIGN $(MQUICKJS_ATOM_ALIGN)"; exit 1; \
 	fi
 	@touch $@
 
