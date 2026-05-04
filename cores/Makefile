@@ -312,7 +312,7 @@ support-init:
 			printf '/*\n!/*/\n' >"$$dir/.git/info/sparse-checkout"; \
 		elif test "$$sparse" != "."; then \
 			git -C "$$dir" sparse-checkout init --cone; \
-			git -C "$$dir" sparse-checkout set $$sparse; \
+			git -C "$$dir" sparse-checkout set --skip-checks $$sparse; \
 		fi; \
 		git -C "$$dir" checkout -q "$$commit"; \
 		git -C "$$dir" reset --hard -q "$$commit"; \
@@ -345,7 +345,7 @@ init: support-init
 		fi; \
 		if test "$$sparse" != "."; then \
 			git -C "$$dir" sparse-checkout init --cone; \
-			git -C "$$dir" sparse-checkout set $$sparse; \
+			git -C "$$dir" sparse-checkout set --skip-checks $$sparse; \
 		fi; \
 		git -C "$$dir" checkout -q "$$commit"; \
 		git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
@@ -355,7 +355,7 @@ init: support-init
 			git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch; \
 		fi; \
 		if test "$$name" = picodrive; then \
-			git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" cpu/cyclone pico/sound/emu2413 platform/libpicofe; \
+			git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" -- cpu/cyclone pico/sound/emu2413 platform/libpicofe; \
 			dr_dir="$$dir/platform/common/dr_libs"; \
 			dr_url=$$(git -C "$$dir" config -f .gitmodules submodule.platform/common/dr_libs.url); \
 			dr_commit=$$(git -C "$$dir" rev-parse HEAD:platform/common/dr_libs); \
@@ -458,7 +458,7 @@ update-core:
 			fi; \
 			if test "$$sparse" != "."; then \
 				git -C "$$dir" sparse-checkout init --cone; \
-				git -C "$$dir" sparse-checkout set $$sparse; \
+				git -C "$$dir" sparse-checkout set --skip-checks $$sparse; \
 			fi; \
 			git -C "$$dir" checkout -q "$$commit"; \
 			git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
@@ -468,7 +468,7 @@ update-core:
 				git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch; \
 			fi; \
 			if test "$$name" = picodrive; then \
-				git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" cpu/cyclone pico/sound/emu2413 platform/libpicofe; \
+				git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" -- cpu/cyclone pico/sound/emu2413 platform/libpicofe; \
 				dr_dir="$$dir/platform/common/dr_libs"; \
 				dr_url=$$(git -C "$$dir" config -f .gitmodules submodule.platform/common/dr_libs.url); \
 				dr_commit=$$(git -C "$$dir" rev-parse HEAD:platform/common/dr_libs); \
