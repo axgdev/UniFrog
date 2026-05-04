@@ -5,12 +5,13 @@ Core source inputs are listed in `cores/manifest.mk`.
 Each manifest entry has:
 
 ```text
-name|checkout-directory|source-branch
+name|checkout-directory|upstream-url|upstream-commit
 ```
 
-`make -C cores init` clones or updates those branches into `.deps/cores/`.
-The app repository does not commit those source trees and does not use Git
-submodules for them.
+`make -C cores init` fetches those exact upstream commits into `.deps/cores/`
+and applies the matching patch series from `cores/patches/<name>/`. The app
+repository does not commit those source trees and does not use Git submodules
+for them.
 
 Useful commands:
 
@@ -21,7 +22,16 @@ make -C cores diff-core CORE=gpsp
 make -C cores update-core CORE=gpsp
 ```
 
-UniFrog-specific source edits currently live on the manifest branches. Prefer
-committed overlays for new integration files when possible, and keep direct
-upstream source edits focused enough to review when rebasing onto newer upstream
-code.
+UniFrog-specific source edits live in committed patch files. To inspect the
+current integration for one core, run:
+
+```sh
+make -C cores diff-core CORE=gpsp
+make -C cores log-core CORE=gpsp
+```
+
+To update a core, change its pinned upstream commit in `cores/manifest.mk`, run
+`make -C cores update-core CORE=<core>`, and refresh only the patches that no
+longer apply cleanly. Prefer committed overlays for new integration files when
+possible, and keep direct upstream source edits focused enough to review when
+rebasing onto newer upstream code.

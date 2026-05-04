@@ -1,0 +1,168 @@
+From 6417e7cb44a8f1871900c6dc59a1432ce4b8c9c4 Mon Sep 17 00:00:00 2001
+From: "Axel Garcia K." <git@axelgk.com>
+Date: Wed, 6 May 2026 08:06:06 +0000
+Subject: [PATCH 2/2] Keep SF2000 support inside libretro-common
+
+Move the SF2000 libco backend and compatibility header into the libretro-common UniFrog branch. This removes the dependency on wrapper-side support files and makes the libretro-common delta self-contained.
+---
+ include/sf2000_compat.h |  26 ++++++++++
+ libco/libco.c           |   2 +-
+ libco/sjlj_sf2000.c     | 103 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 130 insertions(+), 1 deletion(-)
+ create mode 100644 include/sf2000_compat.h
+ create mode 100644 libco/sjlj_sf2000.c
+
+diff --git a/include/sf2000_compat.h b/include/sf2000_compat.h
+new file mode 100644
+index 0000000..7a93259
+--- /dev/null
++++ b/include/sf2000_compat.h
+@@ -0,0 +1,26 @@
++#ifndef SF2000_COMPAT_H
++#define SF2000_COMPAT_H
++
++#include <stdint.h>
++
++#if defined(SF2000)
++typedef long ssize_t;
++
++extern int dly_tsk(unsigned ms);
++extern uint32_t os_get_tick_count(void);
++
++#define nanosleep(rqtp, rmtp) \
++   ({ \
++      const struct timespec *sf2000_rqtp = (rqtp); \
++      struct timespec *sf2000_rmtp = (rmtp); \
++      dly_tsk(1000000L * sf2000_rqtp->tv_sec + sf2000_rqtp->tv_nsec / 1000); \
++      if (sf2000_rmtp) \
++      { \
++         sf2000_rmtp->tv_sec = 0; \
++         sf2000_rmtp->tv_nsec = 0; \
++      } \
++      0; \
++   })
++#endif
++
++#endif
+diff --git a/libco/libco.c b/libco/libco.c
+index 1e83c32..790d869 100644
+--- a/libco/libco.c
++++ b/libco/libco.c
+@@ -38,7 +38,7 @@ void genode_free_secondary_stack(void *stack);
+   #elif defined(__ARM_EABI__) || defined(__arm__)
+     #include "armeabi.c"
+   #elif defined(SF2000)
+-    #include "../../../support/libretro-common/sf2000/libco/sjlj_sf2000.c"
++    #include "sjlj_sf2000.c"
+   #else
+     #include "sjlj.c"
+   #endif
+diff --git a/libco/sjlj_sf2000.c b/libco/sjlj_sf2000.c
+new file mode 100644
+index 0000000..64a2df8
+--- /dev/null
++++ b/libco/sjlj_sf2000.c
+@@ -0,0 +1,103 @@
++
++#define LIBCO_C
++#include <libco.h>
++#include <stdlib.h>
++#include <setjmp.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++typedef struct
++{
++	jmp_buf context;
++	void (*coentry)(void);
++	char* stack;
++} cothread_context_t;
++
++static cothread_context_t co_primary = {0};
++static cothread_context_t *co_creating, *co_running = NULL;
++
++static void cothread_proc()
++{
++	// cothread will be created in a suspended state,
++	// so save the context and return immediately.
++	if (setjmp(co_creating->context) == 1)
++	{// execution will continue here after a call to co_switch
++		co_running->coentry();
++		// cothread should never exit!
++		abort();
++	}
++}
++
++cothread_t co_active(void)
++{
++	if (!co_running)
++		co_running = &co_primary;
++
++	return (cothread_t)co_running;
++}
++
++cothread_t co_create(unsigned int stacksize, void (*coentry)(void))
++{
++	if (!co_running)
++		co_running = &co_primary;
++
++	cothread_context_t *ctx = (cothread_context_t *)malloc(sizeof(cothread_context_t));
++	ctx->stack = malloc(stacksize);
++	ctx->coentry = coentry;
++
++	co_creating = ctx;
++
++	// these must be static because can't access local vars when the stack changes
++	static void* original_sp;
++	static void* modified_sp;
++	modified_sp = ctx->stack + stacksize;
++
++	// save the current stack pointer
++	asm volatile (
++		"move %0, $sp"
++		: "=r" (original_sp)
++	);
++
++	// set the stack for the new cothread
++	asm volatile (
++		"move $sp, %0"
++		:
++		: "r" (modified_sp)
++	);
++
++	// call cothread entry proc to only setup its context, but return immediately here.
++	// cothread's coentry function will actually begin its execution after specifically calling co_switch.
++	cothread_proc();
++
++	// restore the stack pointer to the original stack
++	asm volatile (
++		"move $sp, %0"
++		:
++		: "r" (original_sp)
++	);
++
++	return (cothread_t)ctx;
++}
++
++void co_delete(cothread_t cothread)
++{
++	cothread_context_t *ctx = (cothread_context_t *)cothread;
++	if (ctx->stack)
++		free(ctx->stack);
++	free(ctx);
++}
++
++void co_switch(cothread_t cothread)
++{
++	if (setjmp(co_running->context) == 0)
++	{
++		co_running = (cothread_context_t *)cothread;
++		longjmp(co_running->context, 1);
++	}
++}
++
++#ifdef __cplusplus
++}
++#endif

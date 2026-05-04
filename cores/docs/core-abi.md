@@ -15,9 +15,9 @@ This keeps core updates manageable without blocking specialized work:
 - Each core builds independently and exports the standard `retro_*` symbols or,
   for future external modules, a UniFrog core entry point that returns those
   exports.
-- Core-specific changes stay on the source branches listed in
-  `cores/manifest.mk`, with overlays preferred for integration files that do
-  not need to edit upstream source.
+- Core-specific changes stay in the patch series under `cores/patches`, with
+  overlays preferred for integration files that do not need to edit upstream
+  source.
 - Specialized cores call only the ABI table. They must not depend on private
   frontend symbols, `src/` headers, or one firmware build's raw link addresses.
 
@@ -57,7 +57,7 @@ Until external loading is the default, UniFrog may link more than one libretro
 core into the firmware. In that mode each additional core must avoid public
 `retro_*` symbol collisions by using wrapper-provided preprocessor renames such
 as `gpsp_retro_run`. Keep those renames in `cores/Makefile`, not in upstream
-source branches.
+source patches.
 
 The preferred order for porting an upstream core is:
 
@@ -67,7 +67,7 @@ The preferred order for porting an upstream core is:
    matching POSIX API.
 3. Add compatibility in shared support libraries before editing a core.
 4. Change upstream core source only for real runtime behavior changes, and keep
-   each branch commit focused enough to review against future upstream updates.
+   each patch focused enough to review against future upstream updates.
 
 ## Long Load Progress
 
