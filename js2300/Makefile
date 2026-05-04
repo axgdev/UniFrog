@@ -8,7 +8,9 @@ MQUICKJS_ATOM_ALIGN ?= 256
 MQUICKJS_ATOM_ALIGN_PATCH ?=
 MQUICKJS_TCC_PATCH ?= ../patches/mquickjs/0001-use-portable-int-overflow-checks.patch
 MQUICKJS_BUILD := $(BUILD)/mquickjs
+MQUICKJS_HOST_BUILD := $(BUILD)/mquickjs-host
 MQUICKJS_PREPARE_STAMP := $(MQUICKJS_BUILD)/.prepared
+MQUICKJS_HOST_PREPARE_STAMP := $(MQUICKJS_HOST_BUILD)/.prepared
 
 CC := $(CROSS_COMPILE)gcc
 AR := $(CROSS_COMPILE)ar
@@ -19,7 +21,7 @@ CFLAGS ?= -EL -march=mips32 -mtune=mips32 -Os -pipe -msoft-float \
 	-ffunction-sections -fdata-sections \
 	-Wall -Wextra -Iinclude -I$(MQUICKJS_BUILD) -I$(BUILD) \
 	-D_GNU_SOURCE -DCONFIG_SMALL -DUSE_SOFTFLOAT
-HOST_CFLAGS ?= -std=gnu99 -O2 -Wall -Wextra -D_GNU_SOURCE -I$(MQUICKJS_BUILD)
+HOST_CFLAGS ?= -std=gnu99 -O2 -Wall -Wextra -D_GNU_SOURCE -I$(MQUICKJS_HOST_BUILD)
 MQUICKJS_CFLAGS := $(CFLAGS) -Wno-format -Wno-sign-compare \
 	-Wno-unused-parameter -Wno-type-limits -Wno-dangling-pointer
 
@@ -51,28 +53,35 @@ $(MQUICKJS_PREPARE_STAMP): $(MQUICKJS_DIR)/mquickjs.c $(MQUICKJS_DIR)/mquickjs_b
 	@mkdir -p "$(MQUICKJS_BUILD)"
 	@cp "$(MQUICKJS_DIR)"/*.[ch] "$(MQUICKJS_BUILD)"/
 	@cp "$(MQUICKJS_DIR)/Makefile" "$(MQUICKJS_BUILD)"/
+	@touch $@
+
+$(MQUICKJS_HOST_PREPARE_STAMP): $(MQUICKJS_PREPARE_STAMP)
+	@rm -rf "$(MQUICKJS_HOST_BUILD)"
+	@mkdir -p "$(MQUICKJS_HOST_BUILD)"
+	@cp "$(MQUICKJS_DIR)"/*.[ch] "$(MQUICKJS_HOST_BUILD)"/
+	@cp "$(MQUICKJS_DIR)/Makefile" "$(MQUICKJS_HOST_BUILD)"/
 	@if test -f "$(MQUICKJS_TCC_PATCH)" && command -v patch >/dev/null 2>&1; then \
-		patch -d "$(MQUICKJS_BUILD)" -p1 < "$(MQUICKJS_TCC_PATCH)"; \
+		patch -d "$(MQUICKJS_HOST_BUILD)" -p1 < "$(MQUICKJS_TCC_PATCH)"; \
 	fi
-	@if grep -q '^#define ATOM_ALIGN ' "$(MQUICKJS_BUILD)/mquickjs_build.c"; then \
+	@if grep -q '^#define ATOM_ALIGN ' "$(MQUICKJS_HOST_BUILD)/mquickjs_build.c"; then \
 		if test -n "$(MQUICKJS_ATOM_ALIGN_PATCH)" && test -f "$(MQUICKJS_ATOM_ALIGN_PATCH)" && command -v patch >/dev/null 2>&1; then \
-			patch -d "$(MQUICKJS_BUILD)" -p1 < "$(MQUICKJS_ATOM_ALIGN_PATCH)"; \
+			patch -d "$(MQUICKJS_HOST_BUILD)" -p1 < "$(MQUICKJS_ATOM_ALIGN_PATCH)"; \
 		else \
-			sed -i 's/^#define ATOM_ALIGN .*/#define ATOM_ALIGN $(MQUICKJS_ATOM_ALIGN)/' "$(MQUICKJS_BUILD)/mquickjs_build.c"; \
+			sed -i 's/^#define ATOM_ALIGN .*/#define ATOM_ALIGN $(MQUICKJS_ATOM_ALIGN)/' "$(MQUICKJS_HOST_BUILD)/mquickjs_build.c"; \
 		fi; \
 	fi
-	@if ! grep -q '^#define ATOM_ALIGN $(MQUICKJS_ATOM_ALIGN)$$' "$(MQUICKJS_BUILD)/mquickjs_build.c"; then \
+	@if ! grep -q '^#define ATOM_ALIGN $(MQUICKJS_ATOM_ALIGN)$$' "$(MQUICKJS_HOST_BUILD)/mquickjs_build.c"; then \
 		echo "error: JS2300 requires MQuickJS ATOM_ALIGN $(MQUICKJS_ATOM_ALIGN)"; exit 1; \
 	fi
 	@touch $@
 
-$(BUILD)/js2300_stdlib_gen.o: js2300_stdlib_gen.c $(MQUICKJS_PREPARE_STAMP) | $(BUILD)
+$(BUILD)/js2300_stdlib_gen.o: js2300_stdlib_gen.c $(MQUICKJS_HOST_PREPARE_STAMP) | $(BUILD)
 	@echo "  HOSTCC  $<"
 	@$(HOSTCC) $(HOST_CFLAGS) -o $@ -c $<
 
-$(BUILD)/mquickjs_build.host.o: $(MQUICKJS_PREPARE_STAMP) | $(BUILD)
-	@echo "  HOSTCC  $(MQUICKJS_BUILD)/mquickjs_build.c"
-	@$(HOSTCC) $(HOST_CFLAGS) -o $@ -c $(MQUICKJS_BUILD)/mquickjs_build.c
+$(BUILD)/mquickjs_build.host.o: $(MQUICKJS_HOST_PREPARE_STAMP) | $(BUILD)
+	@echo "  HOSTCC  $(MQUICKJS_HOST_BUILD)/mquickjs_build.c"
+	@$(HOSTCC) $(HOST_CFLAGS) -o $@ -c $(MQUICKJS_HOST_BUILD)/mquickjs_build.c
 
 $(BUILD)/js2300_stdlib_gen: $(BUILD)/js2300_stdlib_gen.o $(BUILD)/mquickjs_build.host.o
 	@echo "  HOSTLD  $@"
