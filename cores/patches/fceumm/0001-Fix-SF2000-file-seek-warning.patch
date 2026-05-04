@@ -1,0 +1,26 @@
+From 4a896e1fa091e85f91934025f5ef01fc411499ea Mon Sep 17 00:00:00 2001
+From: UniFrog CI <ci@unifrog.local>
+Date: Thu, 7 May 2026 02:48:57 +0000
+Subject: [PATCH] Fix SF2000 file seek warning
+
+Reject negative SEEK_SET offsets before comparing against the unsigned in-memory file size. This keeps the existing bounds check while avoiding a signedness warning in the UniFrog core build.
+---
+ src/file.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/file.c b/src/file.c
+index 3f6ba24..151bad3 100644
+--- a/src/file.c
++++ b/src/file.c
+@@ -179,7 +179,7 @@ int FCEU_fseek(FCEUFILE *fp, long offset, int whence)
+    switch (whence)
+    {
+       case SEEK_SET:
+-         if (offset >= fp->fp->size)
++         if (offset < 0 || (uint32_t)offset >= fp->fp->size)
+             return -1;
+ 
+          fp->fp->location = offset;
+-- 
+2.54.0
+

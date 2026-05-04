@@ -111,21 +111,28 @@ CORE_BASE_CFLAGS := -EL -march=mips32 -mtune=mips32 -Os -pipe \
 	-isystem $(abspath $(SDK))/include/hcrtos \
 	-isystem $(abspath $(SDK))/include/newlib
 
-PICODRIVE_CFLAGS := $(CORE_BASE_CFLAGS) $(PICODRIVE_RENAME_CFLAGS)
-SNES9X2005_CFLAGS := $(CORE_BASE_CFLAGS) $(SNES9X2005_RENAME_CFLAGS)
-SNES9X2002_CFLAGS := $(CORE_BASE_CFLAGS) $(SNES9X2002_RENAME_CFLAGS)
+PICODRIVE_CFLAGS := $(CORE_BASE_CFLAGS) $(PICODRIVE_RENAME_CFLAGS) \
+	-Wno-stringop-overflow
+SNES9X2005_CFLAGS := $(CORE_BASE_CFLAGS) $(SNES9X2005_RENAME_CFLAGS) \
+	-Wno-array-bounds -Wno-char-subscripts -Wno-format
+SNES9X2002_CFLAGS := $(CORE_BASE_CFLAGS) $(SNES9X2002_RENAME_CFLAGS) \
+	-Wno-array-bounds -Wno-char-subscripts -Wno-format \
+	-Wno-implicit-fallthrough -Wno-maybe-uninitialized -Wno-restrict \
+	-Wno-shift-negative-value -Wno-unused-value
 QUICKNES_CFLAGS := $(CORE_BASE_CFLAGS) $(QUICKNES_RENAME_CFLAGS)
 FCEUMM_CFLAGS := $(CORE_BASE_CFLAGS) $(FCEUMM_RENAME_CFLAGS)
-GEARBOY_CFLAGS := $(CORE_BASE_CFLAGS) $(GEARBOY_RENAME_CFLAGS) -DMINIZ_NO_TIME
+GEARBOY_CFLAGS := $(CORE_BASE_CFLAGS) $(GEARBOY_RENAME_CFLAGS) -DMINIZ_NO_TIME \
+	-Wno-misleading-indentation -Wno-unused-function
 PCE_FAST_CFLAGS := $(CORE_BASE_CFLAGS) $(PCE_FAST_RENAME_CFLAGS)
 QPSX_CFLAGS := $(CORE_BASE_CFLAGS) $(QPSX_RENAME_CFLAGS) \
 	-Wno-error=incompatible-pointer-types \
 	-Wno-error=implicit-function-declaration \
 	-Wno-error=int-conversion \
+	-Wno-cpp \
 	-Wno-incompatible-pointer-types \
 	-Wno-implicit-function-declaration \
 	-Wno-int-conversion
-QPSX_CXXFLAGS := $(CORE_BASE_CFLAGS) $(QPSX_RENAME_CFLAGS)
+QPSX_CXXFLAGS := $(CORE_BASE_CFLAGS) $(QPSX_RENAME_CFLAGS) -Wno-cpp
 PMP_VIDEO_CFLAGS := $(CORE_BASE_CFLAGS) $(PMP_VIDEO_RENAME_CFLAGS) \
 	-include stdlib.h \
 	-DFPM_DEFAULT \
@@ -143,8 +150,10 @@ PMP_VIDEO_CFLAGS := $(CORE_BASE_CFLAGS) $(PMP_VIDEO_RENAME_CFLAGS) \
 	-Wno-unused-but-set-variable \
 	-Wno-error=implicit-function-declaration \
 	-Wno-error=builtin-declaration-mismatch \
+	-Wno-format -Wno-format-truncation -Wno-misleading-indentation \
 	-Wno-implicit-function-declaration \
-	-Wno-builtin-declaration-mismatch
+	-Wno-builtin-declaration-mismatch \
+	-Wno-unused-local-typedefs
 
 GPSP_CFLAGS := -EL -march=mips32 -mtune=mips32 -msoft-float -G0 \
 	-mno-abicalls -fno-pic -fsigned-char -ffast-math \
@@ -558,6 +567,7 @@ $(BUILD)/chd-support/zlib_%.o: $(ZLIB_DIR)/%.c | $(BUILD)
 	$(CC) $(CHD_SUPPORT_CFLAGS) $(CHD_SUPPORT_EXTRA_CFLAGS) -MD -MP -c $< -o $@
 
 $(BUILD)/chd-support/zlib_gz%.o: CHD_SUPPORT_EXTRA_CFLAGS := -include sys/unistd.h
+$(BUILD)/chd-support/zlib_deflate.o: CHD_SUPPORT_EXTRA_CFLAGS := -include support/zlib_deflate_compat.h
 
 $(BUILD)/chd-support/sf2000_%.o: support/%.c | $(BUILD)
 	@echo "  CC      $<"
