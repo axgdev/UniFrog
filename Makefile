@@ -66,6 +66,7 @@ NM := $(CROSS_COMPILE)nm
 READELF := $(CROSS_COMPILE)readelf
 OBJCOPY := $(CROSS_COMPILE)objcopy
 HOSTCC ?= $(or $(shell command -v tcc 2>/dev/null),gcc)
+FRONTEND_HOSTCC ?= gcc
 HOSTCFLAGS ?= -O0 -Wall -Wextra
 MIPS_ARCH ?= mips32
 MIPS_TUNE ?= mips32
@@ -537,6 +538,7 @@ doctor:
 	@command -v $(READELF) >/dev/null || { echo "missing: $(READELF)"; exit 1; }
 	@command -v $(OBJCOPY) >/dev/null || { echo "missing: $(OBJCOPY)"; exit 1; }
 	@command -v $(HOSTCC) >/dev/null || { echo "missing: $(HOSTCC)"; exit 1; }
+	@command -v $(FRONTEND_HOSTCC) >/dev/null || { echo "missing: $(FRONTEND_HOSTCC)"; exit 1; }
 	@command -v $(DTC) >/dev/null || { echo "missing: $(DTC)"; exit 1; }
 	@test -n "$(GCC_LIBDIR)" || { echo "missing: GCC libdir under $(TOOLCHAIN)/lib/gcc/mipsel-mti-elf"; exit 1; }
 	@test -d "$(SYS_LIBDIR)" || { echo "missing: $(SYS_LIBDIR)"; exit 1; }
@@ -551,6 +553,7 @@ doctor:
 	@test -f "$(FRONTEND)/Makefile" || { echo "missing frontend source: $(FRONTEND)"; exit 1; }
 	@test -f "$(MQUICKJS_DIR)/mquickjs.c" || { echo "missing MQuickJS checkout: $(MQUICKJS_DIR)"; exit 1; }
 	@echo "HOSTCC=$(HOSTCC)"
+	@echo "FRONTEND_HOSTCC=$(FRONTEND_HOSTCC)"
 	@echo "DTC=$(DTC)"
 	@echo "SDK=$(SDK)"
 	@echo "CORES=$(CORES)"
@@ -573,11 +576,12 @@ js2300-check:
 		CROSS_COMPILE=$(CROSS_COMPILE) MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR))
 
 frontend-check:
-	$(Q)$(MAKE) -C $(FRONTEND) check MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR))
+	$(Q)$(MAKE) -C $(FRONTEND) check MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR)) \
+		HOSTCC=$(FRONTEND_HOSTCC)
 
 frontend-package:
 	$(Q)$(MAKE) -C $(FRONTEND) package OUT=$(abspath $(OUT))/frontend \
-		MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR))
+		MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR)) HOSTCC=$(FRONTEND_HOSTCC)
 	$(Q)mkdir -p $(FRONTEND_PACKAGE)
 	$(Q)rm -rf $(FRONTEND_PACKAGE)/app $(FRONTEND_PACKAGE)/themes \
 		$(FRONTEND_PACKAGE)/scripts \
