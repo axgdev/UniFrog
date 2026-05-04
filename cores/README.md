@@ -21,6 +21,7 @@ make -C cores help                  Show the core workflow
 make -C cores print-config          Show paths and tool settings
 make -C cores init                  Fetch pinned sources and apply patches
 make -C cores                       Build every configured core archive
+make -C cores smoke-check           Build libretro-common and QuickNES
 make -C cores check                 Verify clean patched checkouts
 make -C cores core-status           Show source checkout status
 make -C cores pin-status MODE=tag   Compare manifest pins to latest refs

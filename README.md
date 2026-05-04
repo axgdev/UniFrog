@@ -52,7 +52,7 @@ make setup            Fetch required external source inputs
 make deps-status      Show pinned deps vs latest MODE=head or MODE=tag
 make upgrade-deps     Bump dependency pins and fetch them, MODE=head or MODE=tag
 make doctor           Check tools, SDK, and fetched inputs
-make quick-check      Run fast repository, JS, and JS2300 checks
+make quick-check      Run fast repository, core smoke, JS2300, and frontend checks
 make                  Build firmware and core package
 make verify           Build and verify firmware, fastboot, JS, and layout
 make sd-zip           Build output/UniFrog-sdcard.zip

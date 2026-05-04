@@ -6,7 +6,7 @@ Keep this repository small and direct.
 
 - Primary command: `make`
 - Health check: `make doctor`
-- Fast local gate: `make quick-check`
+- Fast local gate: `make quick-check` (includes core smoke)
 - Handoff verification: `make verify`
 - Discovery: `make help`, `make print-config`, and component-local
   `make -C <component> help`

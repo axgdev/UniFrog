@@ -340,6 +340,10 @@ CORE_MAKE_ARGS := \
 	CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT)) \
 	CCACHE=$(CCACHE) \
 	JOBS=$(JOBS)
+CORE_SMOKE_MAKE_FLAGS := --no-print-directory
+ifeq ($(V),)
+CORE_SMOKE_MAKE_FLAGS += --silent
+endif
 LIBRETRO_COMMON_BUILD_DEPS := $(CORE_BUILD_DEPS)
 CHD_SUPPORT_BUILD_DEPS := $(CORE_BUILD_DEPS)
 GAMBATTE_BUILD_DEPS := $(CORE_BUILD_DEPS)
@@ -459,7 +463,7 @@ endif
 COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild
 SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores
 PACKAGE_TARGETS := frontend-package core-package sd-zip install refresh-sd refresh-sd-clean
-VERIFY_TARGETS := asdcheck fastboot-check layout-check js2300-check frontend-check
+VERIFY_TARGETS := asdcheck fastboot-check layout-check js2300-check frontend-check core-smoke-check
 ADVANCED_TARGETS := sdk dtb lib fastboot size ci-deps ci-toolchain ci-commit-check ci-sd-zip print-config
 .PHONY: $(COMMON_TARGETS) $(SETUP_TARGETS) $(PACKAGE_TARGETS) $(VERIFY_TARGETS) $(ADVANCED_TARGETS) FORCE
 
@@ -471,7 +475,7 @@ help:
 	@echo "$(APP) common workflow:"
 	@echo "  make setup         Fetch SDK submodule and external source inputs"
 	@echo "  make doctor        Check toolchain, SDK, and fetched inputs"
-	@echo "  make quick-check   Fast hygiene, JS, and JS2300 checks"
+	@echo "  make quick-check   Fast hygiene, core smoke, JS2300, and frontend checks"
 	@echo "  make               Build $(ASD), $(OUT)/unifrog.bin, and SD files"
 	@echo "  make verify        Build and verify firmware, fastboot, JS, and layout"
 	@echo "  make deps          Same as make setup"
@@ -491,7 +495,8 @@ help:
 	@echo "  make refresh-sd    Build, install, and sync SD files"
 	@echo ""
 	@echo "Focused checks:"
-	@echo "  make repo-check js2300-check frontend-check layout-check asdcheck"
+	@echo "  make repo-check core-smoke-check js2300-check frontend-check"
+	@echo "  make layout-check asdcheck"
 	@echo "  make -C cores help"
 	@echo "  make -C frontend help"
 	@echo "  make -C js2300 help"
@@ -665,11 +670,16 @@ repo-check:
 quick-check:
 	$(Q)$(MAKE) --no-print-directory repo-check
 	$(Q)$(MAKE) --no-print-directory doctor
+	@echo "  CHECK   core smoke"
+	$(Q)$(MAKE) --no-print-directory core-smoke-check
 	@echo "  CHECK   js2300"
 	$(Q)$(MAKE) --no-print-directory js2300-check
 	@echo "  CHECK   frontend"
 	$(Q)$(MAKE) --no-print-directory frontend-check
 	@echo "OK"
+
+core-smoke-check:
+	$(Q)$(MAKE) $(CORE_SMOKE_MAKE_FLAGS) -C $(CORES) smoke-check $(CORE_MAKE_ARGS)
 
 sdk:
 	$(Q)$(MAKE) -C $(SDK) check TOOLCHAIN=$(TOOLCHAIN) \

@@ -281,9 +281,10 @@ CHD_SUPPORT_OBJECTS := \
 CORE_TARGETS := gambatte gpsp picodrive snes9x2005 snes9x2002 quicknes \
 	fceumm gearboy pce-fast qpsx pmp-video
 SUPPORT_TARGETS := libretro-common chd-support
+SMOKE_TARGETS := libretro-common quicknes
 MAINTAIN_TARGETS := support-init init doctor core-status pin-status \
-	upgrade-pins diff-core log-core update-core check clean status help \
-	print-config
+	upgrade-pins diff-core log-core update-core smoke-check check clean \
+	status help print-config
 
 .PHONY: all $(CORE_TARGETS) $(SUPPORT_TARGETS) $(MAINTAIN_TARGETS)
 
@@ -293,6 +294,7 @@ help:
 	@echo "UniFrog core build:"
 	@echo "  make -C cores init                  Fetch pinned sources and apply patches"
 	@echo "  make -C cores                       Build all core archives"
+	@echo "  make -C cores smoke-check           Build libretro-common and QuickNES"
 	@echo "  make -C cores check                 Verify clean patched checkouts"
 	@echo "  make -C cores clean                 Remove core build outputs"
 	@echo ""
@@ -723,6 +725,9 @@ quicknes: doctor | $(OUT)
 		CC="$(CC)" CXX="$(CXX)" AR=$(AR) STATIC_LINKING=1 \
 		fpic= TARGET=quicknes_libretro_sf2000.a
 	$(call copy_core_lib,$(QUICKNES_LIB))
+
+smoke-check: $(SMOKE_TARGETS)
+	@echo "OK"
 
 fceumm: doctor | $(OUT)
 	CFLAGS="$(FCEUMM_CFLAGS) -DFRONTEND_SUPPORTS_RGB565=1" \
