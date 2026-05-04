@@ -45,12 +45,14 @@ from the configured MQuickJS checkout and compiles every shipped JavaScript file
 to 32-bit MQuickJS bytecode.
 
 ```sh
+make -C frontend help
+make -C frontend print-config
 make -C frontend check
 make -C frontend package
 ```
 
-The default MQuickJS checkout is `.deps/mquickjs` when called from the root
-Makefile. Override it when needed:
+The direct frontend default is `../.deps/mquickjs`, which is the same checkout
+the root Makefile fetches as `.deps/mquickjs`. Override it when needed:
 
 ```sh
 make -C frontend MQUICKJS_DIR=/path/to/mquickjs check

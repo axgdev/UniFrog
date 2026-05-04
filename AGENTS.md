@@ -7,6 +7,8 @@ Keep this repository small and direct.
 - Primary command: `make`
 - Health check: `make doctor`
 - Handoff verification: `make check`
+- Discovery: `make help`, `make print-config`, and component-local
+  `make -C <component> help`
 - Defaults: `TOOLCHAIN=/opt/mipsel-mti-elf`, `SDK=unifrog-hcrtos-sdk`,
   `DEPS=.deps`
 - Local overrides belong in untracked `config.mk`.

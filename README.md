@@ -44,7 +44,8 @@ make check
 Useful targets:
 
 ```text
-make help             Show target and override summary
+make help             Show the common workflow and focused entry points
+make print-config     Show current paths, tools, and optimization settings
 make deps             Fetch required external source inputs
 make doctor           Check tools, SDK, and fetched inputs
 make                  Build firmware and core package
@@ -81,3 +82,11 @@ subproject output directories. They are not source.
 - `cores/README.md` explains core source fetching, patching, and ABI rules.
 - `frontend/README.md` covers SD-card JavaScript and theme packaging.
 - `js2300/README.md` covers the embedded JavaScript runtime layer.
+
+Each component Makefile has its own quick reference:
+
+```sh
+make -C cores help
+make -C frontend help
+make -C js2300 help
+```
