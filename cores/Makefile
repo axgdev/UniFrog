@@ -285,10 +285,15 @@ init:
 		url=$${rest%%|*}; rest=$${rest#*|}; \
 		commit=$${rest%%|*}; \
 		if test -d "$$dir/.git"; then \
-			echo "  FETCH   $$name $$commit"; \
 			git -C "$$dir" remote set-url origin "$$url"; \
-			git -C "$$dir" fetch --depth 1 origin "$$commit"; \
-			git -C "$$dir" checkout -q FETCH_HEAD; \
+			if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
+				echo "  REUSE   $$name $$commit"; \
+				git -C "$$dir" checkout -q "$$commit"; \
+			else \
+				echo "  FETCH   $$name $$commit"; \
+				git -C "$$dir" fetch --depth 1 origin "$$commit"; \
+				git -C "$$dir" checkout -q FETCH_HEAD; \
+			fi; \
 		else \
 			echo "  FETCH   $$name $$commit"; \
 			rm -rf "$$dir"; \
@@ -298,12 +303,26 @@ init:
 			git -C "$$dir" checkout -q FETCH_HEAD; \
 		fi; \
 		git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
-		git -C "$$dir" reset --hard -q FETCH_HEAD; \
+		git -C "$$dir" reset --hard -q "$$commit"; \
 		git -C "$$dir" clean -fdx -q; \
 		if ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
 			git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch; \
 		fi; \
-		git -C "$$dir" submodule update --init --recursive --depth 1 --jobs "$(JOBS)"; \
+		case "$$name" in \
+			gearboy) \
+				git -C "$$dir" sparse-checkout init --cone; \
+				git -C "$$dir" sparse-checkout set src platforms/libretro; \
+				;; \
+			picodrive) \
+				git -C "$$dir" sparse-checkout init --cone; \
+				git -C "$$dir" sparse-checkout set cpu pico platform/common platform/libretro unzip zlib; \
+				;; \
+		esac; \
+		git -C "$$dir" submodule update --init --depth 1 --jobs "$(JOBS)"; \
+		if test "$$name" = picodrive && test -d "$$dir/pico/cd/libchdr/.git"; then \
+			git -C "$$dir/pico/cd/libchdr" sparse-checkout init --cone; \
+			git -C "$$dir/pico/cd/libchdr" sparse-checkout set include src deps/lzma-24.05/C deps/lzma-24.05/include deps/zstd-1.5.6/lib deps/zlib-1.3.1; \
+		fi; \
 	done
 
 doctor:
@@ -374,15 +393,33 @@ update-core:
 		if test "$$name" = "$(CORE)"; then \
 			found=1; \
 			git -C "$$dir" remote set-url origin "$$url"; \
-			git -C "$$dir" fetch --depth 1 origin "$$commit"; \
-			git -C "$$dir" checkout -q FETCH_HEAD; \
+			if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
+				git -C "$$dir" checkout -q "$$commit"; \
+			else \
+				git -C "$$dir" fetch --depth 1 origin "$$commit"; \
+				git -C "$$dir" checkout -q FETCH_HEAD; \
+			fi; \
 			git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
-			git -C "$$dir" reset --hard -q FETCH_HEAD; \
+			git -C "$$dir" reset --hard -q "$$commit"; \
 			git -C "$$dir" clean -fdx -q; \
 			if ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
 				git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch; \
 			fi; \
-			git -C "$$dir" submodule update --init --recursive --depth 1 --jobs "$(JOBS)"; \
+			case "$$name" in \
+				gearboy) \
+					git -C "$$dir" sparse-checkout init --cone; \
+					git -C "$$dir" sparse-checkout set src platforms/libretro; \
+					;; \
+				picodrive) \
+					git -C "$$dir" sparse-checkout init --cone; \
+					git -C "$$dir" sparse-checkout set cpu pico platform/common platform/libretro unzip zlib; \
+					;; \
+			esac; \
+			git -C "$$dir" submodule update --init --depth 1 --jobs "$(JOBS)"; \
+			if test "$$name" = picodrive && test -d "$$dir/pico/cd/libchdr/.git"; then \
+				git -C "$$dir/pico/cd/libchdr" sparse-checkout init --cone; \
+				git -C "$$dir/pico/cd/libchdr" sparse-checkout set include src deps/lzma-24.05/C deps/lzma-24.05/include deps/zstd-1.5.6/lib deps/zlib-1.3.1; \
+			fi; \
 		fi; \
 	done; \
 	test "$$found" = 1 || { echo "unknown core: $(CORE)"; exit 1; }
