@@ -4,6 +4,7 @@ SCRIPT_DIR := scripts
 OUT := output
 PACKAGE := $(OUT)/unifrog-frontend
 MQUICKJS_DIR ?= ../mquickjs
+MQUICKJS_TCC_PATCH ?= ../patches/mquickjs/0001-use-portable-int-overflow-checks.patch
 HOSTCC ?= cc
 HOST_NO_PIE := $(if $(findstring tcc,$(notdir $(HOSTCC))),,-no-pie)
 MQJS_BUILD := $(OUT)/mqjs-build
@@ -42,6 +43,9 @@ $(MQJS):
 	@mkdir -p $(MQJS_BUILD)
 	@cp "$(MQUICKJS_DIR)"/*.[ch] "$(MQJS_BUILD)"/
 	@cp "$(MQUICKJS_DIR)/Makefile" "$(MQJS_BUILD)"/
+	@if test -f "$(MQUICKJS_TCC_PATCH)" && command -v patch >/dev/null 2>&1; then \
+		patch -d "$(MQJS_BUILD)" -p1 < "$(MQUICKJS_TCC_PATCH)"; \
+	fi
 	@if grep -q '^#define ATOM_ALIGN 64$$' "$(MQJS_BUILD)/mquickjs_build.c"; then \
 		sed -i 's/^#define ATOM_ALIGN 64$$/#define ATOM_ALIGN 128/' "$(MQJS_BUILD)/mquickjs_build.c"; \
 	fi
