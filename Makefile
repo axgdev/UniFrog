@@ -3,14 +3,13 @@ TOOLCHAIN_URL ?= https://github.com/axgdev/frog-toolchain/releases/download/v1.1
 CROSS_COMPILE ?= $(TOOLCHAIN)/bin/mipsel-mti-elf-
 DEPS ?= .deps
 SDK ?= ../unifrog-hcrtos-sdk
-CORES ?= $(DEPS)/unifrog-cores
+CORES ?= cores
+CORE_SOURCE_ROOT ?= $(DEPS)/cores
 JS2300 ?= js2300
 FRONTEND ?= frontend
 MQUICKJS_DIR ?= $(DEPS)/mquickjs
 MQUICKJS_URL ?= https://github.com/bellard/mquickjs.git
 MQUICKJS_REF ?= main
-CORES_URL ?= https://github.com/axgdev/UniFrogCores.git
-CORES_REF ?= main
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 
 -include config.mk
@@ -81,13 +80,13 @@ Q := $(if $(V),,@)
 UNIFROG_GIT_COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 UNIFROG_GIT_DIRTY := $(shell test -z "$$(git status --porcelain --untracked-files=no 2>/dev/null)" && echo 0 || echo 1)
 UNIFROG_SDK_GIT_COMMIT := $(shell git -C $(SDK) rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
-UNIFROG_CORES_GIT_COMMIT := $(shell git -C $(CORES) rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+UNIFROG_CORES_GIT_COMMIT := $(shell git -C $(CORE_SOURCE_ROOT)/libretro-common rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 UNIFROG_JS2300_GIT_COMMIT := $(shell git -C $(JS2300) rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 UNIFROG_FRONTEND_GIT_COMMIT := $(shell git -C $(FRONTEND) rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 
 # Treat SDK headers as system headers so third-party/newlib warnings do not
 # obscure warnings from the UniFrog source itself.
-PROJECT_INCLUDES := -Iinclude -Isrc -I$(CORES)/upstream/libretro-common/include -I$(JS2300)/include
+PROJECT_INCLUDES := -Iinclude -Isrc -I$(CORE_SOURCE_ROOT)/libretro-common/include -I$(JS2300)/include
 SDK_INCLUDES := \
 	-isystem $(SDK)/include \
 	-isystem $(SDK)/include/hcrtos \
@@ -290,8 +289,8 @@ UNIFROG_OBJECTS := \
 LZ4_SRCS := lz4.c lz4frame.c lz4hc.c xxhash.c
 LZ4_OBJS := $(addprefix $(BUILD)/third_party/lz4/,$(LZ4_SRCS:.c=.o))
 LZ4_CFLAGS := $(CFLAGS_FAST) -w -Isrc/third_party/lz4
-ZSTD_DIR := $(CORES)/upstream/picodrive/pico/cd/libchdr/deps/zstd-1.5.6/lib
-ZSTD_DECODER_SRC := $(CORES)/upstream/picodrive/pico/cd/libchdr/deps/zstd-1.5.6/build/single_file_libs/zstddeclib-in.c
+ZSTD_DIR := $(CORE_SOURCE_ROOT)/picodrive/pico/cd/libchdr/deps/zstd-1.5.6/lib
+ZSTD_DECODER_SRC := $(CORE_SOURCE_ROOT)/picodrive/pico/cd/libchdr/deps/zstd-1.5.6/build/single_file_libs/zstddeclib-in.c
 ZSTD_DECODER_OBJ := $(BUILD)/third_party/zstddeclib.o
 ZSTD_CFLAGS := $(CFLAGS_FAST) -w \
 	-DZSTD_DISABLE_ASM=1 \
@@ -326,8 +325,8 @@ PCE_FAST_CORE_LIB := $(CORES)/output/pce_fast_libretro_sf2000.a
 QPSX_CORE_LIB := $(CORES)/output/pcsx4all_libretro_sf2000.a
 PMP_VIDEO_CORE_LIB := $(CORES)/output/pmp_libretro_sf2000.a
 FIRMWARE_LIBRETRO_CORE_LIBS ?=
-CORE_REV_STAMP := $(BUILD)/unifrog-cores.rev
-CORE_BUILD_DEPS := $(CORES)/Makefile $(CORE_REV_STAMP)
+CORE_REV_STAMP := $(BUILD)/core-sources.rev
+CORE_BUILD_DEPS := $(CORES)/Makefile $(CORES)/manifest.mk $(CORE_REV_STAMP)
 LIBRETRO_COMMON_BUILD_DEPS := $(CORE_BUILD_DEPS)
 CHD_SUPPORT_BUILD_DEPS := $(CORE_BUILD_DEPS)
 GAMBATTE_BUILD_DEPS := $(CORE_BUILD_DEPS)
@@ -402,7 +401,7 @@ CORE_MODULE_LDLIBS := \
 	-lsupc++ \
 	-lc \
 	-lgcc
-PICODRIVE_LZMA_DIR := $(CORES)/upstream/picodrive/pico/cd/libchdr/deps/lzma-24.05
+PICODRIVE_LZMA_DIR := $(CORE_SOURCE_ROOT)/picodrive/pico/cd/libchdr/deps/lzma-24.05
 PICODRIVE_LZMA_SRCS := Alloc.c CpuArch.c Delta.c LzmaDec.c LzmaEnc.c LzFind.c Sort.c
 PICODRIVE_LZMA_OBJS := $(addprefix $(BUILD)/core_modules/picodrive_lzma_,$(PICODRIVE_LZMA_SRCS:.c=.o))
 PICODRIVE_LZMA_CFLAGS := \
@@ -486,7 +485,9 @@ help:
 	@echo "  make distclean    Remove generated files and editor/test leftovers"
 	@echo "  make JOBS=1       Force serial build"
 	@echo "  make SDK=/path    Use an external HCRTOS SDK checkout"
-	@echo "  make CORES=/path  Use an external UniFrogCores checkout"
+	@echo "  make CORES=/path  Use an external core build recipe"
+	@echo "  make CORE_SOURCE_ROOT=/path"
+	@echo "                    Use external direct core source checkouts"
 	@echo "  make MQUICKJS_DIR=/path"
 	@echo "                    Override the bundled MQuickJS checkout for JS2300"
 	@echo "  make TOOLCHAIN=/path/to/mipsel-mti-elf"
@@ -517,16 +518,7 @@ deps-mquickjs:
 	fi
 
 deps-cores:
-	@mkdir -p $(DEPS)
-	@if test -d "$(CORES)/.git"; then \
-		echo "  FETCH   $(CORES)"; \
-		git -C "$(CORES)" fetch --depth 1 origin "$(CORES_REF)"; \
-		git -C "$(CORES)" checkout -q FETCH_HEAD; \
-	else \
-		echo "  CLONE   $(CORES_URL)"; \
-		git clone --depth 1 --branch "$(CORES_REF)" "$(CORES_URL)" "$(CORES)"; \
-	fi
-	$(Q)$(MAKE) -C $(CORES) init
+	$(Q)$(MAKE) -C $(CORES) init CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 doctor:
 	@echo "Toolchain: $(TOOLCHAIN)"
@@ -546,7 +538,7 @@ doctor:
 	@test -f "$(SDK)/lib/core/libm.a" || { echo "missing: $(SDK)/lib/core/libm.a"; exit 1; }
 	@test -f "$(DTS)" || { echo "missing: $(DTS)"; exit 1; }
 	@test -f "$(CORES)/Makefile" || { echo "missing: $(CORES)/Makefile"; exit 1; }
-	@test -e "$(CORES)/upstream/libretro-common/.git" || { echo "missing core checkout; run: make deps-cores"; exit 1; }
+	@test -e "$(CORE_SOURCE_ROOT)/libretro-common/.git" || { echo "missing core checkout; run: make deps-cores"; exit 1; }
 	@test -f "$(JS2300)/Makefile" || { echo "missing JS2300 source: $(JS2300)"; exit 1; }
 	@test -f "$(FRONTEND)/Makefile" || { echo "missing frontend source: $(FRONTEND)"; exit 1; }
 	@test -f "$(MQUICKJS_DIR)/mquickjs.c" || { echo "missing MQuickJS checkout: $(MQUICKJS_DIR)"; exit 1; }
@@ -554,6 +546,7 @@ doctor:
 	@echo "DTC=$(DTC)"
 	@echo "SDK=$(SDK)"
 	@echo "CORES=$(CORES)"
+	@echo "CORE_SOURCE_ROOT=$(CORE_SOURCE_ROOT)"
 	@echo "JS2300=$(JS2300)"
 	@echo "FRONTEND=$(FRONTEND)"
 	@echo "MQUICKJS_DIR=$(MQUICKJS_DIR)"
@@ -770,9 +763,13 @@ $(LIBJS2300): FORCE
 		CROSS_COMPILE=$(CROSS_COMPILE) MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR))
 
 $(CORE_REV_STAMP): FORCE | $(BUILD)
-	$(Q)rev=$$(git -C $(CORES) rev-parse HEAD 2>/dev/null || echo unknown); \
-	dirty=$$(git -C $(CORES) status --porcelain --untracked-files=no 2>/dev/null | cksum | awk '{print $$1}'); \
-	value="$$rev $$dirty"; \
+	$(Q)value=$$(for dir in $(CORE_SOURCE_ROOT)/*; do \
+		test -d "$$dir/.git" || continue; \
+		name=$$(basename "$$dir"); \
+		rev=$$(git -C "$$dir" rev-parse --short=12 HEAD 2>/dev/null || echo unknown); \
+		dirty=$$(git -C "$$dir" status --porcelain --untracked-files=no 2>/dev/null | cksum | awk '{print $$1}'); \
+		printf '%s:%s:%s ' "$$name" "$$rev" "$$dirty"; \
+	done); \
 	old=$$(cat $@ 2>/dev/null || true); \
 	if test "$$value" != "$$old"; then printf '%s\n' "$$value" > $@; fi
 
@@ -784,67 +781,67 @@ $(BUILD_IDENTITY_STAMP): FORCE | $(BUILD)
 $(GAMBATTE_CORE_LIB): $(GAMBATTE_BUILD_DEPS)
 	@echo "  CORE    gambatte"
 	$(Q)$(MAKE) -C $(CORES) gambatte TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK))
+		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 $(GPSP_CORE_LIB): $(GPSP_BUILD_DEPS)
 	@echo "  CORE    gpsp"
 	$(Q)$(MAKE) -C $(CORES) gpsp TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK))
+		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 $(PICODRIVE_CORE_LIB): $(PICODRIVE_BUILD_DEPS) $(CHD_SUPPORT_CORE_LIB)
 	@echo "  CORE    picodrive"
 	$(Q)$(MAKE) -C $(CORES) picodrive TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK))
+		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 $(SNES9X2005_CORE_LIB): $(SNES9X2005_BUILD_DEPS)
 	@echo "  CORE    snes9x2005"
 	$(Q)$(MAKE) -C $(CORES) snes9x2005 TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK))
+		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 $(SNES9X2002_CORE_LIB): $(SNES9X2002_BUILD_DEPS)
 	@echo "  CORE    snes9x2002"
 	$(Q)$(MAKE) -C $(CORES) snes9x2002 TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK))
+		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 $(QUICKNES_CORE_LIB): $(QUICKNES_BUILD_DEPS)
 	@echo "  CORE    quicknes"
 	$(Q)$(MAKE) -C $(CORES) quicknes TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK))
+		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 $(FCEUMM_CORE_LIB): $(FCEUMM_BUILD_DEPS)
 	@echo "  CORE    fceumm"
 	$(Q)$(MAKE) -C $(CORES) fceumm TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK))
+		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 $(GEARBOY_CORE_LIB): $(GEARBOY_BUILD_DEPS)
 	@echo "  CORE    gearboy"
 	$(Q)$(MAKE) -C $(CORES) gearboy TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK))
+		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 $(PCE_FAST_CORE_LIB): $(PCE_FAST_BUILD_DEPS) $(CHD_SUPPORT_CORE_LIB)
 	@echo "  CORE    pce-fast"
 	$(Q)$(MAKE) -C $(CORES) pce-fast TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK))
+		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 $(QPSX_CORE_LIB): $(QPSX_BUILD_DEPS)
 	@echo "  CORE    qpsx"
 	$(Q)$(MAKE) -C $(CORES) qpsx TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK))
+		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 $(PMP_VIDEO_CORE_LIB): $(PMP_VIDEO_BUILD_DEPS)
 	@echo "  CORE    pmp-video"
 	$(Q)$(MAKE) -C $(CORES) pmp-video TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK))
+		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 $(LIBRETRO_COMMON_LIB): $(LIBRETRO_COMMON_BUILD_DEPS)
 	@echo "  CORELIB libretro-common"
 	$(Q)$(MAKE) -C $(CORES) libretro-common TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK))
+		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 $(CHD_SUPPORT_CORE_LIB): $(CHD_SUPPORT_BUILD_DEPS)
 	@echo "  CORELIB libchdr-support"
 	$(Q)$(MAKE) -C $(CORES) chd-support TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK))
+		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 
 $(OUT)/$(TARGET).bin: $(OUT)/$(TARGET).out
 	@echo "  OBJCOPY $@"
@@ -985,7 +982,7 @@ refresh-sd:
 refresh-sd-clean:
 	$(Q)$(MAKE) clean
 	$(Q)$(MAKE) -C $(SDK) clean
-	$(Q)$(MAKE) -C $(CORES) clean
+	$(Q)$(MAKE) -C $(CORES) clean CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
 	$(Q)$(MAKE) -C $(JS2300) clean
 	$(Q)$(MAKE) -C $(FRONTEND) clean
 	$(Q)$(MAKE) install SDCARD=$(SDCARD)

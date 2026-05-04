@@ -13,8 +13,8 @@ Large or mixed-license build inputs are kept outside this repository:
 - `../unifrog-hcrtos-sdk` contains the HCRTOS headers, static libraries, kernel
   objects, and license notices needed to link the SF2000 application.
 - `.deps/mquickjs` is fetched from upstream by `make deps`.
-- `.deps/unifrog-cores` is fetched by `make deps` as a temporary compatibility
-  bridge for the current libretro core build.
+- `.deps/cores` contains direct libretro core source checkouts fetched from the
+  branch manifest in `cores/manifest.mk`.
 
 ## Quick Start
 
@@ -92,10 +92,10 @@ UniFrog app layout.
 Host-side C tools are built with `tcc` by default when it is available. MQuickJS
 is patched during the build so the frontend syntax checker does not require GCC.
 
-The libretro core flow is still being simplified. The current fresh repository
-uses `.deps/unifrog-cores` to preserve the working build while removing Git
-submodules from this repo. The intended next step is to replace that bridge with
-direct core manifests and small UniFrog overlays.
+The libretro core flow is manifest-driven. `cores/manifest.mk` lists the source
+branch for each core and `make deps-cores` fetches those branches directly into
+`.deps/cores`. The checked-out sources remain generated dependencies, not Git
+submodules or committed source trees.
 
 ## History
 
