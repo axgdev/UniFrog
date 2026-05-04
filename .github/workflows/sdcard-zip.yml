@@ -1,0 +1,44 @@
+name: SD card package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  sdcard-zip:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    steps:
+      - name: Install packages
+        run: apk add build-base git make dtc tcc ccache curl tar xz zip patch
+
+      - name: Check out UniFrog
+        uses: actions/checkout@v4
+
+      - name: Check out SDK
+        uses: actions/checkout@v4
+        with:
+          repository: axgdev/unifrog-hcrtos-sdk
+          path: ../unifrog-hcrtos-sdk
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: unifrog-ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            unifrog-ccache-${{ runner.os }}-${{ github.ref_name }}-
+            unifrog-ccache-${{ runner.os }}-
+
+      - name: Build SD card package
+        run: |
+          export CCACHE_DIR="$PWD/.ccache"
+          make ci-sd-zip HOSTCC=tcc CCACHE=ccache
+
+      - name: Upload SD card package
+        uses: actions/upload-artifact@v4
+        with:
+          name: UniFrog-sdcard
+          path: UniFrog-local-sdcard.zip
