@@ -326,17 +326,8 @@ init: support-init
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
 		url=$${rest%%|*}; rest=$${rest#*|}; \
-		commit=$${rest%%|*}; \
-		sparse=.; \
-		case "$$name" in \
-			libretro-common) sparse="compat encodings file formats streams string time vfs include" ;; \
-			gambatte) sparse="common libgambatte" ;; \
-			gearboy) sparse="src platforms/libretro" ;; \
-			picodrive) sparse="cpu/cyclone cpu/cz80 cpu/drc cpu/fame cpu/sh2 pico platform/common platform/libretro unzip zlib" ;; \
-			fceumm) sparse="src" ;; \
-			pce-fast) sparse="mednafen libretro-common" ;; \
-			qpsx) sparse="src libretro" ;; \
-		esac; \
+		commit=$${rest%%|*}; rest=$${rest#*|}; \
+		sparse=$$rest; \
 		if test -d "$$dir/.git"; then \
 			git -C "$$dir" remote set-url origin "$$url"; \
 			if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
@@ -455,17 +446,8 @@ update-core:
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
 		url=$${rest%%|*}; rest=$${rest#*|}; \
-		commit=$${rest%%|*}; \
-		sparse=.; \
-		case "$$name" in \
-			libretro-common) sparse="compat encodings file formats streams string time vfs include" ;; \
-			gambatte) sparse="common libgambatte" ;; \
-			gearboy) sparse="src platforms/libretro" ;; \
-			picodrive) sparse="cpu/cyclone cpu/cz80 cpu/drc cpu/fame cpu/sh2 pico platform/common platform/libretro unzip zlib" ;; \
-			fceumm) sparse="src" ;; \
-			pce-fast) sparse="mednafen libretro-common" ;; \
-			qpsx) sparse="src libretro" ;; \
-		esac; \
+		commit=$${rest%%|*}; rest=$${rest#*|}; \
+		sparse=$$rest; \
 		if test "$$name" = "$(CORE)"; then \
 			found=1; \
 			git -C "$$dir" remote set-url origin "$$url"; \

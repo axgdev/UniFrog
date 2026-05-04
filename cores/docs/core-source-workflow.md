@@ -5,14 +5,11 @@ Core source inputs are listed in `cores/manifest.mk`.
 Each manifest entry has:
 
 ```text
-name|checkout-directory|upstream-url|upstream-commit
-```
-
-Shared support entries add sparse paths:
-
-```text
 name|checkout-directory|upstream-url|upstream-commit|sparse-paths
 ```
+
+Use `.` for a full checkout. Shared support entries also accept `:root-files`
+for root-level files only.
 
 `make -C cores init` fetches those exact upstream commits into `.deps/cores/`
 and applies the matching patch series from `cores/patches/<name>/`. It also
