@@ -4,6 +4,7 @@ SDK ?= ../unifrog-hcrtos-sdk
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 CCACHE ?=
 CCACHE_PREFIX := $(if $(CCACHE),$(CCACHE) )
+Q := $(if $(V),,@)
 
 include manifest.mk
 
@@ -276,21 +277,43 @@ CHD_SUPPORT_OBJECTS := \
 	$(BUILD)/chd-support/zlib_uncompr.o \
 	$(BUILD)/chd-support/zlib_zutil.o
 
-ifeq ($(filter -j% --jobs%,$(MAKEFLAGS)),)
-MAKEFLAGS += -j$(JOBS)
-endif
-ifeq ($(filter --output-sync% -O%,$(MAKEFLAGS)),)
-MAKEFLAGS += --output-sync=target
-endif
+CORE_TARGETS := gambatte gpsp picodrive snes9x2005 snes9x2002 quicknes \
+	fceumm gearboy pce-fast qpsx pmp-video
+SUPPORT_TARGETS := libretro-common chd-support
+MAINTAIN_TARGETS := support-init init doctor core-status diff-core log-core \
+	update-core check clean status help print-config
 
-.PHONY: all support-init init doctor \
-	libretro-common chd-support \
-	gambatte gpsp picodrive snes9x2005 snes9x2002 quicknes fceumm \
-	gearboy pce-fast qpsx pmp-video core-status diff-core log-core update-core \
-	check clean status
+.PHONY: all $(CORE_TARGETS) $(SUPPORT_TARGETS) $(MAINTAIN_TARGETS)
 
-all: libretro-common gambatte gpsp picodrive snes9x2005 snes9x2002 \
-	quicknes fceumm gearboy pce-fast qpsx pmp-video
+all: $(SUPPORT_TARGETS) $(CORE_TARGETS)
+
+help:
+	@echo "UniFrog core build:"
+	@echo "  make -C cores init                  Fetch pinned sources and apply patches"
+	@echo "  make -C cores                       Build all core archives"
+	@echo "  make -C cores check                 Verify clean patched checkouts"
+	@echo "  make -C cores clean                 Remove core build outputs"
+	@echo ""
+	@echo "Focused builds:"
+	@echo "  make -C cores gpsp"
+	@echo "  make -C cores pce-fast"
+	@echo ""
+	@echo "Patch maintenance:"
+	@echo "  make -C cores core-status"
+	@echo "  make -C cores diff-core CORE=gpsp"
+	@echo "  make -C cores log-core CORE=gpsp"
+	@echo "  make -C cores update-core CORE=gpsp"
+	@echo ""
+	@echo "Config:"
+	@echo "  make -C cores print-config"
+
+print-config:
+	@echo "TOOLCHAIN=$(TOOLCHAIN)"
+	@echo "SDK=$(SDK)"
+	@echo "CORE_SOURCE_ROOT=$(CORE_SOURCE_ROOT)"
+	@echo "CORE_SUPPORT_ROOT=$(CORE_SUPPORT_ROOT)"
+	@echo "CCACHE=$(if $(CCACHE),$(CCACHE),disabled)"
+	@echo "JOBS=$(JOBS)"
 
 support-init:
 	@set -e; \
@@ -417,8 +440,6 @@ doctor:
 	@test -f $(LIBCHDR_DIR)/src/libchdr_chd.c || { echo "missing support checkout: $(LIBCHDR_DIR); run: make init"; exit 1; }
 	@test -f $(ZSTD_DIR)/decompress/zstd_decompress.c || { echo "missing support checkout: $(ZSTD_DIR); run: make init"; exit 1; }
 	@test -f $(ZLIB_DIR)/inflate.c || { echo "missing support checkout: $(ZLIB_DIR); run: make init"; exit 1; }
-	@echo "TOOLCHAIN=$(TOOLCHAIN)"
-	@echo "CCACHE=$(if $(CCACHE),$(CCACHE),disabled)"
 	@echo "OK"
 
 core-status:

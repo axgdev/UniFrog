@@ -17,9 +17,22 @@ JS_BYTECODE := $(patsubst %.js,$(OUT)/lint/%.mqbc,$(JS_FILES))
 JS_COMPAT_STAMP := $(OUT)/lint/js-compat.stamp
 JS_FORBIDDEN_PATTERN := \.(substr|substring|slice|toLowerCase|toUpperCase|trim|startsWith|endsWith|includes|map|filter|reduce|forEach|find|some|every)[[:space:]]*\(
 
-.PHONY: all check package clean
+.PHONY: all help check package clean print-config
 
 all: package
+
+help:
+	@echo "UniFrog frontend:"
+	@echo "  make -C frontend check      Compile shipped JS with MQuickJS"
+	@echo "  make -C frontend package    Stage frontend files under frontend/output"
+	@echo "  make -C frontend clean      Remove frontend/output"
+	@echo "  make -C frontend print-config"
+
+print-config:
+	@echo "MQUICKJS_DIR=$(MQUICKJS_DIR)"
+	@echo "OUT=$(OUT)"
+	@echo "PACKAGE=$(PACKAGE)"
+	@echo "HOSTCC=$(HOSTCC)"
 
 check: $(JS_BYTECODE) $(JS_COMPAT_STAMP)
 	@test -f main.js
