@@ -44,9 +44,9 @@ patch series under `cores/patches/`, and `make deps-cores` applies them into
 libchdr, zstd, zlib, and LZMA sources live under `.deps/support` and are built
 once for the cores that need CHD/media support.
 
-The default SDK path is the `hcrtos-sdk` submodule. `make deps` initializes it
-with a shallow checkout. Use `SDK=/path/to/unifrog-hcrtos-sdk` only when testing
-local SDK changes outside the app repository.
+The default SDK path is the `unifrog-hcrtos-sdk` submodule. `make deps`
+initializes it with a shallow checkout. Use `SDK=/path/to/unifrog-hcrtos-sdk`
+only when testing local SDK changes outside the app repository.
 
 ## Branches
 
