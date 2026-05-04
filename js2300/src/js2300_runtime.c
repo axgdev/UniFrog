@@ -12,9 +12,9 @@
 #define JS2300_DEFAULT_STACK_BYTES (256u * 1024u)
 #define JS2300_DEFAULT_BYTECODE_CACHE_BYTES (2u * 1024u * 1024u)
 #define JS2300_MAX_SCRIPT_BYTES (512u * 1024u)
-#define JS2300_MAX_TEXT_FILE_BYTES (1024u * 1024u)
+#define JS2300_MAX_TEXT_FILE_BYTES (2u * 1024u * 1024u)
 #define JS2300_MAX_RECTS 128u
-#define JS2300_MAX_FS_ENTRIES 256u
+#define JS2300_MAX_FS_ENTRIES 1024u
 #define JS2300_HEARTBEAT_INPUT_POLL_INTERVAL 4096u
 
 extern const JSSTDLibraryDef js2300_stdlib;
@@ -43,6 +43,7 @@ enum js2300_cfunc_id {
    JS2300_CFUNC_SYSTEM_AV_OUTPUT,
    JS2300_CFUNC_SYSTEM_ACTION,
    JS2300_CFUNC_FS_LIST,
+   JS2300_CFUNC_FS_INDEX,
    JS2300_CFUNC_FS_READ_TEXT,
    JS2300_CFUNC_FS_WRITE_TEXT,
 };
@@ -75,7 +76,7 @@ static struct js2300_runtime *active_runtime;
 
 const char *js2300_version_string(void)
 {
-   return "0.5.0";
+   return "0.6.0";
 }
 
 int js2300_config_init(struct js2300_config *config)
@@ -300,6 +301,7 @@ static int js_attach_api(JSContext *ctx)
    };
    static const struct js2300_binding fs_bindings[] = {
       { "list", JS2300_CFUNC_FS_LIST },
+      { "index", JS2300_CFUNC_FS_INDEX },
       { "readText", JS2300_CFUNC_FS_READ_TEXT },
       { "writeText", JS2300_CFUNC_FS_WRITE_TEXT },
    };
@@ -941,7 +943,7 @@ static JSValue js2300_system_action(JSContext *ctx, JSValue *this_val, int argc,
 static JSValue js2300_fs_list(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv,
                               JSValue params)
 {
-   struct js2300_fs_entry entries[JS2300_MAX_FS_ENTRIES];
+   struct js2300_fs_entry *entries;
    JSCStringBuf path_buf;
    const char *path;
    int count = -1;
@@ -962,6 +964,13 @@ static JSValue js2300_fs_list(JSContext *ctx, JSValue *this_val, int argc, JSVal
       return JS_EXCEPTION;
    }
 
+   entries = (struct js2300_fs_entry *)calloc(JS2300_MAX_FS_ENTRIES,
+                                              sizeof(*entries));
+   if (!entries) {
+      JS_PopGCRef(ctx, &array_ref);
+      return JS_EXCEPTION;
+   }
+
    if (active_runtime && active_runtime->host.fs_list)
       count = active_runtime->host.fs_list(active_runtime->host.opaque, path,
                                            entries, JS2300_MAX_FS_ENTRIES);
@@ -973,6 +982,7 @@ static JSValue js2300_fs_list(JSContext *ctx, JSValue *this_val, int argc, JSVal
 
    *array = JS_NewArray(ctx, count);
    if (JS_IsException(*array)) {
+      free(entries);
       JS_PopGCRef(ctx, &array_ref);
       return JS_EXCEPTION;
    }
@@ -983,6 +993,7 @@ static JSValue js2300_fs_list(JSContext *ctx, JSValue *this_val, int argc, JSVal
 
       *entry = JS_NewObject(ctx);
       if (JS_IsException(*entry)) {
+         free(entries);
          JS_PopGCRef(ctx, &entry_ref);
          JS_PopGCRef(ctx, &array_ref);
          return JS_EXCEPTION;
@@ -990,6 +1001,7 @@ static JSValue js2300_fs_list(JSContext *ctx, JSValue *this_val, int argc, JSVal
       JS_SetPropertyStr(ctx, *entry, "name", JS_NewString(ctx, entries[i].name));
       JS_SetPropertyStr(ctx, *entry, "dir", JS_NewBool(entries[i].is_dir != 0));
       if (JS_IsException(JS_SetPropertyUint32(ctx, *array, (uint32_t)i, *entry))) {
+         free(entries);
          JS_PopGCRef(ctx, &entry_ref);
          JS_PopGCRef(ctx, &array_ref);
          return JS_EXCEPTION;
@@ -997,8 +1009,60 @@ static JSValue js2300_fs_list(JSContext *ctx, JSValue *this_val, int argc, JSVal
       JS_PopGCRef(ctx, &entry_ref);
    }
 
+   free(entries);
    js2300_note_native_call(active_runtime);
    return JS_PopGCRef(ctx, &array_ref);
+}
+
+static JSValue js2300_fs_index(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv,
+                               JSValue params)
+{
+   struct js2300_fs_index_result result;
+   JSCStringBuf root_buf;
+   JSCStringBuf game_buf;
+   JSCStringBuf media_buf;
+   const char *root;
+   const char *game_path;
+   const char *media_path;
+   int ret = -1;
+   JSGCRef obj_ref;
+   JSValue *obj = JS_PushGCRef(ctx, &obj_ref);
+   (void)this_val;
+   (void)params;
+
+   memset(&result, 0, sizeof(result));
+   if (argc < 3) {
+      JS_PopGCRef(ctx, &obj_ref);
+      return JS_NULL;
+   }
+
+   root = JS_ToCString(ctx, argv[0], &root_buf);
+   game_path = JS_ToCString(ctx, argv[1], &game_buf);
+   media_path = JS_ToCString(ctx, argv[2], &media_buf);
+   if (!root || !game_path || !media_path) {
+      JS_PopGCRef(ctx, &obj_ref);
+      return JS_EXCEPTION;
+   }
+
+   if (active_runtime && active_runtime->host.fs_index)
+      ret = active_runtime->host.fs_index(active_runtime->host.opaque, root,
+                                          game_path, media_path, &result);
+
+   *obj = JS_NewObject(ctx);
+   if (JS_IsException(*obj)) {
+      JS_PopGCRef(ctx, &obj_ref);
+      return JS_EXCEPTION;
+   }
+   JS_SetPropertyStr(ctx, *obj, "ok", JS_NewBool(ret == 0));
+   JS_SetPropertyStr(ctx, *obj, "ret", JS_NewInt32(ctx, ret));
+   JS_SetPropertyStr(ctx, *obj, "games", JS_NewUint32(ctx, result.games));
+   JS_SetPropertyStr(ctx, *obj, "media", JS_NewUint32(ctx, result.media));
+   JS_SetPropertyStr(ctx, *obj, "files", JS_NewUint32(ctx, result.files));
+   JS_SetPropertyStr(ctx, *obj, "dirs", JS_NewUint32(ctx, result.dirs));
+   JS_SetPropertyStr(ctx, *obj, "truncated", JS_NewBool(result.truncated != 0));
+   JS_SetPropertyStr(ctx, *obj, "ms", JS_NewUint32(ctx, result.ms));
+   js2300_note_native_call(active_runtime);
+   return JS_PopGCRef(ctx, &obj_ref);
 }
 
 static JSValue js2300_fs_read_text(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv,

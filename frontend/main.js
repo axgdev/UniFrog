@@ -281,6 +281,7 @@ var indexItems = [];
 var mediaItems = [];
 var systems = [];
 var systemCounts = [];
+var systemItemLists = [];
 var currentItems = [];
 var currentSystem = "";
 var currentListTitle = "";
@@ -793,22 +794,34 @@ function sortEntries(list) {
   var out = [];
   var i;
   var j;
+  var gap;
   var tmp;
   for (i = 0; i < list.length; i++) {
-    if (accepted(list[i])) out.push(list[i]);
+    if (accepted(list[i])) {
+      list[i].key = lowerAscii(list[i].name);
+      out.push(list[i]);
+    }
   }
-  for (i = 0; i < out.length; i++) {
-    for (j = i + 1; j < out.length; j++) {
-      if ((!out[i].dir && out[j].dir) ||
-          (out[i].dir === out[j].dir &&
-           lowerAscii(out[i].name) > lowerAscii(out[j].name))) {
-        tmp = out[i];
-        out[i] = out[j];
-        out[j] = tmp;
+  for (gap = Math.floor(out.length / 2); gap > 0; gap = Math.floor(gap / 2)) {
+    for (i = gap; i < out.length; i++) {
+      tmp = out[i];
+      j = i;
+      while (j >= gap && compareEntries(out[j - gap], tmp) > 0) {
+        out[j] = out[j - gap];
+        j -= gap;
       }
+      out[j] = tmp;
     }
   }
   return out;
+}
+
+function compareEntries(a, b) {
+  if (a.dir && !b.dir) return -1;
+  if (!a.dir && b.dir) return 1;
+  if (a.key < b.key) return -1;
+  if (a.key > b.key) return 1;
+  return 0;
 }
 
 function refreshBrowser() {
@@ -938,16 +951,18 @@ function loadSystemCheckReport(now) {
   }
 }
 
-function pushSystem(system) {
+function pushSystem(system, item) {
   var i;
   for (i = 0; i < systems.length; i++) {
     if (systems[i] === system) {
       systemCounts[i]++;
+      if (item) systemItemLists[i].push(item);
       return;
     }
   }
   systems.push(system);
   systemCounts.push(1);
+  systemItemLists.push(item ? [item] : []);
 }
 
 function clearIndexData() {
@@ -955,6 +970,7 @@ function clearIndexData() {
   mediaItems = [];
   systems = [];
   systemCounts = [];
+  systemItemLists = [];
 }
 
 function addIndexLine(line) {
@@ -972,7 +988,7 @@ function addIndexLine(line) {
       if (!item.label) item.label = basename(item.path);
       if (!item.system) item.system = "Other";
       indexItems.push(item);
-      pushSystem(item.system);
+      pushSystem(item.system, item);
     }
   } else if (kind === "media") {
     item = {
@@ -989,11 +1005,11 @@ function addIndexLine(line) {
   }
 }
 
-function parseIndex(text) {
+function parseIndex(text, append) {
   var line = "";
   var i;
   var c;
-  clearIndexData();
+  if (!append) clearIndexData();
   if (!text) return;
   for (i = 0; i <= text.length; i++) {
     if (i === text.length) c = 10;
@@ -1010,7 +1026,9 @@ function parseIndex(text) {
 function loadIndex() {
   var gameText = JS2300.fs.readText ? JS2300.fs.readText(INDEX_PATH) : null;
   var mediaText = JS2300.fs.readText ? JS2300.fs.readText(MEDIA_INDEX_PATH) : null;
-  parseIndex((gameText ? gameText : "") + (mediaText ? mediaText : ""));
+  clearIndexData();
+  parseIndex(gameText ? gameText : "", 1);
+  parseIndex(mediaText ? mediaText : "", 1);
 }
 
 function skipDir(name, full) {
@@ -1070,14 +1088,34 @@ function scanDirectory(dir, depth, scan) {
   }
 }
 
+function nativeIndexGames(now) {
+  var result;
+  var text;
+  if (!JS2300.fs.index) return 0;
+  drawScan("/media/mmcblk0", 0, 0);
+  result = JS2300.fs.index("/media/mmcblk0", INDEX_PATH, MEDIA_INDEX_PATH);
+  if (!result || !result.ok) return 0;
+  loadIndex();
+  text = String(result.games) + " games indexed";
+  if (result.truncated) text = text + " limited";
+  showToast(text, now);
+  JS2300.log("frontend native index games=" + String(result.games) +
+    " media=" + String(result.media) + " files=" + String(result.files) +
+    " dirs=" + String(result.dirs) + " ms=" + String(result.ms));
+  view = HOME;
+  return 1;
+}
+
 function indexGames(now) {
   var scan = { gameText: "", mediaText: "", games: 0, media: 0, files: 0, dirs: 0 };
+  if (nativeIndexGames(now)) return;
   scanDirectory("/media/mmcblk0", 0, scan);
   if (JS2300.fs.writeText) {
     JS2300.fs.writeText(INDEX_PATH, scan.gameText);
     JS2300.fs.writeText(MEDIA_INDEX_PATH, scan.mediaText);
   }
-  parseIndex(scan.gameText + scan.mediaText);
+  parseIndex(scan.gameText, 0);
+  parseIndex(scan.mediaText, 1);
   showToast(String(scan.games) + " games indexed", now);
   view = HOME;
 }
@@ -1692,14 +1730,9 @@ function openSystems(now) {
 }
 
 function openSystemList(now) {
-  var i;
   currentSystem = systems[selected];
   currentListTitle = currentSystem;
-  currentItems = [];
-  for (i = 0; i < indexItems.length; i++) {
-    if (indexItems[i].system === currentSystem)
-      currentItems.push(indexItems[i]);
-  }
+  currentItems = systemItemLists[selected] ? systemItemLists[selected] : [];
   selected = 0;
   scroll = 0;
   view = INDEX_LIST;
