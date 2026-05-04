@@ -5,7 +5,7 @@ CORE_SUPPORT_ROOT ?= ../.deps/support
 SUPPORT_SPECS := \
 	'libchdr|$(CORE_SUPPORT_ROOT)/libchdr|https://github.com/rtissera/libchdr.git|25fcb10cde7b9af71dbbb76d68033a4975af0a08|include src deps/lzma-25.01/include deps/lzma-25.01/src' \
 	'zstd|$(CORE_SUPPORT_ROOT)/zstd|https://github.com/facebook/zstd.git|f8745da6ff1ad1e7bab384bd1f9d742439278e99|build/single_file_libs lib' \
-	'zlib|$(CORE_SUPPORT_ROOT)/zlib|https://github.com/madler/zlib.git|da607da739fa6047df13e66a2af6b8bec7c2a498|.'
+	'zlib|$(CORE_SUPPORT_ROOT)/zlib|https://github.com/madler/zlib.git|da607da739fa6047df13e66a2af6b8bec7c2a498|:root-files'
 
 # name|checkout-directory|upstream-url|upstream-commit
 CORE_SPECS := \
