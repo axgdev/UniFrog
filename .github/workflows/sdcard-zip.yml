@@ -58,17 +58,25 @@ jobs:
       - name: Build SD card package
         run: |
           export CCACHE_DIR="$PWD/.ccache"
-          make ci-sd-zip HOSTCC=tcc CCACHE=ccache TOOLCHAIN="$PWD/toolchain"
+          jobs="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+          archive="Unifrog-sdcard-${GITHUB_REF_NAME}.zip"
+          make ci-sd-zip \
+            JOBS="$jobs" \
+            HOSTCC=tcc \
+            CCACHE=ccache \
+            TOOLCHAIN="$PWD/toolchain" \
+            CI_SDZIP="$PWD/$archive"
+          printf 'archive=%s\n' "$archive" >> "$GITHUB_ENV"
 
       - name: Upload SD card package
         uses: actions/upload-artifact@v4
         with:
-          name: UniFrog-sdcard
-          path: UniFrog-local-sdcard.zip
+          name: ${{ env.archive }}
+          path: ${{ env.archive }}
 
       - name: Upload draft release asset
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: UniFrog-local-sdcard.zip
+          files: ${{ env.archive }}
