@@ -354,7 +354,13 @@ init: support-init
 		git -C "$$dir" config user.name "UniFrog CI"; \
 		git -C "$$dir" config user.email "ci@unifrog.local"; \
 		if ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
-			git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch; \
+			am_err="$$dir/.git/unifrog-am.err"; \
+			if ! git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch 2>"$$am_err"; then \
+				cat "$$am_err" >&2; \
+				exit 1; \
+			fi; \
+			grep -v '^warning: quoted CRLF detected$$' "$$am_err" >&2 || true; \
+			rm -f "$$am_err"; \
 		fi; \
 		if test "$$name" = picodrive; then \
 			git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" -- cpu/cyclone pico/sound/emu2413 platform/libpicofe; \
@@ -467,7 +473,13 @@ update-core:
 			git -C "$$dir" reset --hard -q "$$commit"; \
 			git -C "$$dir" clean -fdx -q; \
 			if ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
-				git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch; \
+				am_err="$$dir/.git/unifrog-am.err"; \
+				if ! git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch 2>"$$am_err"; then \
+					cat "$$am_err" >&2; \
+					exit 1; \
+				fi; \
+				grep -v '^warning: quoted CRLF detected$$' "$$am_err" >&2 || true; \
+				rm -f "$$am_err"; \
 			fi; \
 			if test "$$name" = picodrive; then \
 				git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" -- cpu/cyclone pico/sound/emu2413 platform/libpicofe; \
