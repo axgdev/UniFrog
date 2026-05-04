@@ -1032,7 +1032,14 @@ ci-toolchain:
 
 ci-commit-check: ci-deps ci-toolchain
 	$(Q)$(MAKE) doctor TOOLCHAIN=$(TOOLCHAIN)
-	$(Q)$(MAKE) sdk lib js2300-check frontend-check TOOLCHAIN=$(TOOLCHAIN) HOSTCC=$(HOSTCC)
+	@echo "  CI      sdk"
+	$(Q)$(MAKE) --no-print-directory sdk TOOLCHAIN=$(TOOLCHAIN) HOSTCC=$(HOSTCC)
+	@echo "  CI      lib"
+	$(Q)$(MAKE) --no-print-directory lib TOOLCHAIN=$(TOOLCHAIN) HOSTCC=$(HOSTCC)
+	@echo "  CI      js2300-check"
+	$(Q)$(MAKE) --no-print-directory js2300-check TOOLCHAIN=$(TOOLCHAIN) HOSTCC=$(HOSTCC)
+	@echo "  CI      frontend-check"
+	$(Q)$(MAKE) --no-print-directory frontend-check TOOLCHAIN=$(TOOLCHAIN) HOSTCC=$(HOSTCC)
 
 ci-sd-zip: ci-deps ci-toolchain
 	$(Q)$(MAKE) doctor TOOLCHAIN=$(TOOLCHAIN)
