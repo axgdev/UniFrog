@@ -4,7 +4,7 @@ TOOLCHAIN_HOST_ARCH := $(if $(filter aarch64 arm64,$(TOOLCHAIN_UNAME_M)),arm64,$
 TOOLCHAIN_URL ?= https://github.com/axgdev/frog-toolchain/releases/download/v1.1.1/toolchain-stable-static-$(TOOLCHAIN_HOST_ARCH)-gcc15.2.0-binutils2.45-newlib4.5.0.20241231.tar.xz
 CROSS_COMPILE ?= $(TOOLCHAIN)/bin/mipsel-mti-elf-
 DEPS ?= .deps
-SDK ?= hcrtos-sdk
+SDK ?= unifrog-hcrtos-sdk
 CORES ?= cores
 CORE_SOURCE_ROOT ?= $(DEPS)/cores
 CORE_SUPPORT_ROOT ?= $(DEPS)/support
@@ -521,8 +521,9 @@ deps-ubuntu:
 	@echo "sudo apt-get update && sudo apt-get install -y git make device-tree-compiler tcc ccache curl xz-utils zip patch"
 
 deps-sdk:
-	git submodule sync hcrtos-sdk
-	git submodule update --init --depth 1 hcrtos-sdk
+	git config --global --add safe.directory "$(abspath .)" 2>/dev/null || true
+	git submodule sync unifrog-hcrtos-sdk
+	git submodule update --init --depth 1 unifrog-hcrtos-sdk
 
 deps-mquickjs:
 	@mkdir -p $(DEPS)

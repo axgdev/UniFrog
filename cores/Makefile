@@ -351,6 +351,8 @@ init: support-init
 		git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
 		git -C "$$dir" reset --hard -q "$$commit"; \
 		git -C "$$dir" clean -fdx -q; \
+		git -C "$$dir" config user.name "UniFrog CI"; \
+		git -C "$$dir" config user.email "ci@unifrog.local"; \
 		if ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
 			git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch; \
 		fi; \
