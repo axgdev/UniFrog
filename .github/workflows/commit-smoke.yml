@@ -30,10 +30,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: unifrog-smoke-ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
+          key: unifrog-ccache-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
-            unifrog-smoke-ccache-${{ runner.os }}-${{ github.ref_name }}-
-            unifrog-smoke-ccache-${{ runner.os }}-
+            unifrog-ccache-${{ runner.os }}-
 
       - name: Cache core sources
         uses: actions/cache@v4
