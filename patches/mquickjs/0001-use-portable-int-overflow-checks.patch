@@ -51,3 +51,48 @@
                          goto binary_arith_slow;
                      sp[1] = (uint32_t)r;
                  } else
+--- a/cutils.h
++++ b/cutils.h
+@@ -131,16 +131,42 @@ static inline size_t min_size_t(size_t a, size_t b)
+ }
+ 
+ /* WARNING: undefined if a = 0 */
++#if defined(__TINYC__)
++static inline int clz32(unsigned int a)
++{
++    int n = 0;
++    unsigned int mask = 1U << 31;
++    while ((a & mask) == 0) {
++        n++;
++        mask >>= 1;
++    }
++    return n;
++}
++#else
+ static inline int clz32(unsigned int a)
+ {
+     return __builtin_clz(a);
+ }
++#endif
+ 
+ /* WARNING: undefined if a = 0 */
++#if defined(__TINYC__)
++static inline int clz64(uint64_t a)
++{
++    int n = 0;
++    uint64_t mask = (uint64_t)1 << 63;
++    while ((a & mask) == 0) {
++        n++;
++        mask >>= 1;
++    }
++    return n;
++}
++#else
+ static inline int clz64(uint64_t a)
+ {
+     return __builtin_clzll(a);
+ }
++#endif
+ 
+ /* WARNING: undefined if a = 0 */
+ static inline int ctz32(unsigned int a)

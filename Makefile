@@ -515,7 +515,7 @@ help:
 deps: deps-sdk deps-mquickjs deps-cores
 
 deps-alpine:
-	apk add git make dtc tcc musl-dev ccache curl tar xz zip patch
+	apk add git make dtc tcc tcc-libs-static musl-dev ccache curl tar xz zip patch
 
 deps-ubuntu:
 	@echo "sudo apt-get update && sudo apt-get install -y git make device-tree-compiler tcc ccache curl xz-utils zip patch"
@@ -590,7 +590,8 @@ sdk:
 
 js2300-check:
 	$(Q)$(MAKE) -C $(JS2300) check TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR))
+		CROSS_COMPILE=$(CROSS_COMPILE) MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR)) \
+		HOSTCC=$(HOSTCC)
 
 frontend-check:
 	$(Q)$(MAKE) -C $(FRONTEND) check MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR)) \
