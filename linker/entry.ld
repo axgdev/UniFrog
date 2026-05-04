@@ -1,0 +1,2 @@
+__RAM_BASE = 0x80001000;
+__ROM_BASE = __RAM_BASE;
