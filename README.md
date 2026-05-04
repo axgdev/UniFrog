@@ -13,8 +13,10 @@ Large or mixed-license build inputs are kept outside this repository:
 - `../unifrog-hcrtos-sdk` contains the HCRTOS headers, static libraries, kernel
   objects, and license notices needed to link the SF2000 application.
 - `.deps/mquickjs` is fetched from upstream by `make deps`.
-- `.deps/cores` contains direct libretro core source checkouts fetched from the
-  branch manifest in `cores/manifest.mk`.
+- `.deps/cores` contains direct libretro core source checkouts fetched from
+  `cores/manifest.mk`.
+- `.deps/support` contains shared core support libraries such as libchdr, zstd,
+  zlib, and LZMA.
 
 ## Quick Start
 
@@ -92,10 +94,10 @@ UniFrog app layout.
 Host-side C tools are built with `tcc` by default when it is available. MQuickJS
 is patched during the build so the frontend syntax checker does not require GCC.
 
-The libretro core flow is manifest-driven. `cores/manifest.mk` lists the source
-branch for each core and `make deps-cores` fetches those branches directly into
-`.deps/cores`. The checked-out sources remain generated dependencies, not Git
-submodules or committed source trees.
+The libretro core flow is manifest-driven. `cores/manifest.mk` pins each
+upstream core commit and the shared support-library commits. `make deps` fetches
+those generated dependencies into `.deps/cores` and `.deps/support`, then the
+build compiles common CHD/zstd/zlib/LZMA support once for all cores that need it.
 
 ## History
 

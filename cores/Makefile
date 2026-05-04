@@ -18,7 +18,10 @@ GPSP_DIR := $(CORE_SOURCE_ROOT)/gpsp-libretro
 GPSP_LIB := $(GPSP_DIR)/gpsp_libretro_sf2000.a
 PICODRIVE_DIR := $(CORE_SOURCE_ROOT)/picodrive
 PICODRIVE_LIB := $(PICODRIVE_DIR)/picodrive_libretro_sf2000.a
-PICODRIVE_LIBCHDR_DIR := $(PICODRIVE_DIR)/pico/cd/libchdr
+LIBCHDR_DIR := $(CORE_SUPPORT_ROOT)/libchdr
+ZSTD_DIR := $(CORE_SUPPORT_ROOT)/zstd/lib
+ZLIB_DIR := $(CORE_SUPPORT_ROOT)/zlib
+LZMA_DIR := $(LIBCHDR_DIR)/deps/lzma-25.01
 CHD_SUPPORT_LIB := $(OUT)/libchdr-support-sf2000.a
 SNES9X2005_DIR := $(CORE_SOURCE_ROOT)/snes9x2005
 SNES9X2005_LIB := $(SNES9X2005_DIR)/snes9x2005_libretro_sf2000.a
@@ -214,28 +217,31 @@ LIBRETRO_COMMON_OBJECTS := \
 	$(BUILD)/libretro-common/vfs/vfs_implementation.o
 
 CHD_SUPPORT_INCFLAGS := \
-	-I$(abspath $(PICODRIVE_LIBCHDR_DIR))/include \
-	-I$(abspath $(PICODRIVE_LIBCHDR_DIR))/deps/lzma-24.05/include \
-	-I$(abspath $(PICODRIVE_LIBCHDR_DIR))/deps/zstd-1.5.6/lib \
-	-I$(abspath $(PICODRIVE_LIBCHDR_DIR))/deps/zlib-1.3.1
+	-I$(abspath $(LIBCHDR_DIR))/include \
+	-I$(abspath $(LZMA_DIR))/include \
+	-I$(abspath $(ZSTD_DIR)) \
+	-I$(abspath $(ZLIB_DIR))
 
 CHD_SUPPORT_CFLAGS := $(CORE_BASE_CFLAGS) $(CHD_SUPPORT_INCFLAGS) \
-	-DZ7_ST -DZSTD_DISABLE_ASM \
+	-DZ7_ST -DZSTD_DISABLE_ASM -DCHDR_SYSTEM_ZLIB -DCHDR_SYSTEM_ZSTD \
 	-Wno-unused -Wno-old-style-definition
 
 CHD_SUPPORT_OBJECTS := \
 	$(BUILD)/chd-support/libchdr_bitstream.o \
 	$(BUILD)/chd-support/libchdr_cdrom.o \
 	$(BUILD)/chd-support/libchdr_chd.o \
+	$(BUILD)/chd-support/libchdr_codec_cdfl.o \
+	$(BUILD)/chd-support/libchdr_codec_cdlz.o \
+	$(BUILD)/chd-support/libchdr_codec_cdzl.o \
+	$(BUILD)/chd-support/libchdr_codec_cdzs.o \
+	$(BUILD)/chd-support/libchdr_codec_flac.o \
+	$(BUILD)/chd-support/libchdr_codec_huff.o \
+	$(BUILD)/chd-support/libchdr_codec_lzma.o \
+	$(BUILD)/chd-support/libchdr_codec_zlib.o \
+	$(BUILD)/chd-support/libchdr_codec_zstd.o \
 	$(BUILD)/chd-support/libchdr_flac.o \
 	$(BUILD)/chd-support/libchdr_huffman.o \
-	$(BUILD)/chd-support/lzma_Alloc.o \
-	$(BUILD)/chd-support/lzma_CpuArch.o \
-	$(BUILD)/chd-support/lzma_Delta.o \
-	$(BUILD)/chd-support/lzma_LzFind.o \
 	$(BUILD)/chd-support/lzma_LzmaDec.o \
-	$(BUILD)/chd-support/lzma_LzmaEnc.o \
-	$(BUILD)/chd-support/lzma_Sort.o \
 	$(BUILD)/chd-support/zstd_entropy_common.o \
 	$(BUILD)/chd-support/zstd_error_private.o \
 	$(BUILD)/chd-support/zstd_fse_decompress.o \
@@ -245,6 +251,7 @@ CHD_SUPPORT_OBJECTS := \
 	$(BUILD)/chd-support/zstd_zstd_ddict.o \
 	$(BUILD)/chd-support/zstd_zstd_decompress.o \
 	$(BUILD)/chd-support/zstd_zstd_decompress_block.o \
+	$(BUILD)/chd-support/sf2000_fcntl.o \
 	$(BUILD)/chd-support/zlib_adler32.o \
 	$(BUILD)/chd-support/zlib_compress.o \
 	$(BUILD)/chd-support/zlib_crc32.o \
@@ -267,7 +274,7 @@ ifeq ($(filter --output-sync% -O%,$(MAKEFLAGS)),)
 MAKEFLAGS += --output-sync=target
 endif
 
-.PHONY: all init doctor \
+.PHONY: all support-init init doctor \
 	libretro-common chd-support \
 	gambatte gpsp picodrive snes9x2005 snes9x2002 quicknes fceumm \
 	gearboy pce-fast qpsx pmp-video core-status diff-core log-core update-core \
@@ -276,7 +283,42 @@ endif
 all: libretro-common gambatte gpsp picodrive snes9x2005 snes9x2002 \
 	quicknes fceumm gearboy pce-fast qpsx pmp-video
 
-init:
+support-init:
+	@set -e; \
+	mkdir -p "$(CORE_SUPPORT_ROOT)"; \
+	for spec in $(SUPPORT_SPECS); do \
+		name=$${spec%%|*}; rest=$${spec#*|}; \
+		dir=$${rest%%|*}; rest=$${rest#*|}; \
+		url=$${rest%%|*}; rest=$${rest#*|}; \
+		commit=$${rest%%|*}; rest=$${rest#*|}; \
+		sparse=$$rest; \
+		if test -d "$$dir/.git"; then \
+			git -C "$$dir" remote set-url origin "$$url"; \
+			if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
+				echo "  REUSE   support/$$name $$commit"; \
+				git -C "$$dir" checkout -q "$$commit"; \
+			else \
+				echo "  FETCH   support/$$name $$commit"; \
+				git -C "$$dir" fetch --depth 1 origin "$$commit"; \
+				git -C "$$dir" checkout -q FETCH_HEAD; \
+			fi; \
+		else \
+			echo "  FETCH   support/$$name $$commit"; \
+			rm -rf "$$dir"; \
+			git init -q "$$dir"; \
+			git -C "$$dir" remote add origin "$$url"; \
+			git -C "$$dir" fetch --depth 1 origin "$$commit"; \
+			git -C "$$dir" checkout -q FETCH_HEAD; \
+		fi; \
+		if test "$$sparse" != "."; then \
+			git -C "$$dir" sparse-checkout init --cone; \
+			git -C "$$dir" sparse-checkout set $$sparse; \
+		fi; \
+		git -C "$$dir" reset --hard -q "$$commit"; \
+		git -C "$$dir" clean -fdx -q; \
+	done
+
+init: support-init
 	@set -e; \
 	mkdir -p "$(CORE_SOURCE_ROOT)"; \
 	for spec in $(CORE_SPECS); do \
@@ -317,11 +359,15 @@ init:
 				git -C "$$dir" sparse-checkout init --cone; \
 				git -C "$$dir" sparse-checkout set cpu pico platform/common platform/libretro unzip zlib; \
 				;; \
+			pce-fast) \
+				git -C "$$dir" sparse-checkout init --cone; \
+				git -C "$$dir" sparse-checkout set mednafen libretro-common; \
+				;; \
 		esac; \
-		git -C "$$dir" submodule update --init --depth 1 --jobs "$(JOBS)"; \
-		if test "$$name" = picodrive && test -d "$$dir/pico/cd/libchdr/.git"; then \
-			git -C "$$dir/pico/cd/libchdr" sparse-checkout init --cone; \
-			git -C "$$dir/pico/cd/libchdr" sparse-checkout set include src deps/lzma-24.05/C deps/lzma-24.05/include deps/zstd-1.5.6/lib deps/zlib-1.3.1; \
+		if test "$$name" = picodrive; then \
+			git -C "$$dir" submodule update --init --depth 1 --jobs "$(JOBS)" cpu/cyclone pico/sound/emu2413 platform/common/dr_libs platform/libpicofe; \
+		else \
+			git -C "$$dir" submodule update --init --depth 1 --jobs "$(JOBS)"; \
 		fi; \
 	done
 
@@ -343,6 +389,9 @@ doctor:
 	@test -e $(QPSX_DIR)/.git || { echo "missing core checkout: $(QPSX_DIR); run: make init"; exit 1; }
 	@test -e $(PMP_VIDEO_DIR)/.git || { echo "missing core checkout: $(PMP_VIDEO_DIR); run: make init"; exit 1; }
 	@test -f $(GPSP_DIR)/libretro/libretro-common/include/libretro.h || { echo "missing gpSP bundled libretro-common; run: make init"; exit 1; }
+	@test -f $(LIBCHDR_DIR)/src/libchdr_chd.c || { echo "missing support checkout: $(LIBCHDR_DIR); run: make init"; exit 1; }
+	@test -f $(ZSTD_DIR)/decompress/zstd_decompress.c || { echo "missing support checkout: $(ZSTD_DIR); run: make init"; exit 1; }
+	@test -f $(ZLIB_DIR)/inflate.c || { echo "missing support checkout: $(ZLIB_DIR); run: make init"; exit 1; }
 	@echo "TOOLCHAIN=$(TOOLCHAIN)"
 	@echo "CCACHE=$(if $(CCACHE),$(CCACHE),disabled)"
 	@echo "OK"
@@ -410,16 +459,20 @@ update-core:
 					git -C "$$dir" sparse-checkout init --cone; \
 					git -C "$$dir" sparse-checkout set src platforms/libretro; \
 					;; \
-				picodrive) \
-					git -C "$$dir" sparse-checkout init --cone; \
-					git -C "$$dir" sparse-checkout set cpu pico platform/common platform/libretro unzip zlib; \
-					;; \
-			esac; \
+			picodrive) \
+				git -C "$$dir" sparse-checkout init --cone; \
+				git -C "$$dir" sparse-checkout set cpu pico platform/common platform/libretro unzip zlib; \
+				;; \
+			pce-fast) \
+				git -C "$$dir" sparse-checkout init --cone; \
+				git -C "$$dir" sparse-checkout set mednafen libretro-common; \
+				;; \
+		esac; \
+		if test "$$name" = picodrive; then \
+			git -C "$$dir" submodule update --init --depth 1 --jobs "$(JOBS)" cpu/cyclone pico/sound/emu2413 platform/common/dr_libs platform/libpicofe; \
+		else \
 			git -C "$$dir" submodule update --init --depth 1 --jobs "$(JOBS)"; \
-			if test "$$name" = picodrive && test -d "$$dir/pico/cd/libchdr/.git"; then \
-				git -C "$$dir/pico/cd/libchdr" sparse-checkout init --cone; \
-				git -C "$$dir/pico/cd/libchdr" sparse-checkout set include src deps/lzma-24.05/C deps/lzma-24.05/include deps/zstd-1.5.6/lib deps/zlib-1.3.1; \
-			fi; \
+		fi; \
 		fi; \
 	done; \
 	test "$$found" = 1 || { echo "unknown core: $(CORE)"; exit 1; }
@@ -443,37 +496,42 @@ libretro-common: $(LIBRETRO_COMMON)
 
 chd-support: $(CHD_SUPPORT_LIB)
 
-$(BUILD)/chd-support/libchdr_%.o: $(PICODRIVE_LIBCHDR_DIR)/src/libchdr_%.c | $(BUILD)
+$(BUILD)/chd-support/libchdr_%.o: $(LIBCHDR_DIR)/src/libchdr_%.c | $(BUILD)
 	@echo "  CC      $<"
 	@mkdir -p $(dir $@)
 	$(CC) $(CHD_SUPPORT_CFLAGS) -MD -MP -c $< -o $@
 
-$(BUILD)/chd-support/lzma_%.o: $(PICODRIVE_LIBCHDR_DIR)/deps/lzma-24.05/src/%.c | $(BUILD)
+$(BUILD)/chd-support/lzma_%.o: $(LZMA_DIR)/src/%.c | $(BUILD)
 	@echo "  CC      $<"
 	@mkdir -p $(dir $@)
 	$(CC) $(CHD_SUPPORT_CFLAGS) -MD -MP -c $< -o $@
 
-$(BUILD)/chd-support/zstd_%.o: $(PICODRIVE_LIBCHDR_DIR)/deps/zstd-1.5.6/lib/common/%.c | $(BUILD)
+$(BUILD)/chd-support/zstd_%.o: $(ZSTD_DIR)/common/%.c | $(BUILD)
 	@echo "  CC      $<"
 	@mkdir -p $(dir $@)
 	$(CC) $(CHD_SUPPORT_CFLAGS) -MD -MP -c $< -o $@
 
-$(BUILD)/chd-support/zstd_huf_decompress.o: $(PICODRIVE_LIBCHDR_DIR)/deps/zstd-1.5.6/lib/decompress/huf_decompress.c | $(BUILD)
+$(BUILD)/chd-support/zstd_huf_decompress.o: $(ZSTD_DIR)/decompress/huf_decompress.c | $(BUILD)
 	@echo "  CC      $<"
 	@mkdir -p $(dir $@)
 	$(CC) $(CHD_SUPPORT_CFLAGS) -MD -MP -c $< -o $@
 
-$(BUILD)/chd-support/zstd_zstd_%.o: $(PICODRIVE_LIBCHDR_DIR)/deps/zstd-1.5.6/lib/decompress/zstd_%.c | $(BUILD)
+$(BUILD)/chd-support/zstd_zstd_%.o: $(ZSTD_DIR)/decompress/zstd_%.c | $(BUILD)
 	@echo "  CC      $<"
 	@mkdir -p $(dir $@)
 	$(CC) $(CHD_SUPPORT_CFLAGS) -MD -MP -c $< -o $@
 
-$(BUILD)/chd-support/zlib_%.o: $(PICODRIVE_LIBCHDR_DIR)/deps/zlib-1.3.1/%.c | $(BUILD)
+$(BUILD)/chd-support/zlib_%.o: $(ZLIB_DIR)/%.c | $(BUILD)
 	@echo "  CC      $<"
 	@mkdir -p $(dir $@)
 	$(CC) $(CHD_SUPPORT_CFLAGS) $(CHD_SUPPORT_EXTRA_CFLAGS) -MD -MP -c $< -o $@
 
 $(BUILD)/chd-support/zlib_gz%.o: CHD_SUPPORT_EXTRA_CFLAGS := -include sys/unistd.h
+
+$(BUILD)/chd-support/sf2000_%.o: support/%.c | $(BUILD)
+	@echo "  CC      $<"
+	@mkdir -p $(dir $@)
+	$(CC) $(CHD_SUPPORT_CFLAGS) -MD -MP -c $< -o $@
 
 $(CHD_SUPPORT_LIB): doctor $(CHD_SUPPORT_OBJECTS) | $(OUT)
 	@echo "  AR      $@"
@@ -495,7 +553,7 @@ picodrive: doctor $(CHD_SUPPORT_LIB) | $(OUT)
 		CC=$(CC) CXX=$(CXX) AR=$(AR) STATIC_LINKING=1 \
 		STATIC_LINKING_LINK=1 EXTERNAL_CHD_MEDIA=1 EXTERNAL_ZLIB=1 \
 		EXTERNAL_CHD_INCFLAGS="$(CHD_SUPPORT_INCFLAGS)" \
-		EXTERNAL_ZLIB_INCFLAGS="-I$(abspath $(PICODRIVE_LIBCHDR_DIR))/deps/zlib-1.3.1" \
+		EXTERNAL_ZLIB_INCFLAGS="-I$(abspath $(ZLIB_DIR))" \
 		fpic= TARGET=picodrive_libretro_sf2000.a
 	$(call copy_core_lib,$(PICODRIVE_LIB))
 
@@ -542,7 +600,7 @@ pce-fast: doctor $(CHD_SUPPORT_LIB) | $(OUT)
 		CC=$(CC) CXX=$(CXX) AR=$(AR) STATIC_LINKING=1 \
 		EXTERNAL_CHD_MEDIA=1 HAVE_CHD=1 \
 		EXTERNAL_CHD_INCFLAGS="$(CHD_SUPPORT_INCFLAGS)" \
-		EXTERNAL_ZLIB_INCFLAGS="-I$(abspath $(PICODRIVE_LIBCHDR_DIR))/deps/zlib-1.3.1" \
+		EXTERNAL_ZLIB_INCFLAGS="-I$(abspath $(ZLIB_DIR))" \
 		fpic= TARGET=pce_fast_libretro_sf2000.a
 	$(call copy_core_lib,$(PCE_FAST_LIB))
 
@@ -597,7 +655,7 @@ clean:
 		platform=unix CC=$(CC) CXX=$(CXX) AR=$(AR) STATIC_LINKING=1 \
 		STATIC_LINKING_LINK=1 EXTERNAL_CHD_MEDIA=1 EXTERNAL_ZLIB=1 \
 		EXTERNAL_CHD_INCFLAGS="$(CHD_SUPPORT_INCFLAGS)" \
-		EXTERNAL_ZLIB_INCFLAGS="-I$(abspath $(PICODRIVE_LIBCHDR_DIR))/deps/zlib-1.3.1" \
+		EXTERNAL_ZLIB_INCFLAGS="-I$(abspath $(ZLIB_DIR))" \
 		fpic= TARGET=picodrive_libretro_sf2000.a || true
 	CFLAGS="$(SNES9X2005_CFLAGS)" CXXFLAGS="$(SNES9X2005_CFLAGS)" \
 		$(MAKE) -C $(SNES9X2005_DIR) -f Makefile clean platform=unix \
@@ -626,7 +684,7 @@ clean:
 		CC=$(CC) CXX=$(CXX) AR=$(AR) STATIC_LINKING=1 fpic= \
 		EXTERNAL_CHD_MEDIA=1 HAVE_CHD=1 \
 		EXTERNAL_CHD_INCFLAGS="$(CHD_SUPPORT_INCFLAGS)" \
-		EXTERNAL_ZLIB_INCFLAGS="-I$(abspath $(PICODRIVE_LIBCHDR_DIR))/deps/zlib-1.3.1" \
+		EXTERNAL_ZLIB_INCFLAGS="-I$(abspath $(ZLIB_DIR))" \
 		TARGET=pce_fast_libretro_sf2000.a || true
 	CFLAGS="$(QPSX_CFLAGS)" CXXFLAGS="$(QPSX_CXXFLAGS)" \
 		$(MAKE) -C $(QPSX_DIR) -f Makefile.libretro clean platform=sf2000 \
