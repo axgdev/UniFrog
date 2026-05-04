@@ -1,0 +1,53 @@
+--- a/mquickjs.c
++++ b/mquickjs.c
+@@ -29,6 +29,7 @@
+ #include <string.h>
+ #include <assert.h>
+ #include <math.h>
++#include <limits.h>
+ #include <setjmp.h>
+ 
+ #include "cutils.h"
+@@ -4478,6 +4478,24 @@ static int js_get_length32(JSContext *ctx, uint32_t *pres, JSValue obj)
+     return JS_ToUint32(ctx, pres, len_val);
+ }
+ 
++static BOOL js_int_add_overflow(int a, int b, int *pr)
++{
++    if ((b > 0 && a > INT_MAX - b) ||
++        (b < 0 && a < INT_MIN - b))
++        return TRUE;
++    *pr = a + b;
++    return FALSE;
++}
++
++static BOOL js_int_sub_overflow(int a, int b, int *pr)
++{
++    if ((b < 0 && a > INT_MAX + b) ||
++        (b > 0 && a < INT_MIN + b))
++        return TRUE;
++    *pr = a - b;
++    return FALSE;
++}
++
+ static no_inline JSValue js_add_slow(JSContext *ctx)
+ {
+     JSValue *op1, *op2;
+@@ -6123,7 +6141,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValue func_obj,
+                 op2 = sp[0];
+                 if (likely(JS_VALUE_IS_BOTH_INT(op1, op2))) {
+                     int r;
+-                    if (unlikely(__builtin_add_overflow((int)op1, (int)op2, &r)))
++                    if (unlikely(js_int_add_overflow((int)op1, (int)op2, &r)))
+                         goto add_slow;
+                     sp[1] = (uint32_t)r;
+                 } else 
+@@ -6156,7 +6174,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValue func_obj,
+                 op2 = sp[0];
+                 if (likely(JS_VALUE_IS_BOTH_INT(op1, op2))) {
+                     int r;
+-                    if (unlikely(__builtin_sub_overflow((int)op1, (int)op2, &r)))
++                    if (unlikely(js_int_sub_overflow((int)op1, (int)op2, &r)))
+                         goto binary_arith_slow;
+                     sp[1] = (uint32_t)r;
+                 } else

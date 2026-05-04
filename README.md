@@ -89,6 +89,9 @@ headers, static libraries, vendor code, and binary objects. Over time, those
 pieces can be replaced with permissively licensed source without changing the
 UniFrog app layout.
 
+Host-side C tools are built with `tcc` by default when it is available. MQuickJS
+is patched during the build so the frontend syntax checker does not require GCC.
+
 The libretro core flow is still being simplified. The current fresh repository
 uses `.deps/unifrog-cores` to preserve the working build while removing Git
 submodules from this repo. The intended next step is to replace that bridge with

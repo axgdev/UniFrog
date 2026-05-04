@@ -2,6 +2,7 @@
 /.deps/
 /output/
 /build/
+/frontend/output/
 /js2300/build/
 /js2300/output/
 /config.mk

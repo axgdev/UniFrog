@@ -5,6 +5,7 @@ OUT ?= output
 TARGET := $(OUT)/libjs2300.a
 MQUICKJS_DIR ?= libs/mquickjs
 MQUICKJS_ATOM_ALIGN_PATCH ?=
+MQUICKJS_TCC_PATCH ?= ../patches/mquickjs/0001-use-portable-int-overflow-checks.patch
 MQUICKJS_BUILD := $(BUILD)/mquickjs
 MQUICKJS_PREPARE_STAMP := $(MQUICKJS_BUILD)/.prepared
 
@@ -47,6 +48,9 @@ $(MQUICKJS_PREPARE_STAMP): $(MQUICKJS_DIR)/mquickjs.c $(MQUICKJS_DIR)/mquickjs_b
 	@mkdir -p "$(MQUICKJS_BUILD)"
 	@cp "$(MQUICKJS_DIR)"/*.[ch] "$(MQUICKJS_BUILD)"/
 	@cp "$(MQUICKJS_DIR)/Makefile" "$(MQUICKJS_BUILD)"/
+	@if test -f "$(MQUICKJS_TCC_PATCH)" && command -v patch >/dev/null 2>&1; then \
+		patch -d "$(MQUICKJS_BUILD)" -p1 < "$(MQUICKJS_TCC_PATCH)"; \
+	fi
 	@if grep -q '^#define ATOM_ALIGN 64$$' "$(MQUICKJS_BUILD)/mquickjs_build.c"; then \
 		if test -n "$(MQUICKJS_ATOM_ALIGN_PATCH)" && test -f "$(MQUICKJS_ATOM_ALIGN_PATCH)" && command -v patch >/dev/null 2>&1; then \
 			patch -d "$(MQUICKJS_BUILD)" -p1 < "$(MQUICKJS_ATOM_ALIGN_PATCH)"; \
