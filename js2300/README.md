@@ -12,12 +12,15 @@ src/                 Runtime and binding implementation
 Makefile             Static-library build and syntax check entry point
 ```
 
-The root build links `js2300/output/libjs2300.a` into the firmware. The default
-MQuickJS checkout is `.deps/mquickjs`, fetched by `make deps`.
+The root build links `js2300/output/libjs2300.a` into the firmware. The direct
+JS2300 default is `../.deps/mquickjs`, which is the same checkout the root
+Makefile fetches as `.deps/mquickjs`.
 
 ## Commands
 
 ```sh
+make -C js2300 help
+make -C js2300 print-config
 make -C js2300
 make -C js2300 check
 make -C js2300 MQUICKJS_DIR=/path/to/mquickjs check

@@ -9,6 +9,7 @@ fetched into `.deps/support`.
 Run from the repository root:
 
 ```sh
+make -C cores help
 make deps-cores
 make -C cores check
 ```
@@ -16,8 +17,10 @@ make -C cores check
 Useful core-maintenance targets:
 
 ```text
+make -C cores help                  Show the core workflow
+make -C cores print-config          Show paths and tool settings
 make -C cores init                  Fetch pinned sources and apply patches
-make -C cores all                   Build every configured core archive
+make -C cores                       Build every configured core archive
 make -C cores check                 Verify clean patched checkouts
 make -C cores core-status           Show source checkout status
 make -C cores diff-core CORE=gpsp   Show UniFrog patch delta for one core
