@@ -32,6 +32,14 @@ jobs:
             unifrog-ccache-${{ runner.os }}-${{ github.ref_name }}-
             unifrog-ccache-${{ runner.os }}-
 
+      - name: Cache core sources
+        uses: actions/cache@v4
+        with:
+          path: .deps/cores
+          key: unifrog-cores-${{ runner.os }}-${{ hashFiles('cores/manifest.mk', 'cores/patches/**/*.patch') }}
+          restore-keys: |
+            unifrog-cores-${{ runner.os }}-
+
       - name: Build SD card package
         run: |
           export CCACHE_DIR="$PWD/.ccache"
