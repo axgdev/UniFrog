@@ -1,0 +1,62 @@
+From 1ccdc01ebaa736b7bb9fd77a44b26f0a324cc7dc Mon Sep 17 00:00:00 2001
+From: "Axel Garcia K." <git@axelgk.com>
+Date: Wed, 6 May 2026 08:55:52 +0000
+Subject: [PATCH 3/4] Trim PCE Fast media build
+
+Add a UniFrog build knob to skip CHD/libchdr/zstd/zlib sources while keeping the CD and Tremor glue required by the existing PCE Fast link path. Also avoid a noisy member-function pointer warning in the PSG channel update path.
+---
+ Makefile                  | 1 +
+ Makefile.common           | 2 ++
+ mednafen/pce_fast/psg.cpp | 3 ++-
+ 3 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 3e03b56..9243e3d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -50,6 +50,7 @@ NEED_CRC32 = 1
+ CORE_DEFINE := -DWANT_PCE_FAST_EMU -DWANT_STEREO_SOUND
+ HAVE_CHD = 1
+ HAVE_CDROM = 0
++NO_CHD_MEDIA = 0
+ 
+ prefix := /usr
+ libdir := $(prefix)/lib
+diff --git a/Makefile.common b/Makefile.common
+index 55b8f8f..77cfda8 100755
+--- a/Makefile.common
++++ b/Makefile.common
+@@ -125,6 +125,7 @@ ifneq ($(HAVE_GRIFFIN),1)
+ endif
+ FLAGS += -DNEED_CD
+ 
++ifneq ($(NO_CHD_MEDIA), 1)
+ ifeq ($(HAVE_CHD), 1)
+ 	FLAGS += -DHAVE_CHD -D_7ZIP_ST -DZSTD_DISABLE_ASM
+ 
+@@ -146,6 +147,7 @@ ifeq ($(HAVE_CHD), 1)
+ 
+ 	SOURCES_CXX += $(CDROM_DIR)/CDAccess_CHD.cpp
+ endif
++endif
+ 
+ ifeq ($(NEED_TREMOR), 1)
+     SOURCES_C += $(sort $(filter-out %ivorbisfile_example.c, $(wildcard $(MEDNAFEN_DIR)/tremor/*.c)))
+diff --git a/mednafen/pce_fast/psg.cpp b/mednafen/pce_fast/psg.cpp
+index 68870ae..b02196e 100644
+--- a/mednafen/pce_fast/psg.cpp
++++ b/mednafen/pce_fast/psg.cpp
+@@ -405,11 +405,12 @@ void PCEFast_PSG::RunChannel(int chc, int32 timestamp)
+    if(chc >= 4)
+    {
+       int32 freq = ch->noise_freq_cache;
++      void (PCEFast_PSG::*noise_update)(const int32, psg_channel *) = &PCEFast_PSG::UpdateOutput_Noise;
+ 
+       ch->noisecount -= run_time;
+ 
+ #define CLOCK_LFSR(lfsr) { unsigned int newbit = ((lfsr >> 0) ^ (lfsr >> 1) ^ (lfsr >> 11) ^ (lfsr >> 12) ^ (lfsr >> 17)) & 1; lfsr = (lfsr >> 1) | (newbit << 17); }
+-      if(&PCEFast_PSG::UpdateOutput_Noise == ch->UpdateOutput)
++      if(noise_update == ch->UpdateOutput)
+       {
+          while(ch->noisecount <= 0)
+          {

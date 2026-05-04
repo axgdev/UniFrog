@@ -1,0 +1,32 @@
+From 6ac9164f3c0c0591a5e8d64419d1c6cdbbbe3718 Mon Sep 17 00:00:00 2001
+From: "Axel Garcia K." <git@axelgk.com>
+Date: Wed, 6 May 2026 09:11:34 +0000
+Subject: [PATCH 4/4] Allow external PCE Fast CHD support
+
+Add an EXTERNAL_CHD_MEDIA path for the SF2000 build so PCE Fast can compile CD/CHD access code while resolving libchdr and zlib from a shared archive supplied by the parent core build.
+---
+ Makefile.common | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/Makefile.common b/Makefile.common
+index 77cfda8..cffb4f3 100755
+--- a/Makefile.common
++++ b/Makefile.common
+@@ -132,6 +132,8 @@ ifeq ($(HAVE_CHD), 1)
+ 	ifeq ($(SYSTEM_LIBCHDR), 1)
+ 		INCFLAGS += $(shell pkg-config --cflags libchdr)
+ 		LIBS += $(shell pkg-config --libs libchdr)
++	else ifeq ($(EXTERNAL_CHD_MEDIA), 1)
++		INCFLAGS += $(EXTERNAL_CHD_INCFLAGS)
+ 	else
+ 		INCFLAGS += $(LIBCHDR_INCFLAGS)
+ 		SOURCES_C += $(LIBCHDR_SOURCES_C)
+@@ -140,6 +142,8 @@ ifeq ($(HAVE_CHD), 1)
+ 	ifeq ($(SYSTEM_ZLIB), 1)
+ 		INCFLAGS += $(shell pkg-config --cflags zlib)
+ 		LIBS += $(shell pkg-config --libs zlib)
++	else ifeq ($(EXTERNAL_CHD_MEDIA), 1)
++		INCFLAGS += $(EXTERNAL_ZLIB_INCFLAGS)
+ 	else
+ 		INCFLAGS  += $(ZLIB_INCFLAGS)
+ 		SOURCES_C += $(ZLIB_SOURCES_C)

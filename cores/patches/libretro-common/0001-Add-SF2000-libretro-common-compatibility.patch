@@ -1,0 +1,124 @@
+From 447fe1357bbafb33b3fce07ac444ece5bc51b924 Mon Sep 17 00:00:00 2001
+From: "Axel Garcia K." <git@axelgk.com>
+Date: Tue, 5 May 2026 18:57:42 +0000
+Subject: [PATCH 1/2] Add SF2000 libretro-common compatibility
+
+Disable host-only UTF-16, thread-attribute, truncate, and mmap assumptions that HCRTOS newlib does not provide. Use the SF2000 tick source for libretro-common timing, report a single CPU core, and route libco through the SF2000 setjmp/longjmp backend.
+---
+ encodings/encoding_utf.c | 3 +++
+ features/features_cpu.c  | 4 ++++
+ include/memmap.h         | 2 +-
+ libco/libco.c            | 2 ++
+ memmap/memmap.c          | 4 ++++
+ rthreads/rthreads.c      | 2 +-
+ vfs/vfs_implementation.c | 2 +-
+ 7 files changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/encodings/encoding_utf.c b/encodings/encoding_utf.c
+index 88f595c..26225bc 100644
+--- a/encodings/encoding_utf.c
++++ b/encodings/encoding_utf.c
+@@ -560,6 +560,7 @@ char *local_to_utf8_string_alloc(const char *str)
+ 	return NULL;
+ }
+ 
++#if !defined(SF2000)
+ /**
+  * utf8_to_utf16_string_alloc:
+  *
+@@ -680,3 +681,5 @@ char *utf16_to_utf8_string_alloc(const wchar_t *str)
+ 
+    return buf;
+ }
++
++#endif // !defined(SF2000)
+diff --git a/features/features_cpu.c b/features/features_cpu.c
+index 236b185..d296527 100644
+--- a/features/features_cpu.c
++++ b/features/features_cpu.c
+@@ -268,6 +268,8 @@ retro_time_t cpu_features_get_time_usec(void)
+    return uclock() * 1000000LL / UCLOCKS_PER_SEC;
+ #elif defined(ORBIS)
+    return sceKernelGetProcessTime();
++#elif defined(SF2000)
++   return os_get_tick_count() * 1000;
+ #else
+ #error "Your platform does not have a timer function implemented in cpu_features_get_time_usec(). Cannot continue."
+ #endif
+@@ -595,6 +597,8 @@ unsigned cpu_features_get_core_amount(void)
+    return amount;
+ #elif defined(_XBOX360)
+    return 3;
++#elif defined(SF2000)
++   return 1;
+ #else
+    /* No idea, assume single core. */
+    return 1;
+diff --git a/include/memmap.h b/include/memmap.h
+index 8897877..2681b90 100644
+--- a/include/memmap.h
++++ b/include/memmap.h
+@@ -26,7 +26,7 @@
+ #include <stdio.h>
+ #include <stdint.h>
+ 
+-#if defined(PSP) || defined(PS2) || defined(GEKKO) || defined(VITA) || defined(_XBOX) || defined(_3DS) || defined(WIIU) || defined(SWITCH) || defined(HAVE_LIBNX) || defined(__PS3__) || defined(__PSL1GHT__)
++#if defined(PSP) || defined(PS2) || defined(GEKKO) || defined(VITA) || defined(_XBOX) || defined(_3DS) || defined(WIIU) || defined(SWITCH) || defined(HAVE_LIBNX) || defined(__PS3__) || defined(__PSL1GHT__) || defined(SF2000)
+ /* No mman available */
+ #elif defined(_WIN32) && !defined(_XBOX)
+ #include <windows.h>
+diff --git a/libco/libco.c b/libco/libco.c
+index 44a65d5..1e83c32 100644
+--- a/libco/libco.c
++++ b/libco/libco.c
+@@ -37,6 +37,8 @@ void genode_free_secondary_stack(void *stack);
+     #include "scefiber.c"
+   #elif defined(__ARM_EABI__) || defined(__arm__)
+     #include "armeabi.c"
++  #elif defined(SF2000)
++    #include "../../../support/libretro-common/sf2000/libco/sjlj_sf2000.c"
+   #else
+     #include "sjlj.c"
+   #endif
+diff --git a/memmap/memmap.c b/memmap/memmap.c
+index 35d9d6d..8996786 100644
+--- a/memmap/memmap.c
++++ b/memmap/memmap.c
+@@ -111,7 +111,11 @@ int mprotect(void *addr, size_t len, int prot)
+ void* mmap(void *addr, size_t len, int prot, int flags,
+       int fildes, size_t offset)
+ {
++#if !defined(SF2000)
+    return malloc(len);
++#else
++   return calloc(len, 1);
++#endif
+ }
+ 
+ int munmap(void *addr, size_t len)
+diff --git a/rthreads/rthreads.c b/rthreads/rthreads.c
+index 3bb3a7e..50f90e2 100644
+--- a/rthreads/rthreads.c
++++ b/rthreads/rthreads.c
+@@ -158,7 +158,7 @@ sthread_t *sthread_create(void (*thread_func)(void*), void *userdata)
+ }
+ 
+ /* TODO/FIXME - this needs to be implemented for Switch/3DS */
+-#if !defined(SWITCH) && !defined(USE_WIN32_THREADS) && !defined(_3DS) && !defined(GEKKO) && !defined(__HAIKU__) && !defined(EMSCRIPTEN)
++#if !defined(SWITCH) && !defined(USE_WIN32_THREADS) && !defined(_3DS) && !defined(GEKKO) && !defined(__HAIKU__) && !defined(EMSCRIPTEN) && !defined(SF2000)
+ #define HAVE_THREAD_ATTR
+ #endif
+ 
+diff --git a/vfs/vfs_implementation.c b/vfs/vfs_implementation.c
+index 30449ad..cfc2dd3 100644
+--- a/vfs/vfs_implementation.c
++++ b/vfs/vfs_implementation.c
+@@ -734,7 +734,7 @@ int64_t retro_vfs_file_truncate_impl(libretro_vfs_implementation_file *stream, i
+ 	   return 0;
+    }
+ #endif
+-#elif !defined(VITA) && !defined(PSP) && !defined(PS2) && !defined(ORBIS) && (!defined(SWITCH) || defined(HAVE_LIBNX))
++#elif !defined(VITA) && !defined(PSP) && !defined(PS2) && !defined(ORBIS) && (!defined(SWITCH) || defined(HAVE_LIBNX)) && !defined(SF2000)
+    if (stream && stream->fp && ftruncate(fileno(stream->fp), (off_t)len) == 0)
+    {
+       stream->size = len;

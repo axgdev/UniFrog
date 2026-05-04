@@ -1,0 +1,41 @@
+From 6a5d363731c6cc3f7e5317f83fe2fb7bab94ea22 Mon Sep 17 00:00:00 2001
+From: "Axel Garcia K." <git@axelgk.com>
+Date: Tue, 5 May 2026 18:57:44 +0000
+Subject: [PATCH 2/4] Use int32 Tremor point accumulators
+
+Keep Tremor point intermediates at int32 width to match the fixed-point code path and avoid narrow int assumptions in the SF2000 toolchain.
+---
+ mednafen/tremor/sharedbook.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/mednafen/tremor/sharedbook.c b/mednafen/tremor/sharedbook.c
+index 454638e..9c5b920 100644
+--- a/mednafen/tremor/sharedbook.c
++++ b/mednafen/tremor/sharedbook.c
+@@ -225,11 +225,11 @@ int32_t *_book_unquantize(const static_codebook *b,int n,int *sparsemap,
+             for(j=0;j<b->entries;j++){
+                if((sparsemap && b->lengthlist[j]) || !sparsemap){
+                   int32_t last=0;
+-                  int lastpoint=0;
++                  int32_t lastpoint=0;
+                   int indexdiv=1;
+                   for(k=0;k<b->dim;k++){
+                      int index= (j/indexdiv)%quantvals;
+-                     int point=0;
++                     int32_t point=0;
+                      int val=VFLOAT_MULTI(delta,delpoint,
+                            abs(b->quantlist[index]),&point);
+ 
+@@ -260,10 +260,10 @@ int32_t *_book_unquantize(const static_codebook *b,int n,int *sparsemap,
+             for(j=0;j<b->entries;j++){
+                if((sparsemap && b->lengthlist[j]) || !sparsemap){
+                   int32_t last=0;
+-                  int         lastpoint=0;
++                  int32_t lastpoint=0;
+ 
+                   for(k=0;k<b->dim;k++){
+-                     int point=0;
++                     int32_t point=0;
+                      int val=VFLOAT_MULTI(delta,delpoint,
+                            abs(b->quantlist[j*b->dim+k]),&point);
+ 

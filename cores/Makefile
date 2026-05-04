@@ -282,15 +282,26 @@ init:
 	for spec in $(CORE_SPECS); do \
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
-		branch=$${rest%%|*}; \
+		url=$${rest%%|*}; rest=$${rest#*|}; \
+		commit=$${rest%%|*}; \
 		if test -d "$$dir/.git"; then \
-			echo "  FETCH   $$name $$branch"; \
-			git -C "$$dir" fetch --depth 1 origin "$$branch"; \
+			echo "  FETCH   $$name $$commit"; \
+			git -C "$$dir" remote set-url origin "$$url"; \
+			git -C "$$dir" fetch --depth 1 origin "$$commit"; \
 			git -C "$$dir" checkout -q FETCH_HEAD; \
 		else \
-			echo "  CLONE   $$name $$branch"; \
+			echo "  FETCH   $$name $$commit"; \
 			rm -rf "$$dir"; \
-			git clone --depth 1 --branch "$$branch" "$(CORE_SOURCE_URL)" "$$dir"; \
+			git init -q "$$dir"; \
+			git -C "$$dir" remote add origin "$$url"; \
+			git -C "$$dir" fetch --depth 1 origin "$$commit"; \
+			git -C "$$dir" checkout -q FETCH_HEAD; \
+		fi; \
+		git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
+		git -C "$$dir" reset --hard -q FETCH_HEAD; \
+		git -C "$$dir" clean -fdx -q; \
+		if ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
+			git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch; \
 		fi; \
 		git -C "$$dir" submodule update --init --recursive --depth 1 --jobs "$(JOBS)"; \
 	done
@@ -322,9 +333,10 @@ core-status:
 	for spec in $(CORE_SPECS); do \
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
-		branch=$${rest%%|*}; \
+		url=$${rest%%|*}; rest=$${rest#*|}; \
+		commit=$${rest%%|*}; \
 		head=$$(git -C "$$dir" rev-parse --short HEAD); \
-		echo "$$name branch=$$branch head=$$head dir=$$dir"; \
+		echo "$$name upstream=$$commit head=$$head dir=$$dir"; \
 	done
 
 diff-core:
@@ -333,8 +345,9 @@ diff-core:
 	for spec in $(CORE_SPECS); do \
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
-		branch=$${rest%%|*}; \
-		if test "$$name" = "$(CORE)"; then found=1; git -C "$$dir" diff "origin/$$branch..HEAD"; fi; \
+		url=$${rest%%|*}; rest=$${rest#*|}; \
+		commit=$${rest%%|*}; \
+		if test "$$name" = "$(CORE)"; then found=1; git -C "$$dir" diff "$$commit..HEAD"; fi; \
 	done; \
 	test "$$found" = 1 || { echo "unknown core: $(CORE)"; exit 1; }
 
@@ -344,8 +357,9 @@ log-core:
 	for spec in $(CORE_SPECS); do \
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
-		branch=$${rest%%|*}; \
-		if test "$$name" = "$(CORE)"; then found=1; git -C "$$dir" log --oneline -20 "origin/$$branch"; fi; \
+		url=$${rest%%|*}; rest=$${rest#*|}; \
+		commit=$${rest%%|*}; \
+		if test "$$name" = "$(CORE)"; then found=1; git -C "$$dir" log --oneline -20 "$$commit..HEAD"; fi; \
 	done; \
 	test "$$found" = 1 || { echo "unknown core: $(CORE)"; exit 1; }
 
@@ -355,11 +369,19 @@ update-core:
 	for spec in $(CORE_SPECS); do \
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
-		branch=$${rest%%|*}; \
+		url=$${rest%%|*}; rest=$${rest#*|}; \
+		commit=$${rest%%|*}; \
 		if test "$$name" = "$(CORE)"; then \
 			found=1; \
-			git -C "$$dir" fetch --depth 1 origin "$$branch"; \
+			git -C "$$dir" remote set-url origin "$$url"; \
+			git -C "$$dir" fetch --depth 1 origin "$$commit"; \
 			git -C "$$dir" checkout -q FETCH_HEAD; \
+			git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
+			git -C "$$dir" reset --hard -q FETCH_HEAD; \
+			git -C "$$dir" clean -fdx -q; \
+			if ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
+				git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch; \
+			fi; \
 			git -C "$$dir" submodule update --init --recursive --depth 1 --jobs "$(JOBS)"; \
 		fi; \
 	done; \

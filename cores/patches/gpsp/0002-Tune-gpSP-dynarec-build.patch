@@ -1,0 +1,31 @@
+From 0599ec42624e40eaa45ce8bc948584f01c9d2640 Mon Sep 17 00:00:00 2001
+From: "Axel Garcia K." <git@axelgk.com>
+Date: Wed, 6 May 2026 09:26:42 +0000
+Subject: [PATCH 2/2] Tune gpSP dynarec build
+
+Add a per-file optimization override for cpu_threaded.c so the SF2000 build can avoid GCC's expensive optimization pass on the generated dynarec translation unit while keeping the dynarec enabled.
+---
+ Makefile | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index f06310d..f7bae60 100644
+--- a/Makefile
++++ b/Makefile
+@@ -581,6 +581,7 @@ WARNINGS_DEFINES =
+ CODE_DEFINES =
+ 
+ COMMON_DEFINES += $(CODE_DEFINES) $(WARNINGS_DEFINES) -DNDEBUG=1 $(fpic)
++CPU_THREADED_OPTIMIZE ?= $(OPTIMIZE)
+ 
+ CFLAGS += $(DEFINES) $(COMMON_DEFINES)
+ 
+@@ -627,7 +628,7 @@ else
+ endif
+ 
+ cpu_threaded.o: cpu_threaded.c
+-	$(CC) $(INCFLAGS) $(CFLAGS) $(OPTIMIZE) -Wno-unused-variable -Wno-unused-label -c  -o $@ $<
++	$(CC) $(INCFLAGS) $(CFLAGS) $(CPU_THREADED_OPTIMIZE) -Wno-unused-variable -Wno-unused-label -c  -o $@ $<
+ 
+ %.o: %.S
+ 	$(CC) $(ASFLAGS) $(CFLAGS) $(OPTIMIZE) -c -o $@ $<

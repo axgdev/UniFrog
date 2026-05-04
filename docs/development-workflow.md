@@ -35,8 +35,9 @@ Fetched dependencies live under `.deps/` and are not committed:
 - `.deps/mquickjs`
 - `.deps/cores`
 
-Core sources are fetched directly from `cores/manifest.mk`. The manifest names
-the source branch for each core and `make deps-cores` updates those checkouts
+Core sources are fetched directly from the upstream repositories pinned in
+`cores/manifest.mk`. UniFrog changes are committed as patch series under
+`cores/patches/`, and `make deps-cores` applies them into `.deps/cores`
 without adding Git submodules to the app repository.
 
 ## Public History

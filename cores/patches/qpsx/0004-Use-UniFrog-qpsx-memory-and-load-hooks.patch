@@ -1,0 +1,160 @@
+From 7f51cbf4f2a2d5f6a630922a966c4d76edaa64ca Mon Sep 17 00:00:00 2001
+From: "Axel Garcia K." <git@axelgk.com>
+Date: Tue, 5 May 2026 18:57:45 +0000
+Subject: [PATCH 4/5] Use UniFrog qpsx memory and load hooks
+
+Disable the stock startup menu by default under UniFrog, avoid fixed-address memory assumptions from the multicore environment, and emit low-frequency load progress logs through the UniFrog callback.
+---
+ libretro/core/libretro-core.cpp | 36 ++++++++++++++++++++++++++++++++-
+ src/psxmem.cpp                  |  2 +-
+ 2 files changed, 36 insertions(+), 2 deletions(-)
+
+diff --git a/libretro/core/libretro-core.cpp b/libretro/core/libretro-core.cpp
+index 2690d49..6fb0bff 100644
+--- a/libretro/core/libretro-core.cpp
++++ b/libretro/core/libretro-core.cpp
+@@ -107,9 +107,12 @@ static void update_debug_log_state(int enabled)
+ 
+ /* v343: Only log when debug_log enabled (was always logging) */
+ #ifdef SF2000
++extern "C" void unifrog_core_load_progress(const char *stage, unsigned current, unsigned total);
+ #define XLOG(fmt, ...) do { if (g_debug_log_enabled) xlog("QPSX: " fmt "\n", ##__VA_ARGS__); } while(0)
++#define LOAD_STAGE(stage, current, total, fmt, ...) do { xlog("QPSX_LOAD: " fmt "\n", ##__VA_ARGS__); unifrog_core_load_progress(stage, current, total); } while(0)
+ #else
+ #define XLOG(fmt, ...) do { if (g_debug_log_enabled) printf("QPSX: " fmt "\n", ##__VA_ARGS__); } while(0)
++#define LOAD_STAGE(stage, current, total, fmt, ...) do { printf("QPSX_LOAD: " fmt "\n", ##__VA_ARGS__); } while(0)
+ #endif
+ 
+ /* Debug logs - only when enabled, write to file */
+@@ -690,7 +693,7 @@ extern "C" void retro_audio_cb(int16_t *buf, int samples)
+ #define QPSX_STARTUP_CONFIG_PATH "/mnt/sda1/cores/config/psx_startup.cfg"
+ 
+ /* v395: Global startup option - whether to open menu at startup */
+-static int g_menu_at_start = 1;  /* default: show menu at start */
++static int g_menu_at_start = 0;  /* UniFrog uses its own launch menu. */
+ 
+ /* ============== v353: BITFLAGS FOR BOOLEAN OPTIONS ============== */
+ /* Pack ON/OFF options into bytes instead of ints: 8 options = 1 byte vs 32 bytes
+@@ -2404,6 +2407,10 @@ static void save_startup_config(void)
+ 
+ static void load_startup_config(void)
+ {
++#ifdef SF2000
++    g_menu_at_start = 0;
++    return;
++#else
+     FILE *f = fopen(QPSX_STARTUP_CONFIG_PATH, "r");
+     if (!f) return;
+     char line[64];
+@@ -2414,6 +2421,7 @@ static void load_startup_config(void)
+         }
+     }
+     fclose(f);
++#endif
+ }
+ 
+ static void set_feedback(const char *msg)
+@@ -3807,9 +3815,14 @@ void retro_run(void)
+ 
+ bool retro_load_game(const struct retro_game_info *info)
+ {
++#ifdef SF2000
++    xlog_clear();
++#endif
++    LOAD_STAGE("QPSX_START", 1, 16, "start");
+     XLOG("=== retro_load_game() ===");
+ 
+     /* v395: Load startup config first (before game config) */
++    LOAD_STAGE("QPSX_STARTUP_CONFIG", 2, 16, "startup_config");
+     load_startup_config();
+ 
+     if (!info || !info->path) {
+@@ -3818,9 +3831,12 @@ bool retro_load_game(const struct retro_game_info *info)
+     }
+ 
+     XLOG("Loading: %s", info->path);
++    LOAD_STAGE("QPSX_PATH", 4, 16, "path=%s", info->path);
+     strncpy(game_path, info->path, sizeof(game_path) - 1);
+ 
++    LOAD_STAGE("QPSX_CONFIG", 5, 16, "config");
+     qpsx_load_config();
++    LOAD_STAGE("QPSX_APPLY_CONFIG", 6, 16, "apply_config");
+     qpsx_apply_config();
+ 
+ #ifdef PSXREC
+@@ -3888,30 +3904,44 @@ bool retro_load_game(const struct retro_game_info *info)
+         }
+     }
+ 
++    LOAD_STAGE("QPSX_PSX_INIT", 8, 16, "psxInit");
+     if (psxInit() == -1) {
+         XLOG("ERROR: psxInit() failed!");
++        LOAD_STAGE("QPSX_PSX_INIT_FAIL", 8, 16, "psxInit failed");
+         return false;
+     }
++    LOAD_STAGE("QPSX_PSX_INIT_OK", 9, 16, "psxInit ok");
+ 
++    LOAD_STAGE("QPSX_PLUGINS", 10, 16, "LoadPlugins");
+     if (LoadPlugins() == -1) {
+         XLOG("ERROR: LoadPlugins() failed!");
++        LOAD_STAGE("QPSX_PLUGINS_FAIL", 10, 16, "LoadPlugins failed");
+         return false;
+     }
++    LOAD_STAGE("QPSX_PLUGINS_OK", 11, 16, "LoadPlugins ok");
+ 
+     psx_initted = true;
+ 
+     SetIsoFile(game_path);
++    LOAD_STAGE("QPSX_CDR_OPEN", 12, 16, "CDR_open");
+     if (CDR_open() < 0) {
+         XLOG("ERROR: CDR_open() failed!");
++        LOAD_STAGE("QPSX_CDR_OPEN_FAIL", 12, 16, "CDR_open failed");
+         return false;
+     }
++    LOAD_STAGE("QPSX_CDR_OPEN_OK", 13, 16, "CDR_open ok");
+ 
++    LOAD_STAGE("QPSX_RESET", 14, 16, "psxReset");
+     psxReset();
++    LOAD_STAGE("QPSX_RESET_OK", 15, 16, "psxReset ok");
+ 
++    LOAD_STAGE("QPSX_CHECK_CD", 15, 16, "CheckCdrom");
+     if (CheckCdrom() == -1) {
+         XLOG("ERROR: CheckCdrom() failed!");
++        LOAD_STAGE("QPSX_CHECK_CD_FAIL", 15, 16, "CheckCdrom failed");
+         return false;
+     }
++    LOAD_STAGE("QPSX_CHECK_CD_OK", 15, 16, "CheckCdrom ok");
+ 
+     /* QPSX_277: FIX - Reinitialize timing after region detection! */
+     psxRcntReinitTiming();
+@@ -3923,13 +3953,17 @@ bool retro_load_game(const struct retro_game_info *info)
+ 
+ 
+     if (Config.HLE) {
++        LOAD_STAGE("QPSX_LOAD_CDROM", 15, 16, "LoadCdrom");
+         if (LoadCdrom() == -1) {
+             XLOG("ERROR: LoadCdrom() failed!");
++            LOAD_STAGE("QPSX_LOAD_CDROM_FAIL", 15, 16, "LoadCdrom failed");
+             return false;
+         }
++        LOAD_STAGE("QPSX_LOAD_CDROM_OK", 15, 16, "LoadCdrom ok");
+     }
+ 
+     XLOG("=== Game loaded! ===");
++    LOAD_STAGE("QPSX_DONE", 16, 16, "done");
+     return true;
+ }
+ 
+diff --git a/src/psxmem.cpp b/src/psxmem.cpp
+index 6e70c26..0c4bb00 100644
+--- a/src/psxmem.cpp
++++ b/src/psxmem.cpp
+@@ -111,7 +111,7 @@ bool psxH_allocated;
+  */
+ #define QPSX_FIXED_PSXM_ADDR    0x85000000
+ #define QPSX_FIXED_PSXM_SIZE    0x200000    /* 2MB PSX RAM */
+-#define QPSX_USE_FIXED_ADDR     1           /* 1=use fixed, 0=use malloc */
++#define QPSX_USE_FIXED_ADDR     0           /* 1=use fixed, 0=use malloc */
+ 
+ /* Track if we're using fixed address (to prevent free() on fixed addr) */
+ static bool psxM_is_fixed_addr = false;

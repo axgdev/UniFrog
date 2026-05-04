@@ -1,0 +1,45 @@
+From 1308011ceea34c36914686ba51841a20e6ea674b Mon Sep 17 00:00:00 2001
+From: "Axel Garcia K." <git@axelgk.com>
+Date: Tue, 5 May 2026 18:57:42 +0000
+Subject: [PATCH] Add SF2000 static Gambatte build
+
+Add a Makefile.libretro platform that builds a static MIPS32 soft-float archive for UniFrog, disables exceptions and RTTI, and keeps the SF2000-specific compiler flags behind the existing platform switch.
+---
+ Makefile.libretro | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/Makefile.libretro b/Makefile.libretro
+index 1842538..0d5da02 100644
+--- a/Makefile.libretro
++++ b/Makefile.libretro
+@@ -398,6 +398,18 @@ else ifeq ($(platform), retrofw)
+    CFLAGS += -fomit-frame-pointer -ffast-math -march=mips32 -mtune=mips32 -mhard-float
+    CXXFLAGS += $(CFLAGS)
+ 
++else ifeq ($(platform), sf2000)
++   TARGET := $(TARGET_NAME)_libretro_sf2000.a
++   CC = $(MIPS)gcc
++   CXX = $(MIPS)g++
++   AR = $(MIPS)ar
++   CFLAGS += -EL -march=mips32 -mtune=mips32 -msoft-float -G0 -mno-abicalls -fno-pic
++   CFLAGS += -ffast-math -fomit-frame-pointer -ffunction-sections -fdata-sections
++   CFLAGS += -fno-unwind-tables -fno-asynchronous-unwind-tables
++   CXXFLAGS += $(CFLAGS) -fno-exceptions -fno-rtti
++   PLATFORM_DEFINES := -DSF2000
++   STATIC_LINKING = 1
++
+ # MIYOO
+ else ifeq ($(platform), miyoo)
+    TARGET := $(TARGET_NAME)_libretro.so
+@@ -656,6 +668,11 @@ endif
+    CXXFLAGS += -O2 -DNDEBUG
+ endif
+ 
++ifeq ($(platform), sf2000)
++   CFLAGS += -Os
++   CXXFLAGS += -Os
++endif
++
+ ifeq (,$(findstring msvc,$(platform)))
+ CXXFLAGS += -fno-exceptions -fno-rtti
+ CXXFLAGS += -std=c++98
