@@ -1,4 +1,4 @@
-name: SD card package
+name: Commit smoke
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  sdcard-zip:
+  commit-smoke:
     runs-on: ubuntu-latest
     container:
       image: alpine:latest
@@ -17,16 +17,17 @@ jobs:
       - name: Check out UniFrog
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: false
 
       - name: Cache ccache
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: unifrog-ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
+          key: unifrog-smoke-ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            unifrog-ccache-${{ runner.os }}-${{ github.ref_name }}-
-            unifrog-ccache-${{ runner.os }}-
+            unifrog-smoke-ccache-${{ runner.os }}-${{ github.ref_name }}-
+            unifrog-smoke-ccache-${{ runner.os }}-
 
       - name: Cache core sources
         uses: actions/cache@v4
@@ -46,13 +47,20 @@ jobs:
           restore-keys: |
             unifrog-toolchain-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Build SD card package
+      - name: Check each commit
         run: |
           export CCACHE_DIR="$PWD/.ccache"
-          make ci-sd-zip HOSTCC=tcc CCACHE=ccache TOOLCHAIN="$PWD/toolchain"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            range="${{ github.event.pull_request.base.sha }}..HEAD"
+          else
+            case "${{ github.event.before }}" in
+              0000000000000000000000000000000000000000) range="HEAD" ;;
+              *) range="${{ github.event.before }}..HEAD" ;;
+            esac
+          fi
 
-      - name: Upload SD card package
-        uses: actions/upload-artifact@v4
-        with:
-          name: UniFrog-sdcard
-          path: UniFrog-local-sdcard.zip
+          for commit in $(git rev-list --reverse "$range"); do
+            echo "Checking $commit"
+            git checkout --detach "$commit"
+            make ci-commit-check HOSTCC=tcc CCACHE=ccache TOOLCHAIN="$PWD/toolchain"
+          done
