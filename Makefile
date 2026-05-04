@@ -1,5 +1,6 @@
 TOOLCHAIN ?= /opt/mipsel-mti-elf
-TOOLCHAIN_HOST_ARCH := $(shell case "$$(uname -m)" in aarch64|arm64) echo arm64 ;; x86_64|amd64) echo x86_64 ;; *) uname -m ;; esac)
+TOOLCHAIN_UNAME_M := $(shell uname -m)
+TOOLCHAIN_HOST_ARCH := $(if $(filter aarch64 arm64,$(TOOLCHAIN_UNAME_M)),arm64,$(if $(filter x86_64 amd64,$(TOOLCHAIN_UNAME_M)),x86_64,$(TOOLCHAIN_UNAME_M)))
 TOOLCHAIN_URL ?= https://github.com/axgdev/frog-toolchain/releases/download/v1.1.1/toolchain-stable-static-$(TOOLCHAIN_HOST_ARCH)-gcc15.2.0-binutils2.45-newlib4.5.0.20241231.tar.xz
 CROSS_COMPILE ?= $(TOOLCHAIN)/bin/mipsel-mti-elf-
 DEPS ?= .deps
