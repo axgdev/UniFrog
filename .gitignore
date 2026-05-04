@@ -1,0 +1,16 @@
+/bl/
+/.deps/
+/output/
+/build/
+/config.mk
+/asdpack
+/bisrv*.asd
+/fastboot*.asd
+*.o
+*.d
+*.out
+*.map
+*.bin
+*.dtb
+*.dts.tmp
+*.pre.tmp
