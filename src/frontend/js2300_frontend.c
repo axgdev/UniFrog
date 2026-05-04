@@ -111,8 +111,6 @@ struct frontend_index_scan {
    uint32_t media_bytes;
 };
 
-static void frontend_draw_status(struct js2300_frontend *frontend,
-   const char *title, const char *detail);
 static void frontend_configure_host(struct js2300_frontend *frontend,
    struct js2300_host *host);
 static int run_requested_action(struct js2300_frontend *frontend);
@@ -553,7 +551,6 @@ static void frontend_fb_reopen(struct js2300_frontend *frontend, const char *tag
    unifrog_fb_close(&frontend->fb);
    if (frontend_fb_open(frontend) == 0) {
       printf("unifrog js fb reopen tag=%s ret=0\n", tag ? tag : "none");
-      frontend_draw_status(frontend, "RETURNING TO MENU", "JS FRONTEND");
    } else {
       printf("unifrog js fb reopen tag=%s ret=-1\n", tag ? tag : "none");
    }
@@ -729,27 +726,6 @@ static int host_video_font(void *opaque, const char *path)
    ret = unifrog_gfx_load_font5x7_file(path);
    printf("js2300 font load path=%s ret=%d\n", path ? path : "?", ret);
    return ret;
-}
-
-static void frontend_draw_status(struct js2300_frontend *frontend,
-   const char *title, const char *detail)
-{
-   for (unsigned i = 0; i < frontend->fb.buffer_count; i++) {
-      struct unifrog_surface surface =
-         unifrog_fb_surface_for_buffer(&frontend->fb, i);
-
-      unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height,
-         UNIFROG_RGB565(7, 10, 14));
-      unifrog_gfx_draw_text(&surface, 18, 70,
-         title ? title : "LOADING MENU", UNIFROG_RGB565(235, 241, 246), 2);
-      if (detail && detail[0])
-         unifrog_gfx_draw_text(&surface, 18, 104, detail,
-            UNIFROG_RGB565(150, 166, 180), 1);
-      unifrog_fb_flush_buffer(&frontend->fb, i);
-   }
-   (void)unifrog_fb_pan(&frontend->fb, 0);
-   frontend->draw_buffer = 0;
-   frontend->frame_open = 0;
 }
 
 static uint32_t host_input_poll(void *opaque)
@@ -1346,12 +1322,16 @@ static void system_check_write_report(const struct system_check_report *report,
    }
 }
 
-static int run_system_check(struct js2300_frontend *frontend)
+static int run_system_check(void)
 {
    static const char *required_files[] = {
       "/media/mmcblk0/bios/bisrv.asd",
       "/media/mmcblk0/firmware/unifrog.bin",
       JS2300_FRONTEND_APP_ROOT "/main.js",
+      JS2300_FRONTEND_APP_ROOT "/app/theme.js",
+      JS2300_FRONTEND_APP_ROOT "/app/constants.js",
+      JS2300_FRONTEND_APP_ROOT "/app/catalog.js",
+      JS2300_FRONTEND_APP_ROOT "/app/app.js",
       JS2300_FRONTEND_APP_ROOT "/manifest.ini",
       JS2300_FRONTEND_APP_ROOT "/scripts/smoke-test.js",
       JS2300_FRONTEND_APP_ROOT "/themes/default.ini",
@@ -1373,7 +1353,6 @@ static int run_system_check(struct js2300_frontend *frontend)
    };
    char manifest[2048];
    char dirty[16];
-   char detail[64];
    struct system_check_report report;
    unsigned stale = 0;
    unsigned missing = 0;
@@ -1418,15 +1397,6 @@ static int run_system_check(struct js2300_frontend *frontend)
       missing, stale);
    system_check_write_report(&report, missing, stale);
    (void)unifrog_log_flush();
-   if (missing || stale) {
-      snprintf(detail, sizeof(detail), "%u missing  %u stale",
-         missing, stale);
-      frontend_draw_status(frontend, "SD FILES NEED REFRESH", detail);
-   } else {
-      frontend_draw_status(frontend, "SYSTEM CHECK OK",
-         "SD files match this build");
-   }
-   msleep(1700);
    return 0;
 }
 
@@ -1683,7 +1653,7 @@ static int run_requested_action(struct js2300_frontend *frontend)
       return -1;
    }
    if (strcmp(frontend->action, "system_check") == 0) {
-      int ret = run_system_check(frontend);
+      int ret = run_system_check();
 
       frontend_fb_reopen(frontend, "system_check_return");
       return ret;
@@ -1691,7 +1661,7 @@ static int run_requested_action(struct js2300_frontend *frontend)
    return -1;
 }
 
-int js2300_frontend_core_main(void)
+int js2300_frontend_main(void)
 {
    struct js2300_frontend frontend;
    struct js2300_config config;
@@ -1707,9 +1677,6 @@ int js2300_frontend_core_main(void)
    if (frontend_fb_open(&frontend) != 0)
       return -1;
    printf("unifrog boot_time stage=js_fb_ready total_ms=%lu\n",
-      (unsigned long)(unifrog_perf_time_ms() - frontend_start_ms));
-   frontend_draw_status(&frontend, "LOADING MENU", "JS FRONTEND");
-   printf("unifrog boot_time stage=loading_screen total_ms=%lu\n",
       (unsigned long)(unifrog_perf_time_ms() - frontend_start_ms));
 
    js2300_config_init(&config);

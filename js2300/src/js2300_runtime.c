@@ -76,7 +76,7 @@ static struct js2300_runtime *active_runtime;
 
 const char *js2300_version_string(void)
 {
-   return "0.6.0";
+   return "0.7.0";
 }
 
 int js2300_config_init(struct js2300_config *config)
@@ -133,24 +133,48 @@ static void js2300_note_native_call(struct js2300_runtime *runtime)
    runtime->native_call_count++;
 }
 
+static char *build_script_path(const struct js2300_config *config,
+                               const char *script_path);
+
 static char *build_entry_path(const struct js2300_config *config)
 {
+   if (!config)
+      return NULL;
+   return build_script_path(config, config->entry_script);
+}
+
+static char *build_script_path(const struct js2300_config *config,
+                               const char *script_path)
+{
    size_t root_len;
-   size_t entry_len;
+   size_t script_len;
+   size_t slash_len;
    char *path;
 
-   if (!config || !config->app_root || !config->entry_script)
+   if (!config || !script_path || !script_path[0])
+      return NULL;
+   if (script_path[0] == '/') {
+      script_len = strlen(script_path);
+      path = (char *)malloc(script_len + 1);
+      if (!path)
+         return NULL;
+      memcpy(path, script_path, script_len + 1);
+      return path;
+   }
+   if (!config->app_root)
       return NULL;
 
    root_len = strlen(config->app_root);
-   entry_len = strlen(config->entry_script);
-   path = (char *)malloc(root_len + entry_len + 2);
+   script_len = strlen(script_path);
+   slash_len = root_len > 0 && config->app_root[root_len - 1] != '/' ? 1u : 0u;
+   path = (char *)malloc(root_len + slash_len + script_len + 1);
    if (!path)
       return NULL;
 
    memcpy(path, config->app_root, root_len);
-   path[root_len] = '/';
-   memcpy(path + root_len + 1, config->entry_script, entry_len + 1);
+   if (slash_len)
+      path[root_len++] = '/';
+   memcpy(path + root_len, script_path, script_len + 1);
    return path;
 }
 
@@ -1163,11 +1187,42 @@ static JSValue js_gc(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 
 static JSValue js_load(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-   (void)ctx;
+   JSCStringBuf script_buf;
+   const char *script_name;
+   char *path;
+   char *script;
+   size_t script_len;
+   JSValue ret;
+
    (void)this_val;
-   (void)argc;
-   (void)argv;
-   return JS_ThrowInternalError(ctx, "load() is not enabled in this JS2300 build");
+
+   if (!active_runtime)
+      return JS_ThrowInternalError(ctx, "load() has no active JS2300 runtime");
+   if (argc < 1)
+      return JS_ThrowInternalError(ctx, "load() requires a script path");
+
+   script_name = JS_ToCString(ctx, argv[0], &script_buf);
+   if (!script_name)
+      return JS_EXCEPTION;
+
+   path = build_script_path(&active_runtime->config, script_name);
+   if (!path)
+      return JS_ThrowInternalError(ctx, "load() could not resolve script path");
+
+   script = read_file(path, JS2300_MAX_SCRIPT_BYTES, &script_len);
+   if (!script) {
+      char line[192];
+      snprintf(line, sizeof(line), "js2300 load failed path=%s errno=%d",
+               path, errno);
+      host_log(active_runtime, line);
+      free(path);
+      return JS_ThrowInternalError(ctx, "load() could not read script");
+   }
+
+   ret = JS_Eval(ctx, script, script_len, path, 0);
+   free(script);
+   free(path);
+   return ret;
 }
 
 static JSValue js_setTimeout(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)

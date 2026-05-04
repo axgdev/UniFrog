@@ -19,6 +19,8 @@ Keep this repository small and direct.
 ## Scope
 
 - Build the native SF2000 `bisrv.asd` and SD-card package.
+- Keep UI screens in `frontend/main.js` and `frontend/app/*.js`; native code
+  should expose fast bindings, launch actions, diagnostics, and crash handling.
 - Keep the mixed-license HCRTOS SDK in the `unifrog-hcrtos-sdk` submodule.
 - Fetch external source dependencies with `make deps`; do not commit `.deps`,
   generated outputs, downloaded toolchains, or upstream core/MQuickJS checkouts.

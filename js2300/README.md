@@ -28,6 +28,9 @@ make -C js2300 MQUICKJS_DIR=/path/to/mquickjs check
 
 `make check` builds the runtime and verifies that the embedded JavaScript
 standard-library source compiles with the configured MQuickJS checkout.
+The global `load("relative/path.js")` helper evaluates scripts relative to the
+current app root, which lets the SD-card frontend stay modular without a
+bundling step.
 
 ## Contract
 

@@ -10,8 +10,13 @@ HOSTCC ?= cc
 HOST_NO_PIE := $(if $(findstring tcc,$(notdir $(HOSTCC))),,-no-pie)
 MQJS_BUILD := $(OUT)/mqjs-build
 MQJS := $(MQJS_BUILD)/mqjs
+APP_FILES := \
+	$(APP_DIR)/theme.js \
+	$(APP_DIR)/constants.js \
+	$(APP_DIR)/catalog.js \
+	$(APP_DIR)/app.js
 THEME_FILES := $(shell find $(THEME_DIR) -type f 2>/dev/null)
-JS_FILES := main.js $(wildcard $(APP_DIR)/*.js) \
+JS_FILES := main.js $(APP_FILES) \
 	$(filter %.js,$(THEME_FILES)) $(wildcard $(SCRIPT_DIR)/*.js)
 JS_BYTECODE := $(patsubst %.js,$(OUT)/lint/%.mqbc,$(JS_FILES))
 JS_COMPAT_STAMP := $(OUT)/lint/js-compat.stamp
@@ -36,15 +41,19 @@ print-config:
 
 check: $(JS_BYTECODE) $(JS_COMPAT_STAMP)
 	@test -f main.js
-	@test -f $(APP_DIR)/shell.js
-	@test -f $(THEME_DIR)/default.js
+	@test -f $(APP_DIR)/app.js
+	@test -f $(APP_DIR)/theme.js
+	@test -f $(APP_DIR)/constants.js
+	@test -f $(APP_DIR)/catalog.js
+	@test -f $(THEME_DIR)/default.ini
 	@echo "OK"
 
 package: check $(THEME_FILES)
+	@rm -rf $(PACKAGE)
 	@mkdir -p $(PACKAGE)
 	@cp main.js $(PACKAGE)/
 	@mkdir -p $(PACKAGE)/$(APP_DIR) $(PACKAGE)/$(THEME_DIR) $(PACKAGE)/$(SCRIPT_DIR)
-	@cp $(APP_DIR)/*.js $(PACKAGE)/$(APP_DIR)/
+	@cp $(APP_FILES) $(PACKAGE)/$(APP_DIR)/
 	@cp -R $(THEME_DIR)/. $(PACKAGE)/$(THEME_DIR)/
 	@cp $(SCRIPT_DIR)/*.js $(PACKAGE)/$(SCRIPT_DIR)/
 

@@ -36,7 +36,6 @@ OUT := output
 TARGET := sf2000
 ASD := bisrv.asd
 FASTBOOT_ASD := fastboot.asd
-FASTBOOT_PAYLOAD ?= full
 FRONTEND_PACKAGE := $(OUT)/sdcard/unifrog
 CORE_PACKAGE := $(OUT)/sdcard/unifrog/cores
 FRONTEND_MANIFEST := $(FRONTEND_PACKAGE)/manifest.ini
@@ -243,20 +242,12 @@ WHOLE_LIBS := \
 
 APP_OBJECTS := \
 	$(BUILD)/main.o \
-	$(BUILD)/frontend/frontend_core.o \
 	$(BUILD)/frontend/js2300_frontend.o
-
-SHELL_APP_OBJECTS := \
-	$(BUILD)/main_shell.o \
-	$(BUILD)/test_frontend/boot_shell.o
 
 BUILD_IDENTITY_STAMP := $(BUILD)/build-identity.stamp
 BUILD_IDENTITY_OBJECTS := \
 	$(BUILD)/main.o \
-	$(BUILD)/main_shell.o \
-	$(BUILD)/unifrog_libretro_host.o \
-	$(BUILD)/test_frontend/boot_shell.o \
-	$(BUILD)/test_frontend/test_frontend.o
+	$(BUILD)/unifrog_libretro_host.o
 
 # These objects print build identity in device logs. Rebuild them only when the
 # embedded identity changes, and let dependent core modules relink from the
@@ -309,8 +300,6 @@ UNIFROG_OBJECTS += $(LZ4_OBJS) $(ZSTD_DECODER_OBJ)
 LIBUNIFROG := $(OUT)/libunifrog.a
 LIBJS2300 := $(JS2300)/output/libjs2300.a
 LIBRETRO_COMMON_LIB := $(CORES)/output/libretro-common-sf2000.a
-SHELL_OUT := $(OUT)/unifrog-shell.out
-SHELL_BIN := $(OUT)/unifrog-shell.bin
 FASTBOOT_STAGE_OUT := $(OUT)/fastboot-stage1.out
 FASTBOOT_STAGE_BIN := $(BUILD)/fastboot/stage1.bin
 FASTBOOT_STUB_OUT := $(OUT)/fastboot-stub.out
@@ -424,32 +413,8 @@ FASTBOOT_CFLAGS := -EL $(ARCH_CFLAGS) -Os -pipe -msoft-float -fsigned-char -W \
 	-ffreestanding -fno-builtin -fno-pic -mno-abicalls \
 	-nostdinc -I$(GCC_LIBDIR)/include
 
-SHELL_LDLIBS := \
-	-lge \
-	-lviddrv \
-	-lviddrv_imagedec \
-	-lviddrv_mpeg2dec \
-	-lauddrv \
-	-lauddsp \
-	-ldsc \
-	-lusbdrv \
-	-lusbdrv_hid \
-	-lkernel \
-	-llnx \
-	-lpthread \
-	-lm \
-	-lc \
-	-lgcc
-
-SHELL_WHOLE_LIBS := \
-	-lntfs \
-	-lmmc \
-	-lmmchosthc15 \
-	-lefuse
-
 ifeq ($(EMBED_DTB),1)
 APP_OBJECTS += $(DTB_OBJ)
-SHELL_APP_OBJECTS += $(DTB_OBJ)
 endif
 
 .DELETE_ON_ERROR:
@@ -795,16 +760,6 @@ $(BUILD)/%.o: src/%.S | $(BUILD)
 	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) $(CFLAGS) -D__ASSEMBLY__ -MD -MP -c $< -o $@
 
-$(BUILD)/main_shell.o: src/main.c | $(BUILD)
-	@echo "  CC      $<"
-	$(Q)mkdir -p $(dir $@)
-	$(Q)$(CC) $(CFLAGS) -DUNIFROG_BOOT_SHELL=1 -MD -MP -c $< -o $@
-
-$(BUILD)/test_frontend/test_frontend.o: src/test_frontend/test_frontend.c $(BUILD_IDENTITY_STAMP) | $(BUILD)
-	@echo "  CC      $<"
-	$(Q)mkdir -p $(dir $@)
-	$(Q)$(CC) $(CFLAGS) -MD -MP -c $< -o $@
-
 $(FASTBOOT_STAGE_OBJ): src/fastboot/stage1.c | $(BUILD)
 	@echo "  CC      $<"
 	$(Q)mkdir -p $(dir $@)
@@ -949,14 +904,6 @@ $(OUT)/$(TARGET).bin: $(OUT)/$(TARGET).out
 	@echo "  OBJCOPY $@"
 	$(Q)$(OBJCOPY) -O binary $< $@
 
-$(SHELL_OUT): $(SHELL_APP_OBJECTS) $(LIBUNIFROG) | $(OUT) sdk
-	@echo "  LD      $@"
-	$(Q)$(LD) $(LDFLAGS) -o $@ -Map $@.map --start-group $^ $(SHELL_LDLIBS) --whole-archive $(SHELL_WHOLE_LIBS) --no-whole-archive --end-group
-
-$(SHELL_BIN): $(SHELL_OUT)
-	@echo "  OBJCOPY $@"
-	$(Q)$(OBJCOPY) -O binary $< $@
-
 $(ASDPACK): tools/asdpack.c | $(BUILD)
 	@echo "  HOSTCC  $<"
 	$(Q)$(HOSTCC) $(HOSTCFLAGS) $< -o $@
@@ -965,17 +912,9 @@ $(ASD): $(OUT)/$(TARGET).bin $(ASDPACK)
 	@echo "  PACK    $@"
 	$(Q)$(ASDPACK) $< $@
 
-ifeq ($(FASTBOOT_PAYLOAD),full)
 $(OUT)/unifrog.bin: $(OUT)/$(TARGET).bin FORCE | $(OUT)
 	@echo "  COPY    $@"
 	$(Q)cp $< $@
-else ifeq ($(FASTBOOT_PAYLOAD),shell)
-$(OUT)/unifrog.bin: $(SHELL_BIN) FORCE | $(OUT)
-	@echo "  COPY    $@"
-	$(Q)cp $< $@
-else
-$(error FASTBOOT_PAYLOAD must be shell or full)
-endif
 
 FORCE:
 
@@ -1004,9 +943,7 @@ fastboot-check: fastboot core-package
 	$(Q)$(ASDPACK) --check $(FASTBOOT_ASD)
 	@echo "  OK      $(FASTBOOT_ASD)"
 
-ifeq ($(FASTBOOT_PAYLOAD),full)
 fastboot-check: layout-check
-endif
 
 layout-check: $(OUT)/$(TARGET).out $(LIBRETRO_CORE_MODULE_OUTS)
 	@echo "  CHECK   link layout"

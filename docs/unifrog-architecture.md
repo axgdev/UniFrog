@@ -26,7 +26,8 @@ output/sdcard/unifrog/            SD-card frontend and core package
 
 `js2300/` embeds MQuickJS and registers native bindings. `frontend/` contains
 the editable JavaScript UI, themes, and smoke-test scripts installed under
-`/unifrog` on the SD card.
+`/unifrog` on the SD card. Native code provides high-throughput bindings; UI
+screens belong in JavaScript.
 
 Updating JavaScript or themes should not require relinking firmware. Updating
 native bindings, runtime modules, or ABI headers requires a rebuild.

@@ -11,7 +11,7 @@
 
 #include <pthread.h>
 
-#include <frontend/frontend_core.h>
+#include <frontend/js2300_frontend.h>
 #include <unifrog/log.h>
 #include <unifrog/perf.h>
 #include <unifrog/platform.h>
@@ -60,11 +60,7 @@ static void *frontend_thread(void *arg)
    thread_start_ms = unifrog_perf_time_ms();
    unifrog_platform_init_board();
    board_ready_ms = unifrog_perf_time_ms();
-#ifdef UNIFROG_BOOT_SHELL
-   storage_ready = -2;
-#else
    storage_ready = unifrog_platform_wait_for_storage();
-#endif
    storage_done_ms = unifrog_perf_time_ms();
 
    if (storage_ready == 0) {
@@ -90,7 +86,7 @@ static void *frontend_thread(void *arg)
       UNIFROG_GIT_COMMIT, UNIFROG_GIT_DIRTY,
       UNIFROG_SDK_GIT_COMMIT, UNIFROG_CORES_GIT_COMMIT,
       UNIFROG_JS2300_GIT_COMMIT, UNIFROG_FRONTEND_GIT_COMMIT);
-   frontend_core_main();
+   js2300_frontend_main();
 
    unifrog_platform_idle_forever();
    return NULL;
@@ -124,11 +120,7 @@ static int start_frontend_thread(void)
 
 static int sf2000_start(void)
 {
-#ifdef UNIFROG_BOOT_SHELL
-   return 0;
-#else
    return start_frontend_thread();
-#endif
 }
 
 __initcall(sf2000_start)

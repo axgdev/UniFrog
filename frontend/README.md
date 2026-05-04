@@ -8,6 +8,7 @@ audio, content launch, battery, standby, firmware handoff, and logging.
 
 ```text
 app/        JavaScript UI files
+main.js     Small loader that loads app modules
 scripts/    Device smoke-test scripts
 themes/     User-editable color themes and icons
 Makefile    Syntax checks and package assembly
@@ -24,6 +25,9 @@ Installed SD-card layout:
 /unifrog/user/
 ```
 
+`main.js` loads `app/theme.js`, `app/constants.js`, `app/catalog.js`, and
+`app/app.js` in order. Put UI behavior in `app/app.js`, editable menu data and
+core lists in `app/catalog.js`, and default visual values in `app/theme.js`.
 Runtime settings live in `/unifrog/settings.ini`. Users can override colors by
 placing `/unifrog/theme.ini` on the SD card with the same keys as
 `themes/default.ini`.
@@ -40,9 +44,9 @@ accept absolute paths or paths relative to `icon_root`.
 
 ## Development
 
-Normal UI edits do not use transpilation. `make check` builds a local `mqjs`
-from the configured MQuickJS checkout and compiles every shipped JavaScript file
-to 32-bit MQuickJS bytecode.
+Normal UI edits do not use transpilation or bundling. JS2300 supports
+`load("relative/path.js")` relative to `/unifrog`, and `make check` compiles
+every shipped JavaScript file to 32-bit MQuickJS bytecode.
 
 ```sh
 make -C frontend help

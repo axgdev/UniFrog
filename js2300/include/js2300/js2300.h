@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 #define JS2300_API_VERSION_MAJOR 0u
-#define JS2300_API_VERSION_MINOR 6u
+#define JS2300_API_VERSION_MINOR 7u
 #define JS2300_API_VERSION_PATCH 0u
 
 #define JS2300_API_VERSION_ENCODE(major, minor, patch) \

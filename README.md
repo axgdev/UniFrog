@@ -73,7 +73,7 @@ change, run `make clean && make verify`.
 board/                 Local SF2000 device tree input
 cores/                 Libretro source manifest, patches, and core build
 docs/                  Hardware, ABI, loader, and diagnostics notes
-frontend/              Editable JavaScript frontend and themes
+frontend/              Modular JavaScript frontend and themes
 include/unifrog/       Public UniFrog C interfaces
 js2300/                MQuickJS embedding layer
 linker/                HCRTOS/SF2000 linker scripts
