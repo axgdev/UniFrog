@@ -5,7 +5,7 @@ JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || ec
 CCACHE ?=
 CCACHE_PREFIX := $(if $(CCACHE),$(CCACHE) )
 Q := $(if $(V),,@)
-PIN_MODE ?= $(if $(MODE),$(MODE),head)
+PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 
 include manifest.mk
 
@@ -304,8 +304,9 @@ help:
 	@echo ""
 	@echo "Patch maintenance:"
 	@echo "  make -C cores core-status"
-	@echo "  make -C cores pin-status MODE=head"
-	@echo "  make -C cores upgrade-pins MODE=tag"
+	@echo "  make -C cores pin-status            Compare pins using manifest policy"
+	@echo "  make -C cores upgrade-pins          Update pins using manifest policy"
+	@echo "  make -C cores pin-status MODE=head  Override policy for one check"
 	@echo "  make -C cores diff-core CORE=gpsp"
 	@echo "  make -C cores log-core CORE=gpsp"
 	@echo "  make -C cores update-core CORE=gpsp"
@@ -328,6 +329,7 @@ support-init:
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
 		url=$${rest%%|*}; rest=$${rest#*|}; \
+		policy=$${rest%%|*}; rest=$${rest#*|}; \
 		commit=$${rest%%|*}; rest=$${rest#*|}; \
 		sparse=$$rest; \
 		if test -d "$$dir/.git"; then \
@@ -366,6 +368,7 @@ init: support-init
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
 		url=$${rest%%|*}; rest=$${rest#*|}; \
+		policy=$${rest%%|*}; rest=$${rest#*|}; \
 		commit=$${rest%%|*}; rest=$${rest#*|}; \
 		sparse=$$rest; \
 		if test -d "$$dir/.git"; then \
@@ -458,15 +461,16 @@ core-status:
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
 		url=$${rest%%|*}; rest=$${rest#*|}; \
+		policy=$${rest%%|*}; rest=$${rest#*|}; \
 		commit=$${rest%%|*}; \
 		head=$$(git -C "$$dir" rev-parse --short HEAD); \
-		echo "$$name upstream=$$commit head=$$head dir=$$dir"; \
+		echo "$$name policy=$$policy upstream=$$commit head=$$head dir=$$dir"; \
 	done
 
 pin-status:
 	@set -e; \
-	mode="$(PIN_MODE)"; \
-	case "$$mode" in head|tag) ;; *) echo "MODE must be head or tag"; exit 1;; esac; \
+	mode_override="$(PIN_MODE)"; \
+	case "$$mode_override" in policy|head|tag) ;; *) echo "MODE must be policy, head, or tag"; exit 1;; esac; \
 	resolve_ref() { \
 		url="$$1"; mode="$$2"; \
 		if test "$$mode" = tag; then \
@@ -487,22 +491,19 @@ pin-status:
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
 		url=$${rest%%|*}; rest=$${rest#*|}; \
+		policy=$${rest%%|*}; rest=$${rest#*|}; \
 		commit=$${rest%%|*}; \
+		mode="$$mode_override"; \
+		if test "$$mode" = policy; then mode="$$policy"; fi; \
+		case "$$mode" in head|tag) ;; *) echo "$$name: policy must be head or tag"; exit 1;; esac; \
 		set -- $$(resolve_ref "$$url" "$$mode"); \
-		if test "$$mode" = tag && test "$$2" = tag; then \
-			head_ref=$$(git ls-remote "$$url" HEAD | awk '/^[0-9a-f]/ { print $$1; exit }'); \
-			if test "$$commit" = "$$head_ref" && test "$$1" != "$$commit"; then \
-				printf '%-16s pinned=%s latest=%s source=head:%s latest_tag=%s\n' "$$name" "$$commit" "$$commit" "$${head_ref:+current}" "$$3"; \
-				continue; \
-			fi; \
-		fi; \
-		printf '%-16s pinned=%s latest=%s source=%s:%s\n' "$$name" "$$commit" "$$1" "$$2" "$$3"; \
+		printf '%-16s policy=%s mode=%s pinned=%s latest=%s source=%s:%s\n' "$$name" "$$policy" "$$mode" "$$commit" "$$1" "$$2" "$$3"; \
 	done
 
 upgrade-pins:
 	@set -e; \
-	mode="$(PIN_MODE)"; \
-	case "$$mode" in head|tag) ;; *) echo "MODE must be head or tag"; exit 1;; esac; \
+	mode_override="$(PIN_MODE)"; \
+	case "$$mode_override" in policy|head|tag) ;; *) echo "MODE must be policy, head, or tag"; exit 1;; esac; \
 	resolve_ref() { \
 		url="$$1"; mode="$$2"; \
 		if test "$$mode" = tag; then \
@@ -523,23 +524,20 @@ upgrade-pins:
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
 		url=$${rest%%|*}; rest=$${rest#*|}; \
+		policy=$${rest%%|*}; rest=$${rest#*|}; \
 		old=$${rest%%|*}; \
+		mode="$$mode_override"; \
+		if test "$$mode" = policy; then mode="$$policy"; fi; \
+		case "$$mode" in head|tag) ;; *) echo "$$name: policy must be head or tag"; exit 1;; esac; \
 		set -- $$(resolve_ref "$$url" "$$mode"); \
 		new=$$1; kind=$$2; label=$$3; \
 		if test -z "$$new"; then echo "$$name: unable to resolve latest $$mode"; exit 1; fi; \
-		if test "$$mode" = tag && test "$$kind" = tag; then \
-			head_ref=$$(git ls-remote "$$url" HEAD | awk '/^[0-9a-f]/ { print $$1; exit }'); \
-			if test "$$old" = "$$head_ref" && test "$$new" != "$$old"; then \
-				echo "  PIN     $$name already at upstream HEAD $$old (latest tag $$label is older)"; \
-				continue; \
-			fi; \
-		fi; \
 		if test "$$new" != "$$old"; then \
 			sed -i.bak "/'$$name|/s|$$old|$$new|" manifest.mk; \
 			rm -f manifest.mk.bak; \
-			echo "  PIN     $$name $$old -> $$new ($$kind $$label)"; \
+			echo "  PIN     $$name $$old -> $$new ($$kind $$label, policy $$policy, mode $$mode)"; \
 		else \
-			echo "  PIN     $$name already $$old ($$kind $$label)"; \
+			echo "  PIN     $$name already $$old ($$kind $$label, policy $$policy, mode $$mode)"; \
 		fi; \
 	done
 
@@ -550,6 +548,7 @@ diff-core:
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
 		url=$${rest%%|*}; rest=$${rest#*|}; \
+		policy=$${rest%%|*}; rest=$${rest#*|}; \
 		commit=$${rest%%|*}; \
 		if test "$$name" = "$(CORE)"; then found=1; git -C "$$dir" diff "$$commit..HEAD"; fi; \
 	done; \
@@ -562,6 +561,7 @@ log-core:
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
 		url=$${rest%%|*}; rest=$${rest#*|}; \
+		policy=$${rest%%|*}; rest=$${rest#*|}; \
 		commit=$${rest%%|*}; \
 		if test "$$name" = "$(CORE)"; then found=1; git -C "$$dir" log --oneline -20 "$$commit..HEAD"; fi; \
 	done; \
@@ -574,6 +574,7 @@ update-core:
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
 		url=$${rest%%|*}; rest=$${rest#*|}; \
+		policy=$${rest%%|*}; rest=$${rest#*|}; \
 		commit=$${rest%%|*}; rest=$${rest#*|}; \
 		sparse=$$rest; \
 		if test "$$name" = "$(CORE)"; then \

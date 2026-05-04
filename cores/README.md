@@ -24,8 +24,8 @@ make -C cores                       Build every configured core archive
 make -C cores smoke-check           Build libretro-common and QuickNES
 make -C cores check                 Verify clean patched checkouts
 make -C cores core-status           Show source checkout status
-make -C cores pin-status MODE=tag   Compare manifest pins to latest refs
-make -C cores upgrade-pins MODE=tag Update manifest pins only
+make -C cores pin-status            Compare pins using manifest policy
+make -C cores upgrade-pins          Update manifest pins by policy
 make -C cores diff-core CORE=gpsp   Show UniFrog patch delta for one core
 make -C cores log-core CORE=gpsp    Show UniFrog patch commits for one core
 make -C cores update-core CORE=gpsp Refresh one patched checkout
@@ -36,8 +36,11 @@ make -C cores update-core CORE=gpsp Refresh one patched checkout
 Pinned upstream inputs live in `cores/manifest.mk`:
 
 ```text
-name|checkout-directory|upstream-url|upstream-commit|sparse-paths
+name|checkout-directory|upstream-url|pin-policy|upstream-commit|sparse-paths
 ```
+
+`pin-policy` is `head` or `tag`. The default update path follows that policy;
+`MODE=head` or `MODE=tag` is only for an explicit override.
 
 UniFrog-specific changes live as committed patch series under
 `cores/patches/<name>/`. Keep upstream source edits focused and reviewable.

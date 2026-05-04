@@ -10,8 +10,8 @@ Keep this repository small and direct.
 - Handoff verification: `make verify`
 - Discovery: `make help`, `make print-config`, and component-local
   `make -C <component> help`
-- Dependency pins: `make deps-status MODE=head|tag` and
-  `make upgrade-deps MODE=head|tag`
+- Dependency pins: `make deps-status` and `make upgrade-deps`; use
+  `MODE=head|tag` only to override repository policy.
 - Defaults: `TOOLCHAIN=/opt/mipsel-mti-elf`, `SDK=unifrog-hcrtos-sdk`,
   `DEPS=.deps`
 - Local overrides belong in untracked `config.mk`.

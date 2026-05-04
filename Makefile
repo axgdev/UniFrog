@@ -13,9 +13,10 @@ JS2300 ?= js2300
 FRONTEND ?= frontend
 MQUICKJS_DIR ?= $(DEPS)/mquickjs
 MQUICKJS_URL ?= https://github.com/bellard/mquickjs.git
+MQUICKJS_POLICY ?= head
 MQUICKJS_REF ?= ee50431eac9b14b99f722b537ec4cac0c8dd75ab
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
-PIN_MODE ?= $(if $(MODE),$(MODE),head)
+PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 
 -include config.mk
 
@@ -418,14 +419,6 @@ CORE_MODULE_LDLIBS := \
 	-lsupc++ \
 	-lc \
 	-lgcc
-PICODRIVE_LZMA_DIR := $(CORE_SUPPORT_ROOT)/libchdr/deps/lzma-25.01
-PICODRIVE_LZMA_SRCS := LzmaDec.c
-PICODRIVE_LZMA_OBJS := $(addprefix $(BUILD)/core_modules/picodrive_lzma_,$(PICODRIVE_LZMA_SRCS:.c=.o))
-PICODRIVE_LZMA_CFLAGS := \
-	-DZ7_ST \
-	-Wno-unused \
-	-I$(PICODRIVE_LZMA_DIR)/include \
-	-I$(PICODRIVE_LZMA_DIR)/src
 FASTBOOT_CFLAGS := -EL $(ARCH_CFLAGS) -Os -pipe -msoft-float -fsigned-char -W \
 	-ffunction-sections -fdata-sections -G0 \
 	-ffreestanding -fno-builtin -fno-pic -mno-abicalls \
@@ -479,8 +472,8 @@ help:
 	@echo "  make               Build $(ASD), $(OUT)/unifrog.bin, and SD files"
 	@echo "  make verify        Build and verify firmware, fastboot, JS, and layout"
 	@echo "  make deps          Same as make setup"
-	@echo "  make deps-status   Show pinned deps vs latest MODE=head or MODE=tag"
-	@echo "  make upgrade-deps  Bump pins and fetch deps, MODE=head or MODE=tag"
+	@echo "  make deps-status   Show pins vs policy, or override MODE=head|tag"
+	@echo "  make upgrade-deps  Bump pins by policy, or override MODE=head|tag"
 	@echo "  make check         Same as make verify"
 	@echo ""
 	@echo "Setup:"
@@ -562,7 +555,8 @@ deps-mquickjs:
 deps-status:
 	@set -e; \
 	mode="$(PIN_MODE)"; \
-	case "$$mode" in head|tag) ;; *) echo "MODE must be head or tag"; exit 1;; esac; \
+	case "$$mode" in policy|head|tag) ;; *) echo "MODE must be policy, head, or tag"; exit 1;; esac; \
+	if test "$$mode" = policy; then mode="$(MQUICKJS_POLICY)"; fi; \
 	resolve_ref() { \
 		url="$$1"; mode="$$2"; \
 		if test "$$mode" = tag; then \
@@ -580,15 +574,16 @@ deps-status:
 		printf '%s head %s\n' "$$ref" "$${branch:-HEAD}"; \
 	}; \
 	set -- $$(resolve_ref "$(MQUICKJS_URL)" "$$mode"); \
-	printf '%-16s pinned=%s latest=%s source=%s:%s\n' mquickjs "$(MQUICKJS_REF)" "$$1" "$$2" "$$3"
-	$(Q)$(MAKE) -C $(CORES) pin-status PIN_MODE=$(PIN_MODE) \
+	printf '%-16s policy=%s mode=%s pinned=%s latest=%s source=%s:%s\n' mquickjs "$(MQUICKJS_POLICY)" "$$mode" "$(MQUICKJS_REF)" "$$1" "$$2" "$$3"
+	$(Q)$(MAKE) --no-print-directory -C $(CORES) pin-status PIN_MODE=$(PIN_MODE) \
 		CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT)) \
 		CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT))
 
 upgrade-pins:
 	@set -e; \
 	mode="$(PIN_MODE)"; \
-	case "$$mode" in head|tag) ;; *) echo "MODE must be head or tag"; exit 1;; esac; \
+	case "$$mode" in policy|head|tag) ;; *) echo "MODE must be policy, head, or tag"; exit 1;; esac; \
+	if test "$$mode" = policy; then mode="$(MQUICKJS_POLICY)"; fi; \
 	resolve_ref() { \
 		url="$$1"; mode="$$2"; \
 		if test "$$mode" = tag; then \
@@ -611,11 +606,11 @@ upgrade-pins:
 	if test "$$new" != "$$old"; then \
 		sed -i.bak "s|^MQUICKJS_REF ?= .*|MQUICKJS_REF ?= $$new|" Makefile; \
 		rm -f Makefile.bak; \
-		echo "  PIN     mquickjs $$old -> $$new ($$kind $$label)"; \
+		echo "  PIN     mquickjs $$old -> $$new ($$kind $$label, policy $(MQUICKJS_POLICY), mode $$mode)"; \
 	else \
-		echo "  PIN     mquickjs already $$old ($$kind $$label)"; \
+		echo "  PIN     mquickjs already $$old ($$kind $$label, policy $(MQUICKJS_POLICY), mode $$mode)"; \
 	fi
-	$(Q)$(MAKE) -C $(CORES) upgrade-pins PIN_MODE=$(PIN_MODE) \
+	$(Q)$(MAKE) --no-print-directory -C $(CORES) upgrade-pins PIN_MODE=$(PIN_MODE) \
 		CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT)) \
 		CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT))
 
@@ -749,11 +744,6 @@ $(BUILD)/core_modules/support.o: src/unifrog_core_module_support.c include/unifr
 	@echo "  CC      $<"
 	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) $(CORE_MODULE_CFLAGS) -MD -MP -c $< -o $@
-
-$(BUILD)/core_modules/picodrive_lzma_%.o: $(PICODRIVE_LZMA_DIR)/src/%.c | $(BUILD)
-	@echo "  CC      $<"
-	$(Q)mkdir -p $(dir $@)
-	$(Q)$(CC) $(CORE_MODULE_CFLAGS) $(PICODRIVE_LZMA_CFLAGS) -MD -MP -c $< -o $@
 
 $(BUILD)/third_party/lz4/%.o: src/third_party/lz4/%.c | $(BUILD)
 	@echo "  CC      $<"
