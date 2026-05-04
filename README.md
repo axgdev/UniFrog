@@ -38,6 +38,7 @@ DEPS := .deps
 ```sh
 make setup
 make doctor
+make quick-check
 make
 make verify
 ```
@@ -49,6 +50,7 @@ make help             Show the common workflow and focused entry points
 make print-config     Show current paths, tools, and optimization settings
 make setup            Fetch required external source inputs
 make doctor           Check tools, SDK, and fetched inputs
+make quick-check      Run fast repository, JS, and JS2300 checks
 make                  Build firmware and core package
 make verify           Build and verify firmware, fastboot, JS, and layout
 make sd-zip           Build output/UniFrog-sdcard.zip
@@ -57,8 +59,9 @@ make distclean        Also clean sub-build outputs
 ```
 
 `make deps` and `make check` remain supported aliases for the same workflow.
-`make verify` is the normal verification before handing off changes.
-If linker scripts or link libraries change, run `make clean && make verify`.
+Use `make quick-check` while iterating. `make verify` is the normal verification
+before handing off changes. If linker scripts or link libraries change, run
+`make clean && make verify`.
 
 ## Layout
 

@@ -455,7 +455,7 @@ SHELL_APP_OBJECTS += $(DTB_OBJ)
 endif
 
 .DELETE_ON_ERROR:
-COMMON_TARGETS := all help setup doctor deps check verify clean distclean rebuild
+COMMON_TARGETS := all help setup doctor deps repo-check quick-check check verify clean distclean rebuild
 SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores
 PACKAGE_TARGETS := frontend-package core-package sd-zip install refresh-sd refresh-sd-clean
 VERIFY_TARGETS := asdcheck fastboot-check layout-check js2300-check frontend-check
@@ -470,6 +470,7 @@ help:
 	@echo "$(APP) common workflow:"
 	@echo "  make setup         Fetch SDK submodule and external source inputs"
 	@echo "  make doctor        Check toolchain, SDK, and fetched inputs"
+	@echo "  make quick-check   Fast hygiene, JS, and JS2300 checks"
 	@echo "  make               Build $(ASD), $(OUT)/unifrog.bin, and SD files"
 	@echo "  make verify        Build and verify firmware, fastboot, JS, and layout"
 	@echo "  make deps          Same as make setup"
@@ -487,7 +488,7 @@ help:
 	@echo "  make refresh-sd    Build, install, and sync SD files"
 	@echo ""
 	@echo "Focused checks:"
-	@echo "  make js2300-check frontend-check layout-check asdcheck"
+	@echo "  make repo-check js2300-check frontend-check layout-check asdcheck"
 	@echo "  make -C cores help"
 	@echo "  make -C frontend help"
 	@echo "  make -C js2300 help"
@@ -576,6 +577,26 @@ doctor:
 	@test -f "$(MQUICKJS_DIR)/mquickjs.c" || { echo "missing MQuickJS checkout: $(MQUICKJS_DIR)"; exit 1; }
 	@echo "OK"
 	@echo "Run 'make print-config' to show resolved paths and tools."
+
+repo-check:
+	@echo "  CHECK   repository hygiene"
+	$(Q)git diff --check
+	$(Q)git diff --cached --check
+	$(Q)! git ls-files | grep -E '(^build/|^output/|^\.deps/|^cores/build/|^cores/output/|^frontend/output/|^js2300/build/|^js2300/output/|~$$|\.tmp$$|\.DS_Store$$|\.o$$|\.d$$|\.out$$|\.map$$|\.bin$$|\.dtb$$|\.dts\.tmp$$|\.pre\.tmp$$)' >/dev/null || { \
+		echo "tracked generated file found"; \
+		git ls-files | grep -E '(^build/|^output/|^\.deps/|^cores/build/|^cores/output/|^frontend/output/|^js2300/build/|^js2300/output/|~$$|\.tmp$$|\.DS_Store$$|\.o$$|\.d$$|\.out$$|\.map$$|\.bin$$|\.dtb$$|\.dts\.tmp$$|\.pre\.tmp$$)'; \
+		exit 1; \
+	}
+	@echo "OK"
+
+quick-check:
+	$(Q)$(MAKE) --no-print-directory repo-check
+	$(Q)$(MAKE) --no-print-directory doctor
+	@echo "  CHECK   js2300"
+	$(Q)$(MAKE) --no-print-directory js2300-check
+	@echo "  CHECK   frontend"
+	$(Q)$(MAKE) --no-print-directory frontend-check
+	@echo "OK"
 
 sdk:
 	$(Q)$(MAKE) -C $(SDK) check TOOLCHAIN=$(TOOLCHAIN) \
@@ -1025,7 +1046,7 @@ ci-toolchain:
 	@test -x "$(TOOLCHAIN)/bin/mipsel-mti-elf-gcc" || { echo "missing: $(TOOLCHAIN)/bin/mipsel-mti-elf-gcc"; exit 1; }
 
 ci-commit-check: ci-deps ci-toolchain
-	$(Q)$(MAKE) doctor TOOLCHAIN=$(TOOLCHAIN)
+	$(Q)$(MAKE) quick-check TOOLCHAIN=$(TOOLCHAIN)
 	@echo "  CI      sdk"
 	$(Q)$(MAKE) --no-print-directory sdk TOOLCHAIN=$(TOOLCHAIN) HOSTCC=$(HOSTCC)
 	@echo "  CI      lib"
