@@ -455,7 +455,7 @@ SHELL_APP_OBJECTS += $(DTB_OBJ)
 endif
 
 .DELETE_ON_ERROR:
-COMMON_TARGETS := all help doctor deps check clean distclean rebuild
+COMMON_TARGETS := all help setup doctor deps check verify clean distclean rebuild
 SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores
 PACKAGE_TARGETS := frontend-package core-package sd-zip install refresh-sd refresh-sd-clean
 VERIFY_TARGETS := asdcheck fastboot-check layout-check js2300-check frontend-check
@@ -463,13 +463,17 @@ ADVANCED_TARGETS := sdk dtb lib fastboot size ci-deps ci-toolchain ci-commit-che
 .PHONY: $(COMMON_TARGETS) $(SETUP_TARGETS) $(PACKAGE_TARGETS) $(VERIFY_TARGETS) $(ADVANCED_TARGETS) FORCE
 
 all: $(ASD) $(OUT)/unifrog.bin core-package
+setup: deps
+verify: check
 
 help:
 	@echo "$(APP) common workflow:"
-	@echo "  make deps          Fetch SDK submodule and external source inputs"
+	@echo "  make setup         Fetch SDK submodule and external source inputs"
 	@echo "  make doctor        Check toolchain, SDK, and fetched inputs"
 	@echo "  make               Build $(ASD), $(OUT)/unifrog.bin, and SD files"
-	@echo "  make check         Build and verify firmware, fastboot, JS, and layout"
+	@echo "  make verify        Build and verify firmware, fastboot, JS, and layout"
+	@echo "  make deps          Same as make setup"
+	@echo "  make check         Same as make verify"
 	@echo ""
 	@echo "Setup:"
 	@echo "  make deps-alpine   Install Alpine host packages"
@@ -570,9 +574,8 @@ doctor:
 	@test -f "$(JS2300)/Makefile" || { echo "missing JS2300 source: $(JS2300)"; exit 1; }
 	@test -f "$(FRONTEND)/Makefile" || { echo "missing frontend source: $(FRONTEND)"; exit 1; }
 	@test -f "$(MQUICKJS_DIR)/mquickjs.c" || { echo "missing MQuickJS checkout: $(MQUICKJS_DIR)"; exit 1; }
-	$(Q)$(MAKE) --no-print-directory print-config
-	@echo "GCC_LIBDIR=$(GCC_LIBDIR)"
 	@echo "OK"
+	@echo "Run 'make print-config' to show resolved paths and tools."
 
 sdk:
 	$(Q)$(MAKE) -C $(SDK) check TOOLCHAIN=$(TOOLCHAIN) \

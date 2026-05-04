@@ -36,9 +36,10 @@ DEPS := .deps
 ## Build
 
 ```sh
+make setup
 make doctor
 make
-make check
+make verify
 ```
 
 Useful targets:
@@ -46,17 +47,18 @@ Useful targets:
 ```text
 make help             Show the common workflow and focused entry points
 make print-config     Show current paths, tools, and optimization settings
-make deps             Fetch required external source inputs
+make setup            Fetch required external source inputs
 make doctor           Check tools, SDK, and fetched inputs
 make                  Build firmware and core package
-make check            Build and verify firmware, fastboot, JS, and layout
+make verify           Build and verify firmware, fastboot, JS, and layout
 make sd-zip           Build output/UniFrog-sdcard.zip
 make clean            Remove generated build/output files
 make distclean        Also clean sub-build outputs
 ```
 
-`make check` is the normal verification before handing off changes. If linker
-scripts or link libraries change, run `make clean && make check`.
+`make deps` and `make check` remain supported aliases for the same workflow.
+`make verify` is the normal verification before handing off changes.
+If linker scripts or link libraries change, run `make clean && make verify`.
 
 ## Layout
 

@@ -6,7 +6,7 @@ Keep this repository small and direct.
 
 - Primary command: `make`
 - Health check: `make doctor`
-- Handoff verification: `make check`
+- Handoff verification: `make verify`
 - Discovery: `make help`, `make print-config`, and component-local
   `make -C <component> help`
 - Defaults: `TOOLCHAIN=/opt/mipsel-mti-elf`, `SDK=unifrog-hcrtos-sdk`,
@@ -27,5 +27,5 @@ Keep this repository small and direct.
 - Avoid Python, CMake, Autotools, and generated configure layers.
 - Keep dependencies to a host C compiler, the MIPS cross toolchain, `make`,
   `dtc`, the SDK, fetched dependencies, and normal Unix utilities.
-- If changing link libraries or linker scripts, run `make clean && make check`.
-  Otherwise run `make check` before handoff.
+- If changing link libraries or linker scripts, run `make clean && make verify`.
+  Otherwise run `make verify` before handoff.
