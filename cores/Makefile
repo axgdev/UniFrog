@@ -330,7 +330,7 @@ init: support-init
 		sparse=.; \
 		case "$$name" in \
 			gearboy) sparse="src platforms/libretro" ;; \
-			picodrive) sparse="cpu pico platform/common platform/libretro unzip zlib" ;; \
+			picodrive) sparse="cpu/cyclone cpu/cz80 cpu/drc cpu/fame cpu/sh2 pico platform/common platform/libretro unzip zlib" ;; \
 			pce-fast) sparse="mednafen libretro-common" ;; \
 		esac; \
 		if test -d "$$dir/.git"; then \
@@ -360,7 +360,25 @@ init: support-init
 			git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch; \
 		fi; \
 		if test "$$name" = picodrive; then \
-			git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" cpu/cyclone pico/sound/emu2413 platform/common/dr_libs platform/libpicofe; \
+			git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" cpu/cyclone pico/sound/emu2413 platform/libpicofe; \
+			dr_dir="$$dir/platform/common/dr_libs"; \
+			dr_url=$$(git -C "$$dir" config -f .gitmodules submodule.platform/common/dr_libs.url); \
+			dr_commit=$$(git -C "$$dir" rev-parse HEAD:platform/common/dr_libs); \
+			if test -d "$$dr_dir/.git"; then \
+				git -C "$$dr_dir" remote set-url origin "$$dr_url"; \
+			else \
+				rm -rf "$$dr_dir"; \
+				git init -q "$$dr_dir"; \
+				git -C "$$dr_dir" remote add origin "$$dr_url"; \
+			fi; \
+			if ! git -C "$$dr_dir" cat-file -e "$$dr_commit^{commit}" 2>/dev/null; then \
+				git -C "$$dr_dir" fetch --depth 1 --filter=blob:none origin "$$dr_commit"; \
+			fi; \
+			git -C "$$dr_dir" sparse-checkout init --no-cone; \
+			printf '/dr_mp3.h\n/LICENSE\n' >"$$dr_dir/.git/info/sparse-checkout"; \
+			git -C "$$dr_dir" checkout -q "$$dr_commit"; \
+			git -C "$$dr_dir" reset --hard -q "$$dr_commit"; \
+			git -C "$$dr_dir" clean -fdx -q; \
 		else \
 			git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)"; \
 		fi; \
@@ -437,7 +455,7 @@ update-core:
 		sparse=.; \
 		case "$$name" in \
 			gearboy) sparse="src platforms/libretro" ;; \
-			picodrive) sparse="cpu pico platform/common platform/libretro unzip zlib" ;; \
+			picodrive) sparse="cpu/cyclone cpu/cz80 cpu/drc cpu/fame cpu/sh2 pico platform/common platform/libretro unzip zlib" ;; \
 			pce-fast) sparse="mednafen libretro-common" ;; \
 		esac; \
 		if test "$$name" = "$(CORE)"; then \
@@ -460,7 +478,25 @@ update-core:
 				git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch; \
 			fi; \
 			if test "$$name" = picodrive; then \
-				git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" cpu/cyclone pico/sound/emu2413 platform/common/dr_libs platform/libpicofe; \
+				git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" cpu/cyclone pico/sound/emu2413 platform/libpicofe; \
+				dr_dir="$$dir/platform/common/dr_libs"; \
+				dr_url=$$(git -C "$$dir" config -f .gitmodules submodule.platform/common/dr_libs.url); \
+				dr_commit=$$(git -C "$$dir" rev-parse HEAD:platform/common/dr_libs); \
+				if test -d "$$dr_dir/.git"; then \
+					git -C "$$dr_dir" remote set-url origin "$$dr_url"; \
+				else \
+					rm -rf "$$dr_dir"; \
+					git init -q "$$dr_dir"; \
+					git -C "$$dr_dir" remote add origin "$$dr_url"; \
+				fi; \
+				if ! git -C "$$dr_dir" cat-file -e "$$dr_commit^{commit}" 2>/dev/null; then \
+					git -C "$$dr_dir" fetch --depth 1 --filter=blob:none origin "$$dr_commit"; \
+				fi; \
+				git -C "$$dr_dir" sparse-checkout init --no-cone; \
+				printf '/dr_mp3.h\n/LICENSE\n' >"$$dr_dir/.git/info/sparse-checkout"; \
+				git -C "$$dr_dir" checkout -q "$$dr_commit"; \
+				git -C "$$dr_dir" reset --hard -q "$$dr_commit"; \
+				git -C "$$dr_dir" clean -fdx -q; \
 			else \
 				git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)"; \
 			fi; \
