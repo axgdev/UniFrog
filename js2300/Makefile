@@ -19,6 +19,8 @@ CFLAGS ?= -EL -march=mips32 -mtune=mips32 -Os -pipe -msoft-float \
 	-Wall -Wextra -Iinclude -I$(MQUICKJS_BUILD) -I$(BUILD) \
 	-D_GNU_SOURCE -DCONFIG_SMALL -DUSE_SOFTFLOAT
 HOST_CFLAGS ?= -std=gnu99 -O2 -Wall -Wextra -D_GNU_SOURCE -I$(MQUICKJS_BUILD)
+MQUICKJS_CFLAGS := $(CFLAGS) -Wno-format -Wno-sign-compare \
+	-Wno-unused-parameter -Wno-type-limits -Wno-dangling-pointer
 
 OBJECTS := \
 	$(BUILD)/js2300_runtime.o \
@@ -90,19 +92,19 @@ $(BUILD)/js2300_runtime.o: src/js2300_runtime.c $(BUILD)/js2300_stdlib.h $(MQUIC
 
 $(BUILD)/mquickjs.o: $(MQUICKJS_BUILD)/mquickjs_atom.h | $(BUILD)
 	@echo "  CC      $(MQUICKJS_BUILD)/mquickjs.c"
-	@$(CC) $(CFLAGS) -MD -MP -c $(MQUICKJS_BUILD)/mquickjs.c -o $@
+	@$(CC) $(MQUICKJS_CFLAGS) -MD -MP -c $(MQUICKJS_BUILD)/mquickjs.c -o $@
 
 $(BUILD)/dtoa.o: $(MQUICKJS_PREPARE_STAMP) | $(BUILD)
 	@echo "  CC      $(MQUICKJS_BUILD)/dtoa.c"
-	@$(CC) $(CFLAGS) -MD -MP -c $(MQUICKJS_BUILD)/dtoa.c -o $@
+	@$(CC) $(MQUICKJS_CFLAGS) -MD -MP -c $(MQUICKJS_BUILD)/dtoa.c -o $@
 
 $(BUILD)/libm.o: $(MQUICKJS_PREPARE_STAMP) | $(BUILD)
 	@echo "  CC      $(MQUICKJS_BUILD)/libm.c"
-	@$(CC) $(CFLAGS) -MD -MP -c $(MQUICKJS_BUILD)/libm.c -o $@
+	@$(CC) $(MQUICKJS_CFLAGS) -MD -MP -c $(MQUICKJS_BUILD)/libm.c -o $@
 
 $(BUILD)/cutils.o: $(MQUICKJS_PREPARE_STAMP) | $(BUILD)
 	@echo "  CC      $(MQUICKJS_BUILD)/cutils.c"
-	@$(CC) $(CFLAGS) -MD -MP -c $(MQUICKJS_BUILD)/cutils.c -o $@
+	@$(CC) $(MQUICKJS_CFLAGS) -MD -MP -c $(MQUICKJS_BUILD)/cutils.c -o $@
 
 $(TARGET): $(OBJECTS) | $(OUT)
 	@echo "  AR      $@"
