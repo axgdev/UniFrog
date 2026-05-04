@@ -577,7 +577,8 @@ doctor:
 	@echo "OK"
 
 sdk:
-	$(Q)$(MAKE) -C $(SDK) check
+	$(Q)$(MAKE) -C $(SDK) check TOOLCHAIN=$(TOOLCHAIN) \
+		CROSS_COMPILE=$(CROSS_COMPILE) CCACHE=$(CCACHE) JOBS=$(JOBS)
 
 js2300-check:
 	$(Q)$(MAKE) -C $(JS2300) check TOOLCHAIN=$(TOOLCHAIN) \
@@ -986,7 +987,8 @@ refresh-sd:
 
 refresh-sd-clean:
 	$(Q)$(MAKE) clean
-	$(Q)$(MAKE) -C $(SDK) clean
+	$(Q)$(MAKE) -C $(SDK) clean TOOLCHAIN=$(TOOLCHAIN) \
+		CROSS_COMPILE=$(CROSS_COMPILE) CCACHE=$(CCACHE) JOBS=$(JOBS)
 	$(Q)$(MAKE) -C $(CORES) clean $(CORE_MAKE_ARGS)
 	$(Q)$(MAKE) -C $(JS2300) clean
 	$(Q)$(MAKE) -C $(FRONTEND) clean
