@@ -515,7 +515,7 @@ help:
 deps: deps-sdk deps-mquickjs deps-cores
 
 deps-alpine:
-	apk add git make dtc tcc ccache curl tar xz zip patch
+	apk add git make dtc tcc musl-dev ccache curl tar xz zip patch
 
 deps-ubuntu:
 	@echo "sudo apt-get update && sudo apt-get install -y git make device-tree-compiler tcc ccache curl xz-utils zip patch"
