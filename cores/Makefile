@@ -567,7 +567,7 @@ gpsp: doctor | $(OUT)
 picodrive: doctor $(CHD_SUPPORT_LIB) | $(OUT)
 	CFLAGS="$(PICODRIVE_CFLAGS)" CXXFLAGS="$(PICODRIVE_CFLAGS)" \
 	$(MAKE) -C $(PICODRIVE_DIR) -f Makefile.libretro platform=unix \
-		CC=$(CC) CXX=$(CXX) AR=$(AR) STATIC_LINKING=1 \
+		CC="$(CC)" CXX="$(CXX)" AR=$(AR) STATIC_LINKING=1 \
 		STATIC_LINKING_LINK=1 EXTERNAL_CHD_MEDIA=1 EXTERNAL_ZLIB=1 \
 		EXTERNAL_CHD_INCFLAGS="$(CHD_SUPPORT_INCFLAGS)" \
 		EXTERNAL_ZLIB_INCFLAGS="-I$(abspath $(ZLIB_DIR))" \
@@ -577,21 +577,21 @@ picodrive: doctor $(CHD_SUPPORT_LIB) | $(OUT)
 snes9x2005: doctor | $(OUT)
 	CFLAGS="$(SNES9X2005_CFLAGS)" CXXFLAGS="$(SNES9X2005_CFLAGS)" \
 	$(MAKE) -C $(SNES9X2005_DIR) -f Makefile platform=unix \
-		CC=$(CC) CXX=$(CXX) AR=$(AR) STATIC_LINKING=1 \
+		CC="$(CC)" CXX="$(CXX)" AR=$(AR) STATIC_LINKING=1 \
 		fpic= TARGET=snes9x2005_libretro_sf2000.a
 	$(call copy_core_lib,$(SNES9X2005_LIB))
 
 snes9x2002: doctor | $(OUT)
 	CFLAGS="$(SNES9X2002_CFLAGS)" CXXFLAGS="$(SNES9X2002_CFLAGS)" \
 	$(MAKE) -C $(SNES9X2002_DIR) -f Makefile platform=unix \
-		CC=$(CC) CXX=$(CXX) AR=$(AR) STATIC_LINKING=1 \
+		CC="$(CC)" CXX="$(CXX)" AR=$(AR) STATIC_LINKING=1 \
 		fpic= TARGET=snes9x2002_libretro_sf2000.a
 	$(call copy_core_lib,$(SNES9X2002_LIB))
 
 quicknes: doctor | $(OUT)
 	CFLAGS="$(QUICKNES_CFLAGS)" CXXFLAGS="$(QUICKNES_CFLAGS)" \
 	$(MAKE) -C $(QUICKNES_DIR) -f Makefile platform=unix \
-		CC=$(CC) CXX=$(CXX) AR=$(AR) STATIC_LINKING=1 \
+		CC="$(CC)" CXX="$(CXX)" AR=$(AR) STATIC_LINKING=1 \
 		fpic= TARGET=quicknes_libretro_sf2000.a
 	$(call copy_core_lib,$(QUICKNES_LIB))
 
@@ -599,7 +599,7 @@ fceumm: doctor | $(OUT)
 	CFLAGS="$(FCEUMM_CFLAGS) -DFRONTEND_SUPPORTS_RGB565=1" \
 	CXXFLAGS="$(FCEUMM_CFLAGS) -DFRONTEND_SUPPORTS_RGB565=1" \
 	$(MAKE) -C $(FCEUMM_DIR) -f Makefile.libretro platform=unix \
-		CC=$(CC) CXX=$(CXX) AR=$(AR) STATIC_LINKING=1 \
+		CC="$(CC)" CXX="$(CXX)" AR=$(AR) STATIC_LINKING=1 \
 		EXTERNAL_ZLIB=1 HAVE_NTSC=0 WANT_32BPP=0 fpic= \
 		TARGET=fceumm_libretro_sf2000.a
 	$(call copy_core_lib,$(FCEUMM_LIB))
@@ -607,14 +607,14 @@ fceumm: doctor | $(OUT)
 gearboy: doctor | $(OUT)
 	CFLAGS="$(GEARBOY_CFLAGS)" CXXFLAGS="$(GEARBOY_CFLAGS)" \
 	$(MAKE) -C $(GEARBOY_DIR) -f Makefile platform=unix \
-		CC=$(CC) CXX=$(CXX) AR=$(AR) STATIC_LINKING=1 \
+		CC="$(CC)" CXX="$(CXX)" AR=$(AR) STATIC_LINKING=1 \
 		fpic= TARGET=gearboy_libretro_sf2000.a
 	$(call copy_core_lib,$(GEARBOY_LIB))
 
 pce-fast: doctor $(CHD_SUPPORT_LIB) | $(OUT)
 	CFLAGS="$(PCE_FAST_CFLAGS)" CXXFLAGS="$(PCE_FAST_CFLAGS)" \
 	$(MAKE) -C $(PCE_FAST_DIR) -f Makefile platform=unix \
-		CC=$(CC) CXX=$(CXX) AR=$(AR) STATIC_LINKING=1 \
+		CC="$(CC)" CXX="$(CXX)" AR=$(AR) STATIC_LINKING=1 \
 		EXTERNAL_CHD_MEDIA=1 HAVE_CHD=1 \
 		EXTERNAL_CHD_INCFLAGS="$(CHD_SUPPORT_INCFLAGS)" \
 		EXTERNAL_ZLIB_INCFLAGS="-I$(abspath $(ZLIB_DIR))" \
@@ -624,13 +624,13 @@ pce-fast: doctor $(CHD_SUPPORT_LIB) | $(OUT)
 qpsx: doctor | $(OUT)
 	CFLAGS="$(QPSX_CFLAGS)" CXXFLAGS="$(QPSX_CXXFLAGS)" \
 	$(MAKE) -C $(QPSX_DIR) -f Makefile.libretro platform=sf2000 \
-		MIPS=$(CROSS_COMPILE) CC=$(CC) CXX=$(CXX) AR=$(AR) \
+		MIPS=$(CROSS_COMPILE) CC="$(CC)" CXX="$(CXX)" AR=$(AR) \
 		STATIC_LINKING=1 TARGET=pcsx4all_libretro_sf2000.a
 	$(call copy_core_lib,$(QPSX_LIB))
 
 pmp-video: doctor | $(OUT)
 	$(MAKE) -C $(PMP_VIDEO_DIR) -f Makefile platform=sf2000 \
-		MIPS=$(CROSS_COMPILE) CC=$(CC) CXX=$(CXX) AR=$(AR) \
+		MIPS=$(CROSS_COMPILE) CC="$(CC)" CXX="$(CXX)" AR=$(AR) \
 		CFLAGS="$(PMP_VIDEO_CFLAGS)" STATIC_LINKING=1 \
 		TARGET=pmp_libretro_sf2000.a
 	$(call copy_core_lib,$(PMP_VIDEO_LIB))
