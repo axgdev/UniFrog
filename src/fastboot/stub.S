@@ -1,0 +1,37 @@
+	.set noreorder
+	.set noat
+	.set mips32
+
+#include "handoff.h"
+
+	.section .text.start, "ax"
+	.globl _start
+	.ent _start
+_start:
+	la	$t0, __stage1_blob_start
+	la	$t1, __stage1_blob_end
+	li	$t2, FASTBOOT_STAGE1_ADDR
+
+1:
+	beq	$t0, $t1, 2f
+	nop
+	lw	$t3, 0($t0)
+	addiu	$t0, $t0, 4
+	sw	$t3, 0($t2)
+	b	1b
+	addiu	$t2, $t2, 4
+
+2:
+	li	$t9, FASTBOOT_STAGE1_ADDR
+	jr	$t9
+	nop
+	.end _start
+
+	.section .rodata, "a"
+	.balign 16
+	.globl __stage1_blob_start
+__stage1_blob_start:
+	.incbin "build/fastboot/stage1.bin"
+	.balign 16
+	.globl __stage1_blob_end
+__stage1_blob_end:
