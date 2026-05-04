@@ -296,24 +296,25 @@ support-init:
 			git -C "$$dir" remote set-url origin "$$url"; \
 			if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
 				echo "  REUSE   support/$$name $$commit"; \
-				git -C "$$dir" checkout -q "$$commit"; \
 			else \
 				echo "  FETCH   support/$$name $$commit"; \
-				git -C "$$dir" fetch --depth 1 origin "$$commit"; \
-				git -C "$$dir" checkout -q FETCH_HEAD; \
+				git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
 			fi; \
 		else \
 			echo "  FETCH   support/$$name $$commit"; \
 			rm -rf "$$dir"; \
 			git init -q "$$dir"; \
 			git -C "$$dir" remote add origin "$$url"; \
-			git -C "$$dir" fetch --depth 1 origin "$$commit"; \
-			git -C "$$dir" checkout -q FETCH_HEAD; \
+			git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
 		fi; \
-		if test "$$sparse" != "."; then \
+		if test "$$sparse" = ":root-files"; then \
+			git -C "$$dir" sparse-checkout init --no-cone; \
+			printf '/*\n!/*/\n' >"$$dir/.git/info/sparse-checkout"; \
+		elif test "$$sparse" != "."; then \
 			git -C "$$dir" sparse-checkout init --cone; \
 			git -C "$$dir" sparse-checkout set $$sparse; \
 		fi; \
+		git -C "$$dir" checkout -q "$$commit"; \
 		git -C "$$dir" reset --hard -q "$$commit"; \
 		git -C "$$dir" clean -fdx -q; \
 	done
@@ -326,48 +327,42 @@ init: support-init
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
 		url=$${rest%%|*}; rest=$${rest#*|}; \
 		commit=$${rest%%|*}; \
+		sparse=.; \
+		case "$$name" in \
+			gearboy) sparse="src platforms/libretro" ;; \
+			picodrive) sparse="cpu pico platform/common platform/libretro unzip zlib" ;; \
+			pce-fast) sparse="mednafen libretro-common" ;; \
+		esac; \
 		if test -d "$$dir/.git"; then \
 			git -C "$$dir" remote set-url origin "$$url"; \
 			if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
 				echo "  REUSE   $$name $$commit"; \
-				git -C "$$dir" checkout -q "$$commit"; \
 			else \
 				echo "  FETCH   $$name $$commit"; \
-				git -C "$$dir" fetch --depth 1 origin "$$commit"; \
-				git -C "$$dir" checkout -q FETCH_HEAD; \
+				git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
 			fi; \
 		else \
 			echo "  FETCH   $$name $$commit"; \
 			rm -rf "$$dir"; \
 			git init -q "$$dir"; \
 			git -C "$$dir" remote add origin "$$url"; \
-			git -C "$$dir" fetch --depth 1 origin "$$commit"; \
-			git -C "$$dir" checkout -q FETCH_HEAD; \
+			git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
 		fi; \
+		if test "$$sparse" != "."; then \
+			git -C "$$dir" sparse-checkout init --cone; \
+			git -C "$$dir" sparse-checkout set $$sparse; \
+		fi; \
+		git -C "$$dir" checkout -q "$$commit"; \
 		git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
 		git -C "$$dir" reset --hard -q "$$commit"; \
 		git -C "$$dir" clean -fdx -q; \
 		if ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
 			git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch; \
 		fi; \
-		case "$$name" in \
-			gearboy) \
-				git -C "$$dir" sparse-checkout init --cone; \
-				git -C "$$dir" sparse-checkout set src platforms/libretro; \
-				;; \
-			picodrive) \
-				git -C "$$dir" sparse-checkout init --cone; \
-				git -C "$$dir" sparse-checkout set cpu pico platform/common platform/libretro unzip zlib; \
-				;; \
-			pce-fast) \
-				git -C "$$dir" sparse-checkout init --cone; \
-				git -C "$$dir" sparse-checkout set mednafen libretro-common; \
-				;; \
-		esac; \
 		if test "$$name" = picodrive; then \
-			git -C "$$dir" submodule update --init --depth 1 --jobs "$(JOBS)" cpu/cyclone pico/sound/emu2413 platform/common/dr_libs platform/libpicofe; \
+			git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" cpu/cyclone pico/sound/emu2413 platform/common/dr_libs platform/libpicofe; \
 		else \
-			git -C "$$dir" submodule update --init --depth 1 --jobs "$(JOBS)"; \
+			git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)"; \
 		fi; \
 	done
 
@@ -439,40 +434,36 @@ update-core:
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
 		url=$${rest%%|*}; rest=$${rest#*|}; \
 		commit=$${rest%%|*}; \
+		sparse=.; \
+		case "$$name" in \
+			gearboy) sparse="src platforms/libretro" ;; \
+			picodrive) sparse="cpu pico platform/common platform/libretro unzip zlib" ;; \
+			pce-fast) sparse="mednafen libretro-common" ;; \
+		esac; \
 		if test "$$name" = "$(CORE)"; then \
 			found=1; \
 			git -C "$$dir" remote set-url origin "$$url"; \
 			if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
-				git -C "$$dir" checkout -q "$$commit"; \
+				:; \
 			else \
-				git -C "$$dir" fetch --depth 1 origin "$$commit"; \
-				git -C "$$dir" checkout -q FETCH_HEAD; \
+				git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
 			fi; \
+			if test "$$sparse" != "."; then \
+				git -C "$$dir" sparse-checkout init --cone; \
+				git -C "$$dir" sparse-checkout set $$sparse; \
+			fi; \
+			git -C "$$dir" checkout -q "$$commit"; \
 			git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
 			git -C "$$dir" reset --hard -q "$$commit"; \
 			git -C "$$dir" clean -fdx -q; \
 			if ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
 				git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch; \
 			fi; \
-			case "$$name" in \
-				gearboy) \
-					git -C "$$dir" sparse-checkout init --cone; \
-					git -C "$$dir" sparse-checkout set src platforms/libretro; \
-					;; \
-			picodrive) \
-				git -C "$$dir" sparse-checkout init --cone; \
-				git -C "$$dir" sparse-checkout set cpu pico platform/common platform/libretro unzip zlib; \
-				;; \
-			pce-fast) \
-				git -C "$$dir" sparse-checkout init --cone; \
-				git -C "$$dir" sparse-checkout set mednafen libretro-common; \
-				;; \
-		esac; \
-		if test "$$name" = picodrive; then \
-			git -C "$$dir" submodule update --init --depth 1 --jobs "$(JOBS)" cpu/cyclone pico/sound/emu2413 platform/common/dr_libs platform/libpicofe; \
-		else \
-			git -C "$$dir" submodule update --init --depth 1 --jobs "$(JOBS)"; \
-		fi; \
+			if test "$$name" = picodrive; then \
+				git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" cpu/cyclone pico/sound/emu2413 platform/common/dr_libs platform/libpicofe; \
+			else \
+				git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)"; \
+			fi; \
 		fi; \
 	done; \
 	test "$$found" = 1 || { echo "unknown core: $(CORE)"; exit 1; }
