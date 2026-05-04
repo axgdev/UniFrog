@@ -1,6 +1,6 @@
 TOOLCHAIN ?= /opt/mipsel-mti-elf
 CROSS_COMPILE ?= $(TOOLCHAIN)/bin/mipsel-mti-elf-
-SDK ?= ../../unifrog-hcrtos-sdk
+SDK ?= ../unifrog-hcrtos-sdk
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 CCACHE ?=
 CCACHE_PREFIX := $(if $(CCACHE),$(CCACHE) )

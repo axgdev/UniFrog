@@ -1,107 +1,83 @@
 # UniFrog
 
-UniFrog is a native SF2000 frontend and libretro runtime built for the HCRTOS
-firmware environment.
+UniFrog builds a native SF2000 firmware payload, JavaScript frontend package,
+and libretro core modules for an SD-card based setup.
 
-This repository is intentionally source-focused. It keeps the permissively
-licensed UniFrog app code, JS2300 runtime bindings, JavaScript frontend, build
-rules, linker scripts, device-tree input, and small permissive third-party
-sources together so changes can be reviewed as one product.
+The root Makefile is the authoritative entry point. It builds `bisrv.asd`,
+`output/unifrog.bin`, and `output/sdcard/unifrog`.
 
-Large or mixed-license build inputs are kept outside this repository:
+## Requirements
 
-- `../unifrog-hcrtos-sdk` contains the HCRTOS headers, static libraries, kernel
-  objects, and license notices needed to link the SF2000 application.
-- `.deps/mquickjs` is fetched from upstream by `make deps`.
-- `.deps/cores` contains direct libretro core source checkouts fetched from
-  `cores/manifest.mk`.
-- `.deps/support` contains shared core support libraries such as libchdr, zstd,
-  zlib, and LZMA.
+- Alpine or another Unix-like host with `make`, a C compiler, Git, and `dtc`
+- MIPS toolchain at `/opt/mipsel-mti-elf` by default
+- HCRTOS SDK submodule at `unifrog-hcrtos-sdk`
+- External source checkouts fetched under `.deps`
 
-## Quick Start
-
-On Alpine:
+Install Alpine host packages with:
 
 ```sh
 make deps-alpine
-make deps
-make doctor
-make
 ```
 
-On Ubuntu:
+Fetch the SDK submodule, MQuickJS, libretro cores, and support libraries:
 
 ```sh
-make deps-ubuntu
-# run the printed apt command
 make deps
-make doctor
-make
 ```
 
-The default MIPS toolchain path is:
-
-```text
-/opt/mipsel-mti-elf
-```
-
-Override local paths with untracked `config.mk`:
+Local paths can be overridden in untracked `config.mk`:
 
 ```make
 TOOLCHAIN := /opt/mipsel-mti-elf
-SDK := ../unifrog-hcrtos-sdk
+SDK := unifrog-hcrtos-sdk
+DEPS := .deps
 ```
 
-## Build Targets
+## Build
 
 ```sh
-make              # build bisrv.asd, unifrog.bin, and staged SD files
-make deps         # fetch external dependencies into .deps/
-make doctor       # check host tools, SDK, toolchain, and fetched dependencies
-make check        # build and verify firmware, fastboot, layout, and JS UI
-make sd-zip       # create output/UniFrog-sdcard.zip
-make ci-sd-zip    # local equivalent of the CI artifact build
-make clean
+make doctor
+make
+make check
 ```
 
-Generated files are written under `build/`, `output/`, and `.deps/`.
-
-## Repository Layout
+Useful targets:
 
 ```text
-board/       local SF2000 device tree
-docs/        development notes and hardware findings
-dts/         minimal device-tree include files
-frontend/    editable JavaScript frontend
-include/     public UniFrog C headers
-js2300/      JavaScript runtime bindings around MQuickJS
-linker/      HCRTOS app and core-module linker scripts
-src/         native frontend, runtime, platform, media, and libretro host code
-tools/       host-side build tools
+make help             Show target and override summary
+make deps             Fetch required external source inputs
+make doctor           Check tools, SDK, and fetched inputs
+make                  Build firmware and core package
+make check            Build and verify firmware, fastboot, JS, and layout
+make sd-zip           Build output/UniFrog-sdcard.zip
+make clean            Remove generated build/output files
+make distclean        Also clean sub-build outputs
 ```
 
-## Dependency Policy
+`make check` is the normal verification before handing off changes. If linker
+scripts or link libraries change, run `make clean && make check`.
 
-The app repository should stay small and easy to clone. Do not vendor generated
-objects, downloaded toolchains, core upstream checkouts, MQuickJS checkouts, or
-release artifacts.
+## Layout
 
-The HCRTOS SDK is intentionally separate because it contains mixed-license
-headers, static libraries, vendor code, and binary objects. Over time, those
-pieces can be replaced with permissively licensed source without changing the
-UniFrog app layout.
+```text
+board/                 Local SF2000 device tree input
+cores/                 Libretro source manifest, patches, and core build
+docs/                  Hardware, ABI, loader, and diagnostics notes
+frontend/              Editable JavaScript frontend and themes
+include/unifrog/       Public UniFrog C interfaces
+js2300/                MQuickJS embedding layer
+linker/                HCRTOS/SF2000 linker scripts
+src/                   Native runtime implementation
+tools/asdpack.c        Host tool used to pack and verify ASD images
+unifrog-hcrtos-sdk/    SDK submodule
+```
 
-Host-side C tools are built with `tcc` by default when it is available. MQuickJS
-is patched during the build so the frontend syntax checker does not require GCC.
+Generated files live in `build/`, `output/`, `cores/output/`, `.deps/`, and
+subproject output directories. They are not source.
 
-The libretro core flow is manifest-driven. `cores/manifest.mk` pins each
-upstream core commit and the shared support-library commits. `make deps` fetches
-those generated dependencies into `.deps/cores` and `.deps/support`, then the
-build compiles common CHD/zstd/zlib/LZMA support once for all cores that need it.
+## Component Docs
 
-## History
-
-This repository was restarted from the SF2000/HCRTOS experiments and the older
-split UniFrog repositories. Curated commits reference original commit hashes in
-their commit bodies so the source of each grouped change can still be traced in
-the private history.
+- `docs/README.md` maps the retained hardware and architecture notes.
+- `cores/README.md` explains core source fetching, patching, and ABI rules.
+- `frontend/README.md` covers SD-card JavaScript and theme packaging.
+- `js2300/README.md` covers the embedded JavaScript runtime layer.
