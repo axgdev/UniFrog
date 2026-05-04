@@ -6,6 +6,7 @@ Keep this repository small and direct.
 
 - Primary command: `make`
 - Health check: `make doctor`
+- Fast local gate: `make quick-check`
 - Handoff verification: `make verify`
 - Discovery: `make help`, `make print-config`, and component-local
   `make -C <component> help`
@@ -27,5 +28,5 @@ Keep this repository small and direct.
 - Avoid Python, CMake, Autotools, and generated configure layers.
 - Keep dependencies to a host C compiler, the MIPS cross toolchain, `make`,
   `dtc`, the SDK, fetched dependencies, and normal Unix utilities.
+- Run `make quick-check` after focused edits. Run `make verify` before handoff.
 - If changing link libraries or linker scripts, run `make clean && make verify`.
-  Otherwise run `make verify` before handoff.
