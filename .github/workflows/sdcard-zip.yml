@@ -42,10 +42,18 @@ jobs:
           restore-keys: |
             unifrog-cores-${{ runner.os }}-
 
+      - name: Cache toolchain
+        uses: actions/cache@v4
+        with:
+          path: toolchain
+          key: unifrog-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
+          restore-keys: |
+            unifrog-toolchain-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Build SD card package
         run: |
           export CCACHE_DIR="$PWD/.ccache"
-          make ci-sd-zip HOSTCC=tcc CCACHE=ccache
+          make ci-sd-zip HOSTCC=tcc CCACHE=ccache TOOLCHAIN="$PWD/toolchain"
 
       - name: Upload SD card package
         uses: actions/upload-artifact@v4
