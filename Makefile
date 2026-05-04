@@ -328,6 +328,14 @@ PMP_VIDEO_CORE_LIB := $(CORES)/output/pmp_libretro_sf2000.a
 FIRMWARE_LIBRETRO_CORE_LIBS ?=
 CORE_REV_STAMP := $(BUILD)/core-sources.rev
 CORE_BUILD_DEPS := $(CORES)/Makefile $(CORES)/manifest.mk $(CORE_REV_STAMP)
+CORE_MAKE_ARGS := \
+	TOOLCHAIN=$(TOOLCHAIN) \
+	CROSS_COMPILE=$(CROSS_COMPILE) \
+	SDK=$(abspath $(SDK)) \
+	CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT)) \
+	CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT)) \
+	CCACHE=$(CCACHE) \
+	JOBS=$(JOBS)
 LIBRETRO_COMMON_BUILD_DEPS := $(CORE_BUILD_DEPS)
 CHD_SUPPORT_BUILD_DEPS := $(CORE_BUILD_DEPS)
 GAMBATTE_BUILD_DEPS := $(CORE_BUILD_DEPS)
@@ -499,7 +507,7 @@ help:
 	@echo "                    Keep audio-sensitive objects on the measured-safe path"
 	@echo "  make V=1          Show full compiler/linker commands"
 
-deps: deps-mquickjs deps-support deps-cores
+deps: deps-mquickjs deps-cores
 
 deps-alpine:
 	apk add git make dtc tcc ccache curl tar xz zip patch
@@ -519,10 +527,10 @@ deps-mquickjs:
 	fi
 
 deps-support:
-	$(Q)$(MAKE) -C $(CORES) support-init CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT))
+	$(Q)$(MAKE) -C $(CORES) support-init $(CORE_MAKE_ARGS)
 
 deps-cores:
-	$(Q)$(MAKE) -C $(CORES) init CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT)) CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT))
+	$(Q)$(MAKE) -C $(CORES) init $(CORE_MAKE_ARGS)
 
 doctor:
 	@echo "Toolchain: $(TOOLCHAIN)"
@@ -788,68 +796,55 @@ $(BUILD_IDENTITY_STAMP): FORCE | $(BUILD)
 
 $(GAMBATTE_CORE_LIB): $(GAMBATTE_BUILD_DEPS)
 	@echo "  CORE    gambatte"
-	$(Q)$(MAKE) -C $(CORES) gambatte TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) gambatte $(CORE_MAKE_ARGS)
 
 $(GPSP_CORE_LIB): $(GPSP_BUILD_DEPS)
 	@echo "  CORE    gpsp"
-	$(Q)$(MAKE) -C $(CORES) gpsp TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) gpsp $(CORE_MAKE_ARGS)
 
 $(PICODRIVE_CORE_LIB): $(PICODRIVE_BUILD_DEPS) $(CHD_SUPPORT_CORE_LIB)
 	@echo "  CORE    picodrive"
-	$(Q)$(MAKE) -C $(CORES) picodrive TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) picodrive $(CORE_MAKE_ARGS)
 
 $(SNES9X2005_CORE_LIB): $(SNES9X2005_BUILD_DEPS)
 	@echo "  CORE    snes9x2005"
-	$(Q)$(MAKE) -C $(CORES) snes9x2005 TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) snes9x2005 $(CORE_MAKE_ARGS)
 
 $(SNES9X2002_CORE_LIB): $(SNES9X2002_BUILD_DEPS)
 	@echo "  CORE    snes9x2002"
-	$(Q)$(MAKE) -C $(CORES) snes9x2002 TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) snes9x2002 $(CORE_MAKE_ARGS)
 
 $(QUICKNES_CORE_LIB): $(QUICKNES_BUILD_DEPS)
 	@echo "  CORE    quicknes"
-	$(Q)$(MAKE) -C $(CORES) quicknes TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) quicknes $(CORE_MAKE_ARGS)
 
 $(FCEUMM_CORE_LIB): $(FCEUMM_BUILD_DEPS)
 	@echo "  CORE    fceumm"
-	$(Q)$(MAKE) -C $(CORES) fceumm TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) fceumm $(CORE_MAKE_ARGS)
 
 $(GEARBOY_CORE_LIB): $(GEARBOY_BUILD_DEPS)
 	@echo "  CORE    gearboy"
-	$(Q)$(MAKE) -C $(CORES) gearboy TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) gearboy $(CORE_MAKE_ARGS)
 
 $(PCE_FAST_CORE_LIB): $(PCE_FAST_BUILD_DEPS) $(CHD_SUPPORT_CORE_LIB)
 	@echo "  CORE    pce-fast"
-	$(Q)$(MAKE) -C $(CORES) pce-fast TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) pce-fast $(CORE_MAKE_ARGS)
 
 $(QPSX_CORE_LIB): $(QPSX_BUILD_DEPS)
 	@echo "  CORE    qpsx"
-	$(Q)$(MAKE) -C $(CORES) qpsx TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) qpsx $(CORE_MAKE_ARGS)
 
 $(PMP_VIDEO_CORE_LIB): $(PMP_VIDEO_BUILD_DEPS)
 	@echo "  CORE    pmp-video"
-	$(Q)$(MAKE) -C $(CORES) pmp-video TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) pmp-video $(CORE_MAKE_ARGS)
 
 $(LIBRETRO_COMMON_LIB): $(LIBRETRO_COMMON_BUILD_DEPS)
 	@echo "  CORELIB libretro-common"
-	$(Q)$(MAKE) -C $(CORES) libretro-common TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) libretro-common $(CORE_MAKE_ARGS)
 
 $(CHD_SUPPORT_CORE_LIB): $(CHD_SUPPORT_BUILD_DEPS)
 	@echo "  CORELIB libchdr-support"
-	$(Q)$(MAKE) -C $(CORES) chd-support TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) SDK=$(abspath $(SDK)) CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) chd-support $(CORE_MAKE_ARGS)
 
 $(OUT)/$(TARGET).bin: $(OUT)/$(TARGET).out
 	@echo "  OBJCOPY $@"
@@ -990,7 +985,7 @@ refresh-sd:
 refresh-sd-clean:
 	$(Q)$(MAKE) clean
 	$(Q)$(MAKE) -C $(SDK) clean
-	$(Q)$(MAKE) -C $(CORES) clean CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) clean $(CORE_MAKE_ARGS)
 	$(Q)$(MAKE) -C $(JS2300) clean
 	$(Q)$(MAKE) -C $(FRONTEND) clean
 	$(Q)$(MAKE) install SDCARD=$(SDCARD)
