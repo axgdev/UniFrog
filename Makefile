@@ -1018,6 +1018,7 @@ ci-toolchain:
 		root=$$(dirname "$$(dirname "$$found")"); \
 		mkdir -p "$(TOOLCHAIN)"; \
 		cp -a "$$root"/. "$(TOOLCHAIN)"/; \
+		rm -f /tmp/frog-toolchain.tar.xz; \
 	fi
 	@test -x "$(TOOLCHAIN)/bin/mipsel-mti-elf-gcc" || { echo "missing: $(TOOLCHAIN)/bin/mipsel-mti-elf-gcc"; exit 1; }
 
