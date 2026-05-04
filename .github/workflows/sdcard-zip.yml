@@ -16,7 +16,7 @@ jobs:
       image: alpine:latest
     steps:
       - name: Install packages
-        run: apk add git make dtc tcc ccache curl tar xz zip patch
+        run: apk add git make dtc tcc musl-dev ccache curl tar xz zip patch
 
       - name: Check out UniFrog
         uses: actions/checkout@v4
