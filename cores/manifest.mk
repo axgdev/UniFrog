@@ -2,6 +2,8 @@ CORE_SOURCE_ROOT ?= ../.deps/cores
 CORE_SUPPORT_ROOT ?= ../.deps/support
 
 # name|checkout-directory|upstream-url|upstream-commit|sparse-paths
+# Use ":files /patterns" for sparse file patterns when cone mode would pull
+# extra platform assets.
 SUPPORT_SPECS := \
 	'libchdr|$(CORE_SUPPORT_ROOT)/libchdr|https://github.com/rtissera/libchdr.git|25fcb10cde7b9af71dbbb76d68033a4975af0a08|include src deps/lzma-25.01/include deps/lzma-25.01/src' \
 	'zstd|$(CORE_SUPPORT_ROOT)/zstd|https://github.com/facebook/zstd.git|f8745da6ff1ad1e7bab384bd1f9d742439278e99|build/single_file_libs lib' \
@@ -17,7 +19,7 @@ CORE_SPECS := \
 	'snes9x2002|$(CORE_SOURCE_ROOT)/snes9x2002|https://github.com/libretro/snes9x2002.git|39e0d8c6daf4b1b1302eeecfee8309570aeb6a82|.' \
 	'quicknes|$(CORE_SOURCE_ROOT)/QuickNES_Core|https://github.com/libretro/QuickNES_Core.git|7848e1ac22b1c69d056ae4cb57710651ff1dd169|.' \
 	'fceumm|$(CORE_SOURCE_ROOT)/libretro-fceumm|https://github.com/libretro/libretro-fceumm.git|3a84a6fd0ba20dd4877c06b1d58741172148395f|src' \
-	'gearboy|$(CORE_SOURCE_ROOT)/Gearboy|https://github.com/libretro/Gearboy.git|368521ef59f3a0e600346ba22041b05331188275|src platforms/libretro' \
+	'gearboy|$(CORE_SOURCE_ROOT)/Gearboy|https://github.com/drhelius/Gearboy.git|f1c41e6fe0e5f91e148094309903460a6a4ebb7b|:files /LICENSE /src/** /platforms/libretro/Makefile /platforms/libretro/Makefile.common /platforms/libretro/libretro.cpp /platforms/libretro/libretro.h /platforms/libretro/libretro_core_options.h /platforms/libretro/link.T /platforms/shared/dependencies/miniz/**' \
 	'pce-fast|$(CORE_SOURCE_ROOT)/beetle-pce-fast-libretro|https://github.com/libretro/beetle-pce-fast-libretro.git|9ba79648d6ec85e833aef719d7f359117498d89c|mednafen libretro-common' \
 	'qpsx|$(CORE_SOURCE_ROOT)/sf2000-qpsx-playstation-emulator|https://github.com/angree/sf2000-qpsx-playstation-emulator.git|368310aa1b94fe764b8fdf4ddbd7afd06d7bd2a1|src libretro' \
 	'pmp-video|$(CORE_SOURCE_ROOT)/sf2000-video-player|https://github.com/angree/sf2000-video-player.git|3fba73781f3b502642ef7eb7748ab0dca357926d|.'

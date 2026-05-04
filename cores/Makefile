@@ -345,7 +345,9 @@ support-init:
 			git -C "$$dir" remote add origin "$$url"; \
 			git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
 		fi; \
-		if test "$$sparse" = ":root-files"; then \
+		if test "$${sparse#":files "}" != "$$sparse"; then \
+			git -C "$$dir" sparse-checkout set --no-cone $${sparse#":files "}; \
+		elif test "$$sparse" = ":root-files"; then \
 			git -C "$$dir" sparse-checkout init --no-cone; \
 			printf '/*\n!/*/\n' >"$$dir/.git/info/sparse-checkout"; \
 		elif test "$$sparse" != "."; then \
@@ -381,7 +383,9 @@ init: support-init
 			git -C "$$dir" remote add origin "$$url"; \
 			git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
 		fi; \
-		if test "$$sparse" != "."; then \
+		if test "$${sparse#":files "}" != "$$sparse"; then \
+			git -C "$$dir" sparse-checkout set --no-cone $${sparse#":files "}; \
+		elif test "$$sparse" != "."; then \
 			git -C "$$dir" sparse-checkout init --cone; \
 			git -C "$$dir" sparse-checkout set --skip-checks $$sparse; \
 		fi; \
@@ -580,7 +584,9 @@ update-core:
 			else \
 				git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
 			fi; \
-			if test "$$sparse" != "."; then \
+			if test "$${sparse#":files "}" != "$$sparse"; then \
+				git -C "$$dir" sparse-checkout set --no-cone $${sparse#":files "}; \
+			elif test "$$sparse" != "."; then \
 				git -C "$$dir" sparse-checkout init --cone; \
 				git -C "$$dir" sparse-checkout set --skip-checks $$sparse; \
 			fi; \
