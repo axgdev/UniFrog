@@ -4,7 +4,7 @@ TOOLCHAIN_HOST_ARCH := $(if $(filter aarch64 arm64,$(TOOLCHAIN_UNAME_M)),arm64,$
 TOOLCHAIN_URL ?= https://github.com/axgdev/frog-toolchain/releases/download/v1.1.1/toolchain-stable-static-$(TOOLCHAIN_HOST_ARCH)-gcc15.2.0-binutils2.45-newlib4.5.0.20241231.tar.xz
 CROSS_COMPILE ?= $(TOOLCHAIN)/bin/mipsel-mti-elf-
 DEPS ?= .deps
-SDK ?= ../unifrog-hcrtos-sdk
+SDK ?= hcrtos-sdk
 CORES ?= cores
 CORE_SOURCE_ROOT ?= $(DEPS)/cores
 CORE_SUPPORT_ROOT ?= $(DEPS)/support
@@ -454,7 +454,7 @@ SHELL_APP_OBJECTS += $(DTB_OBJ)
 endif
 
 .DELETE_ON_ERROR:
-.PHONY: all clean distclean rebuild refresh-sd refresh-sd-clean sd-zip deps deps-alpine deps-ubuntu deps-mquickjs deps-support deps-cores ci-deps ci-toolchain ci-sd-zip check asdcheck fastboot fastboot-check layout-check doctor size install dtb lib sdk js2300-check frontend-check frontend-package core-package help FORCE
+.PHONY: all clean distclean rebuild refresh-sd refresh-sd-clean sd-zip deps deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores ci-deps ci-toolchain ci-commit-check ci-sd-zip check asdcheck fastboot fastboot-check layout-check doctor size install dtb lib sdk js2300-check frontend-check frontend-package core-package help FORCE
 
 all: $(ASD) $(OUT)/unifrog.bin core-package
 
@@ -466,6 +466,7 @@ help:
 	@echo "  make deps         Fetch external build inputs into $(DEPS)"
 	@echo "  make deps-alpine  Install Alpine host packages"
 	@echo "  make deps-ubuntu  Print Ubuntu host package command"
+	@echo "  make deps-sdk     Initialize the HCRTOS SDK submodule"
 	@echo "  make js2300-check Check the JS2300 runtime"
 	@echo "  make frontend-check"
 	@echo "                    Check the editable JavaScript frontend"
@@ -491,6 +492,8 @@ help:
 	@echo "  make sd-zip       Build a ready-to-extract SD card ZIP at SDZIP=output/UniFrog-sdcard.zip"
 	@echo "  make ci-sd-zip    Run the local equivalent of the GitHub SD-card ZIP build"
 	@echo "                    Uses fetched dependencies and fast ZIP compression"
+	@echo "  make ci-commit-check"
+	@echo "                    Fast per-commit compile smoke test used by GitHub Actions"
 	@echo "  make rebuild      Clean, then build"
 	@echo "  make clean        Remove generated files"
 	@echo "  make distclean    Remove generated files and editor/test leftovers"
@@ -509,13 +512,17 @@ help:
 	@echo "                    Keep audio-sensitive objects on the measured-safe path"
 	@echo "  make V=1          Show full compiler/linker commands"
 
-deps: deps-mquickjs deps-cores
+deps: deps-sdk deps-mquickjs deps-cores
 
 deps-alpine:
 	apk add git make dtc tcc ccache curl tar xz zip patch
 
 deps-ubuntu:
 	@echo "sudo apt-get update && sudo apt-get install -y git make device-tree-compiler tcc ccache curl xz-utils zip patch"
+
+deps-sdk:
+	git submodule sync hcrtos-sdk
+	git submodule update --init --depth 1 hcrtos-sdk
 
 deps-mquickjs:
 	@mkdir -p $(DEPS)
@@ -1021,6 +1028,10 @@ ci-toolchain:
 		rm -f /tmp/frog-toolchain.tar.xz; \
 	fi
 	@test -x "$(TOOLCHAIN)/bin/mipsel-mti-elf-gcc" || { echo "missing: $(TOOLCHAIN)/bin/mipsel-mti-elf-gcc"; exit 1; }
+
+ci-commit-check: ci-deps ci-toolchain
+	$(Q)$(MAKE) doctor TOOLCHAIN=$(TOOLCHAIN)
+	$(Q)$(MAKE) sdk lib js2300-check frontend-check TOOLCHAIN=$(TOOLCHAIN) HOSTCC=$(HOSTCC)
 
 ci-sd-zip: ci-deps ci-toolchain
 	$(Q)$(MAKE) doctor TOOLCHAIN=$(TOOLCHAIN)

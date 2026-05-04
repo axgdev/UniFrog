@@ -1,0 +1,4 @@
+[submodule "hcrtos-sdk"]
+	path = hcrtos-sdk
+	url = https://github.com/axgdev/unifrog-hcrtos-sdk.git
+	branch = main
