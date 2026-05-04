@@ -28,10 +28,17 @@ inputs are described in:
 cores/manifest.mk
 ```
 
-`make deps-cores` clones or updates each listed branch directly into:
+`make deps-cores` clones or updates each listed core commit directly into:
 
 ```text
 .deps/cores/
+```
+
+Shared support inputs for CHD/zstd/zlib/LZMA are pinned in the same manifest and
+fetched into:
+
+```text
+.deps/support/
 ```
 
 The core build recipe lives in `cores/Makefile` and writes built static archives
@@ -46,7 +53,6 @@ stages the final `.bin` files under `output/sdcard/unifrog/cores/`.
 
 ## Core Changes
 
-UniFrog-specific core changes are currently kept on the public branches listed
-in `cores/manifest.mk`. The next refinement is to move simple integration files
-into committed overlays under `cores/overlays/`, leaving only unavoidable
-upstream source edits on the fetched core branches.
+UniFrog-specific core changes are committed as patch series under
+`cores/patches/<core>/`. Generated checkouts under `.deps/` can be deleted and
+recreated from the manifest plus patches.

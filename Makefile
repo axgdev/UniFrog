@@ -5,6 +5,7 @@ DEPS ?= .deps
 SDK ?= ../unifrog-hcrtos-sdk
 CORES ?= cores
 CORE_SOURCE_ROOT ?= $(DEPS)/cores
+CORE_SUPPORT_ROOT ?= $(DEPS)/support
 JS2300 ?= js2300
 FRONTEND ?= frontend
 MQUICKJS_DIR ?= $(DEPS)/mquickjs
@@ -289,8 +290,8 @@ UNIFROG_OBJECTS := \
 LZ4_SRCS := lz4.c lz4frame.c lz4hc.c xxhash.c
 LZ4_OBJS := $(addprefix $(BUILD)/third_party/lz4/,$(LZ4_SRCS:.c=.o))
 LZ4_CFLAGS := $(CFLAGS_FAST) -w -Isrc/third_party/lz4
-ZSTD_DIR := $(CORE_SOURCE_ROOT)/picodrive/pico/cd/libchdr/deps/zstd-1.5.6/lib
-ZSTD_DECODER_SRC := $(CORE_SOURCE_ROOT)/picodrive/pico/cd/libchdr/deps/zstd-1.5.6/build/single_file_libs/zstddeclib-in.c
+ZSTD_DIR := $(CORE_SUPPORT_ROOT)/zstd/lib
+ZSTD_DECODER_SRC := $(CORE_SUPPORT_ROOT)/zstd/build/single_file_libs/zstddeclib-in.c
 ZSTD_DECODER_OBJ := $(BUILD)/third_party/zstddeclib.o
 ZSTD_CFLAGS := $(CFLAGS_FAST) -w \
 	-DZSTD_DISABLE_ASM=1 \
@@ -401,8 +402,8 @@ CORE_MODULE_LDLIBS := \
 	-lsupc++ \
 	-lc \
 	-lgcc
-PICODRIVE_LZMA_DIR := $(CORE_SOURCE_ROOT)/picodrive/pico/cd/libchdr/deps/lzma-24.05
-PICODRIVE_LZMA_SRCS := Alloc.c CpuArch.c Delta.c LzmaDec.c LzmaEnc.c LzFind.c Sort.c
+PICODRIVE_LZMA_DIR := $(CORE_SUPPORT_ROOT)/libchdr/deps/lzma-25.01
+PICODRIVE_LZMA_SRCS := LzmaDec.c
 PICODRIVE_LZMA_OBJS := $(addprefix $(BUILD)/core_modules/picodrive_lzma_,$(PICODRIVE_LZMA_SRCS:.c=.o))
 PICODRIVE_LZMA_CFLAGS := \
 	-DZ7_ST \
@@ -443,7 +444,7 @@ SHELL_APP_OBJECTS += $(DTB_OBJ)
 endif
 
 .DELETE_ON_ERROR:
-.PHONY: all clean distclean rebuild refresh-sd refresh-sd-clean sd-zip deps deps-alpine deps-ubuntu deps-mquickjs deps-cores ci-deps ci-toolchain ci-sd-zip check asdcheck fastboot fastboot-check layout-check doctor size install dtb lib sdk js2300-check frontend-check frontend-package core-package help FORCE
+.PHONY: all clean distclean rebuild refresh-sd refresh-sd-clean sd-zip deps deps-alpine deps-ubuntu deps-mquickjs deps-support deps-cores ci-deps ci-toolchain ci-sd-zip check asdcheck fastboot fastboot-check layout-check doctor size install dtb lib sdk js2300-check frontend-check frontend-package core-package help FORCE
 
 all: $(ASD) $(OUT)/unifrog.bin core-package
 
@@ -498,7 +499,7 @@ help:
 	@echo "                    Keep audio-sensitive objects on the measured-safe path"
 	@echo "  make V=1          Show full compiler/linker commands"
 
-deps: deps-mquickjs deps-cores
+deps: deps-mquickjs deps-support deps-cores
 
 deps-alpine:
 	apk add git make dtc tcc ccache curl tar xz zip patch
@@ -517,8 +518,11 @@ deps-mquickjs:
 		git clone --depth 1 --branch "$(MQUICKJS_REF)" "$(MQUICKJS_URL)" "$(MQUICKJS_DIR)"; \
 	fi
 
+deps-support:
+	$(Q)$(MAKE) -C $(CORES) support-init CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT))
+
 deps-cores:
-	$(Q)$(MAKE) -C $(CORES) init CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))
+	$(Q)$(MAKE) -C $(CORES) init CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT)) CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT))
 
 doctor:
 	@echo "Toolchain: $(TOOLCHAIN)"
@@ -539,6 +543,9 @@ doctor:
 	@test -f "$(DTS)" || { echo "missing: $(DTS)"; exit 1; }
 	@test -f "$(CORES)/Makefile" || { echo "missing: $(CORES)/Makefile"; exit 1; }
 	@test -e "$(CORE_SOURCE_ROOT)/libretro-common/.git" || { echo "missing core checkout; run: make deps-cores"; exit 1; }
+	@test -f "$(CORE_SUPPORT_ROOT)/zstd/build/single_file_libs/zstddeclib-in.c" || { echo "missing core support checkout; run: make deps"; exit 1; }
+	@test -f "$(CORE_SUPPORT_ROOT)/zlib/inflate.c" || { echo "missing core support checkout; run: make deps"; exit 1; }
+	@test -f "$(CORE_SUPPORT_ROOT)/libchdr/src/libchdr_chd.c" || { echo "missing core support checkout; run: make deps"; exit 1; }
 	@test -f "$(JS2300)/Makefile" || { echo "missing JS2300 source: $(JS2300)"; exit 1; }
 	@test -f "$(FRONTEND)/Makefile" || { echo "missing frontend source: $(FRONTEND)"; exit 1; }
 	@test -f "$(MQUICKJS_DIR)/mquickjs.c" || { echo "missing MQuickJS checkout: $(MQUICKJS_DIR)"; exit 1; }
@@ -547,6 +554,7 @@ doctor:
 	@echo "SDK=$(SDK)"
 	@echo "CORES=$(CORES)"
 	@echo "CORE_SOURCE_ROOT=$(CORE_SOURCE_ROOT)"
+	@echo "CORE_SUPPORT_ROOT=$(CORE_SUPPORT_ROOT)"
 	@echo "JS2300=$(JS2300)"
 	@echo "FRONTEND=$(FRONTEND)"
 	@echo "MQUICKJS_DIR=$(MQUICKJS_DIR)"

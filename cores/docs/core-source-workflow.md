@@ -8,10 +8,16 @@ Each manifest entry has:
 name|checkout-directory|upstream-url|upstream-commit
 ```
 
+Shared support entries add sparse paths:
+
+```text
+name|checkout-directory|upstream-url|upstream-commit|sparse-paths
+```
+
 `make -C cores init` fetches those exact upstream commits into `.deps/cores/`
-and applies the matching patch series from `cores/patches/<name>/`. The app
-repository does not commit those source trees and does not use Git submodules
-for them.
+and applies the matching patch series from `cores/patches/<name>/`. It also
+fetches shared support sources into `.deps/support/`. The app repository does
+not commit those source trees and does not use Git submodules for them.
 
 Useful commands:
 

@@ -34,11 +34,14 @@ Fetched dependencies live under `.deps/` and are not committed:
 
 - `.deps/mquickjs`
 - `.deps/cores`
+- `.deps/support`
 
-Core sources are fetched directly from the upstream repositories pinned in
-`cores/manifest.mk`. UniFrog changes are committed as patch series under
-`cores/patches/`, and `make deps-cores` applies them into `.deps/cores`
-without adding Git submodules to the app repository.
+Core and shared support sources are fetched directly from the upstream
+repositories pinned in `cores/manifest.mk`. UniFrog changes are committed as
+patch series under `cores/patches/`, and `make deps-cores` applies them into
+`.deps/cores` without adding Git submodules to the app repository. Shared
+libchdr, zstd, zlib, and LZMA sources live under `.deps/support` and are built
+once for the cores that need CHD/media support.
 
 ## Public History
 
