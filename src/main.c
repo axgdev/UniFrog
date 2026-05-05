@@ -50,15 +50,7 @@
 static void app_main(void *pvParameters);
 static void *frontend_thread(void *arg);
 static int start_frontend_thread(void);
-static int init_early_display_modules(void);
 static int frontend_started;
-
-static const char *early_display_modules[] = {
-   "pwm",
-   "fb",
-   "st7789v2",
-   "backlight",
-};
 
 static char *fast_ui_boot_excludes[] = {
    "apll_dai",
@@ -186,37 +178,6 @@ static int start_frontend_thread(void)
    return 0;
 }
 
-static int init_early_display_modules(void)
-{
-   uint32_t start_ms;
-   int first_ret = 0;
-
-   start_ms = unifrog_perf_time_ms();
-   for (unsigned i = 0; i < sizeof(early_display_modules) /
-      sizeof(early_display_modules[0]); i++) {
-      const char *name = early_display_modules[i];
-      uint32_t module_start_ms = unifrog_perf_time_ms();
-      uint32_t module_done_ms;
-      int ret;
-
-      ret = module_init(name);
-      module_done_ms = unifrog_perf_time_ms();
-      unifrog_log("unifrog boot_perf phase=early_display_module "
-         "name=%s ret=%d ms=%lu total_ms=%lu\n",
-         name, ret,
-         (unsigned long)(module_done_ms - module_start_ms),
-         (unsigned long)(module_done_ms - start_ms));
-      if (ret != 0 && first_ret == 0)
-         first_ret = ret;
-   }
-   unifrog_log("unifrog boot_perf phase=early_display_init ret=%d "
-      "ms=%lu modules=%lu\n",
-      first_ret, (unsigned long)(unifrog_perf_time_ms() - start_ms),
-      (unsigned long)(sizeof(early_display_modules) /
-         sizeof(early_display_modules[0])));
-   return first_ret;
-}
-
 static int sf2000_start(void)
 {
    return start_frontend_thread();
@@ -227,8 +188,6 @@ __initcall(sf2000_start)
 
 static void app_main(void *pvParameters)
 {
-   int early_display_ret;
-   int logo_ret = -1;
    int module_ret;
    uint32_t module_start_ms;
    uint32_t module_done_ms;
@@ -242,12 +201,6 @@ static void app_main(void *pvParameters)
       module_start_ms,
       (uint32_t)(sizeof(fast_ui_boot_excludes) / sizeof(fast_ui_boot_excludes[0])),
       0);
-   early_display_ret = init_early_display_modules();
-   if (early_display_ret == 0)
-      logo_ret = unifrog_boot_logo_present_early();
-   else
-      unifrog_log("unifrog boot_logo early skipped display_ret=%d\n",
-         early_display_ret);
    module_ret = module_init2("all",
       (int)(sizeof(fast_ui_boot_excludes) / sizeof(fast_ui_boot_excludes[0])),
       fast_ui_boot_excludes);
@@ -260,13 +213,8 @@ static void app_main(void *pvParameters)
          sizeof(fast_ui_boot_excludes[0])));
    if (module_ret != 0)
       printf("module_init all failed ret=%d, starting frontend fallback\n", module_ret);
-   else if (!unifrog_boot_logo_is_active())
-      logo_ret = unifrog_boot_logo_present_early();
-   if (logo_ret != 0)
-      unifrog_log("unifrog boot_logo early final_ret=%d display_ret=%d "
-         "module_ret=%d active=%d\n",
-         logo_ret, early_display_ret, module_ret,
-         unifrog_boot_logo_is_active());
+   else
+      (void)unifrog_boot_logo_present_early();
    start_frontend_thread();
 
    setenv("TZ", CONFIG_APP_TIMEZONE, 1);
