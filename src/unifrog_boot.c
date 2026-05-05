@@ -105,6 +105,20 @@ static void boot_via_stage1_path(const char *path)
    reset_into_fastboot();
 }
 
+void unifrog_boot_reboot(void)
+{
+   volatile struct fastboot_handoff *handoff = FASTBOOT_HANDOFF_ADDR;
+   volatile struct fastboot_diag *diag = FASTBOOT_DIAG_ADDR;
+
+   handoff->magic = 0;
+   diag->magic = 0;
+   cache_flush((void *)handoff, sizeof(*handoff));
+   cache_flush((void *)diag, sizeof(*diag));
+   printf("unifrog reboot request\n");
+   (void)unifrog_log_flush();
+   reset_into_fastboot();
+}
+
 int unifrog_boot_firmware_asd(const char *name)
 {
    static const char prefix[] = "firmware/";

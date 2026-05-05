@@ -377,6 +377,7 @@ function settingValue(id) {
   if (id === "index") return "Scan";
   if (id === "system_check") return "Verify";
   if (id === "developer") return "Tools";
+  if (id === "reboot") return "Now";
   return "";
 }
 

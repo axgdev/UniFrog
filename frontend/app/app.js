@@ -84,6 +84,12 @@ function frontendPhase(stage) {
   frontendPhaseStartMs = JS2300.now();
 }
 
+function frontendStartupTotalMs() {
+  if (typeof __frontendLoadStart === "number")
+    return JS2300.now() - __frontendLoadStart;
+  return JS2300.now() - frontendStartupStartMs;
+}
+
 JS2300.log("unifrog frontend start");
 loadSettings();
 frontendPhase("settings_loaded");
@@ -120,7 +126,7 @@ while (running) {
         if (!frontendReadyLogged)
           JS2300.log("frontend phase=first_draw ms=" +
             String(JS2300.now() - gateDrawStart) + " total_ms=" +
-            String(JS2300.now() - frontendStartupStartMs));
+            String(frontendStartupTotalMs()));
         dirty = false;
         noteFrontendReady(now);
       } else {
@@ -151,7 +157,7 @@ while (running) {
     if (!frontendReadyLogged)
       JS2300.log("frontend phase=first_draw ms=" +
         String(JS2300.now() - drawStart) + " total_ms=" +
-        String(JS2300.now() - frontendStartupStartMs));
+        String(frontendStartupTotalMs()));
     dirty = false;
     if (deferImageLoads) {
       deferImageLoads = false;

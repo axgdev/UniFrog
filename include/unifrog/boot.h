@@ -15,6 +15,7 @@ extern "C" {
  */
 int unifrog_boot_firmware_asd(const char *name);
 int unifrog_boot_firmware_name_supported(const char *name);
+void unifrog_boot_reboot(void);
 
 #ifdef __cplusplus
 }

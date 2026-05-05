@@ -422,10 +422,13 @@ int host_action(void *opaque, const char *id)
 
    run_path = parse_run_action(frontend, id);
    if (run_path) {
-      unifrog_text_copy(frontend->action, sizeof(frontend->action), "run");
-      unifrog_text_copy(frontend->path, sizeof(frontend->path), run_path);
-      printf("js2300 action run path=%s core=%s corefile=%s audio=%d gain=%u scpu=%u ge=%d backlight=%d fs=%d display=%d\n",
-         frontend->path,
+      char path[JS2300_FRONTEND_MAX_PATH];
+      uint32_t start_ms;
+      int ret;
+
+      unifrog_text_copy(path, sizeof(path), run_path);
+      printf("js2300 action run warm path=%s core=%s corefile=%s audio=%d gain=%u scpu=%u ge=%d backlight=%d fs=%d display=%d\n",
+         path,
          frontend->run_options.core_id[0] ?
             frontend->run_options.core_id : "auto",
          frontend->run_options.core_path,
@@ -435,7 +438,17 @@ int host_action(void *opaque, const char *id)
          frontend->run_options.backlight_level,
          frontend->run_options.frameskip,
          frontend->run_options.display_mode);
-      return 0;
+      unifrog_diag_memory_snapshot("frontend.warm_run_start");
+      (void)unifrog_log_flush();
+      start_ms = unifrog_perf_time_ms();
+      ret = unifrog_libretro_run_path_ex(path, &frontend->run_options);
+      printf("js2300 action run warm ret=%d ms=%lu path=%s\n",
+         ret, (unsigned long)(unifrog_perf_time_ms() - start_ms), path);
+      unifrog_diag_memory_snapshot("frontend.warm_run_return");
+      frontend_fb_reopen(frontend, "warm_libretro_return");
+      unifrog_input_clear();
+      frontend->input_recovered = 1;
+      return ret == 0 ? 1 : -1;
    }
    if (strncmp(id, "script:", 7) == 0) {
       const char *path = id + 7;
@@ -497,6 +510,11 @@ int host_action(void *opaque, const char *id)
       unifrog_text_copy(frontend->action, sizeof(frontend->action), "firmware");
       unifrog_text_copy(frontend->path, sizeof(frontend->path), id + 9);
       printf("js2300 action firmware name=%s\n", frontend->path);
+      return 0;
+   }
+   if (strcmp(id, "reboot") == 0) {
+      unifrog_text_copy(frontend->action, sizeof(frontend->action), "reboot");
+      printf("js2300 action reboot\n");
       return 0;
    }
    if (strcmp(id, "continue") == 0) {
@@ -630,6 +648,10 @@ int run_requested_action(struct js2300_frontend *frontend)
          frontend->path);
       (void)unifrog_log_flush();
       return ret;
+   }
+   if (strcmp(frontend->action, "reboot") == 0) {
+      unifrog_boot_reboot();
+      return 0;
    }
    if (strcmp(frontend->action, "script") == 0) {
       char script_path[JS2300_FRONTEND_MAX_PATH];

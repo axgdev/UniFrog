@@ -25,7 +25,7 @@
 extern unsigned long PINMUXL;
 extern unsigned long PINMUXR;
 
-#define STORAGE_STABLE_SAMPLES 10
+#define STORAGE_STABLE_SAMPLES 2
 #define STORAGE_MAX_POLLS 100
 #define STORAGE_POLL_MS 100
 

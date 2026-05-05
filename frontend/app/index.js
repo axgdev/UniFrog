@@ -97,52 +97,98 @@ function clearIndexData() {
   systemItemLists = [];
 }
 
-function addIndexLine(line) {
-  var kind = field(line, 0);
+function rangeEquals(text, start, end, value) {
+  var i;
+  if (end - start !== value.length) return false;
+  for (i = 0; i < value.length; i++) {
+    if (text.charCodeAt(start + i) !== value.charCodeAt(i)) return false;
+  }
+  return true;
+}
+
+function rangeText(text, start, end) {
+  var out = "";
+  var i;
+  var c;
+  for (i = start; i < end; i++) {
+    c = text.charCodeAt(i);
+    if (c !== 13) out += String.fromCharCode(c);
+  }
+  return out;
+}
+
+function findSep(text, start, end) {
+  var pos = text.indexOf("|", start);
+  if (pos < 0 || pos >= end) return -1;
+  return pos;
+}
+
+function addIndexFields(isMedia, system, core, pathText, label) {
   var item;
-  if (kind === "game") {
-    item = {
-      system: field(line, 1),
-      core: field(line, 2),
-      path: field(line, 3),
-      label: field(line, 4)
-    };
-    if (item.path) {
-      if (shouldHideFile(basename(item.path), parentPath(item.path))) return;
-      if (!item.label) item.label = basename(item.path);
-      if (!item.system) item.system = "Other";
-      indexItems.push(item);
-      pushSystem(item.system, item);
-    }
-  } else if (kind === "media") {
-    item = {
+  if (!pathText) return;
+  if (shouldHideFile(basename(pathText), parentPath(pathText))) return;
+  if (!label) label = basename(pathText);
+  if (isMedia) {
+    mediaItems.push({
       system: "Media",
       core: "video",
-      path: field(line, 3),
-      label: field(line, 4)
+      path: pathText,
+      label: label
+    });
+  } else {
+    if (!system) system = "Other";
+    item = {
+      system: system,
+      core: core,
+      path: pathText,
+      label: label
     };
-    if (item.path) {
-      if (shouldHideFile(basename(item.path), parentPath(item.path))) return;
-      if (!item.label) item.label = basename(item.path);
-      mediaItems.push(item);
-    }
+    indexItems.push(item);
+    pushSystem(system, item);
   }
 }
 
+function addIndexLineRange(text, start, end) {
+  var p1;
+  var p2;
+  var p3;
+  var p4;
+  var isGame;
+  var isMediaLine;
+
+  while (end > start && text.charCodeAt(end - 1) === 13) end--;
+  if (end <= start) return;
+  p1 = findSep(text, start, end);
+  if (p1 < 0) return;
+  isGame = rangeEquals(text, start, p1, "game");
+  isMediaLine = !isGame && rangeEquals(text, start, p1, "media");
+  if (!isGame && !isMediaLine) return;
+  p2 = findSep(text, p1 + 1, end);
+  if (p2 < 0) return;
+  p3 = findSep(text, p2 + 1, end);
+  if (p3 < 0) return;
+  p4 = findSep(text, p3 + 1, end);
+  if (p4 < 0) return;
+  addIndexFields(isMediaLine,
+    rangeText(text, p1 + 1, p2),
+    rangeText(text, p2 + 1, p3),
+    rangeText(text, p3 + 1, p4),
+    rangeText(text, p4 + 1, end));
+}
+
 function parseIndex(text, append) {
-  var line = "";
-  var i;
-  var c;
+  var start = 0;
+  var end;
   if (!append) clearIndexData();
   if (!text) return;
-  for (i = 0; i <= text.length; i++) {
-    if (i === text.length) c = 10;
-    else c = text.charCodeAt(i);
-    if (c === 10 || c === 13) {
-      if (line.length > 0) addIndexLine(line);
-      line = "";
+  while (start < text.length) {
+    end = text.indexOf("\n", start);
+    if (end < 0) {
+      addIndexLineRange(text, start, text.length);
+      break;
     } else {
-      line += String.fromCharCode(c);
+      addIndexLineRange(text, start, end);
+      start = end + 1;
     }
   }
 }

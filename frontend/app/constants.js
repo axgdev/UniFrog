@@ -110,5 +110,6 @@ var settingRows = [
   { id: "system_check", label: "System check" },
   { id: "input", label: "Input monitor" },
   { id: "developer", label: "Developer tools" },
+  { id: "reboot", label: "Reboot" },
   { id: "about", label: "About" }
 ];

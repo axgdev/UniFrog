@@ -252,8 +252,20 @@ function openHomeItem(now) {
 
 function runAction(id, now) {
   var ret = JS2300.system.action(id);
-  if (ret !== 0) showToast("Action failed " + String(ret), now);
-  else running = false;
+  if (ret < 0) {
+    showToast("Action failed " + String(ret), now);
+  } else if (ret === 0) {
+    running = false;
+  } else {
+    startupInputGate = true;
+    startupInputGateMask = -1;
+    prevInput = 0;
+    repeatMask = 0;
+    nextRepeatMs = 0;
+    if (startsWithText(id, "run")) goHome(now);
+    showToast("Returned", now);
+    dirty = true;
+  }
 }
 
 function runLaunchGame(now) {
@@ -360,7 +372,7 @@ function cycleLaunch(delta) {
 function changeSetting(delta, now) {
   var id = settingRows[selected].id;
   if (id === "index" || id === "system_check" || id === "input" ||
-      id === "developer" || id === "about") {
+      id === "developer" || id === "reboot" || id === "about") {
     return;
   } else if (id === "brightness") {
     config.brightness =
@@ -415,6 +427,8 @@ function activateSetting(now) {
     scroll = 0;
     view = DEVELOPER;
     showToast("Developer", now);
+  } else if (id === "reboot") {
+    runAction("reboot", now);
   } else if (id === "about") {
     pushNav();
     view = ABOUT;

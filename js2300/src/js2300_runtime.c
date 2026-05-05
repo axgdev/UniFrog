@@ -1799,6 +1799,7 @@ static JSValue js2300_system_av_output(JSContext *ctx, JSValue *this_val, int ar
 static JSValue js2300_system_action(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv,
                                     JSValue params)
 {
+   struct js2300_runtime *runtime = active_runtime;
    JSCStringBuf buf;
    const char *id;
    int ret = -1;
@@ -1809,11 +1810,13 @@ static JSValue js2300_system_action(JSContext *ctx, JSValue *this_val, int argc,
       return JS_NewInt32(ctx, ret);
 
    id = JS_ToCString(ctx, argv[0], &buf);
-   if (active_runtime && active_runtime->host.action && id)
-      ret = active_runtime->host.action(active_runtime->host.opaque, id);
-   if (ret == 0 && active_runtime)
-      active_runtime->exit_requested = 1;
-   js2300_note_native_call(active_runtime);
+   if (runtime && runtime->host.action && id)
+      ret = runtime->host.action(runtime->host.opaque, id);
+   if (active_runtime != runtime)
+      active_runtime = runtime;
+   if (ret == 0 && runtime)
+      runtime->exit_requested = 1;
+   js2300_note_native_call(runtime);
    return JS_NewInt32(ctx, ret);
 }
 
