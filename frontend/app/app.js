@@ -669,6 +669,13 @@ function updateBattery(now) {
   dirty = true;
 }
 
+function noteFrontendReady(now) {
+  if (!frontendReadyLogged) {
+    JS2300.log("frontend ready input_ms=" + String(now) + " view=" + String(view));
+    frontendReadyLogged = true;
+  }
+}
+
 function showToast(text, now) {
   toast = text;
   toastUntilMs = now + 1400;
@@ -1995,6 +2002,7 @@ loadIndex();
 if (config.autoIndex)
   indexGames(JS2300.now());
 loadSystemCheckReport(JS2300.now());
+nextBatteryMs = JS2300.now() + 750;
 
 while (running) {
   var now = JS2300.now();
@@ -2015,6 +2023,7 @@ while (running) {
       if (dirty) {
         draw(now);
         dirty = false;
+        noteFrontendReady(now);
       } else {
         JS2300.sleep(16);
       }
@@ -2046,10 +2055,7 @@ while (running) {
     } else if (imageLoadPending) {
       dirty = true;
     }
-    if (!frontendReadyLogged) {
-      JS2300.log("frontend ready input_ms=" + String(now) + " view=" + String(view));
-      frontendReadyLogged = true;
-    }
+    noteFrontendReady(now);
   } else {
     JS2300.sleep(16);
   }

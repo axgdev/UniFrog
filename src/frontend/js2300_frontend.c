@@ -91,6 +91,7 @@ struct js2300_frontend {
    unsigned draw_buffer;
    int frame_open;
    int relaunch;
+   int input_recovered;
    uint32_t icon_use_counter;
 };
 
@@ -1606,6 +1607,7 @@ static int run_requested_action(struct js2300_frontend *frontend)
       printf("js2300 run action core ret=%d path=%s\n", ret, frontend->path);
       (void)unifrog_log_flush();
       frontend_fb_reopen(frontend, "libretro_return");
+      frontend->input_recovered = 1;
       return 0;
    }
    if (strcmp(frontend->action, "video") == 0) {
@@ -1700,27 +1702,36 @@ int js2300_frontend_main(void)
    do {
       struct js2300_runtime *runtime = NULL;
       size_t old_auto_flush;
+      const char *recover_tag;
+      unsigned relaunch = launch_count++;
 
       frontend.relaunch = 0;
       frontend.action[0] = 0;
       frontend.path[0] = 0;
       frontend.video_preset = 0;
       frontend.video_disable_audio = 0;
-      unifrog_input_recover_core_transition(launch_count++ ?
-         "frontend_relaunch" : "frontend_launch");
+      recover_tag = relaunch ? "frontend_relaunch" : "frontend_launch";
+      if (frontend.input_recovered) {
+         printf("unifrog input recover_transition skip tag=%s reason=already_recovered\n",
+            recover_tag);
+         unifrog_input_clear();
+         frontend.input_recovered = 0;
+      } else {
+         unifrog_input_recover_core_transition(recover_tag);
+      }
       unifrog_libretro_run_options_init(&frontend.run_options);
       old_auto_flush = unifrog_log_auto_flush_bytes();
       unifrog_log_set_auto_flush_bytes(64u * 1024u);
       printf("unifrog js launch root=%s script=%s boot_ms=%lu relaunch=%u\n",
          config.app_root, config.entry_script,
          (unsigned long)(unifrog_perf_time_ms() - frontend_start_ms),
-         launch_count - 1u);
+         relaunch);
       unifrog_log_flush();
 
       ret = js2300_runtime_create(&config, &host, &runtime);
       printf("unifrog boot_time stage=js_runtime_created total_ms=%lu ret=%d relaunch=%u\n",
          (unsigned long)(unifrog_perf_time_ms() - frontend_start_ms),
-         ret, launch_count - 1u);
+         ret, relaunch);
       if (ret == 0)
          ret = js2300_runtime_run(runtime);
       js2300_runtime_destroy(runtime);
