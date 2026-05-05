@@ -586,7 +586,8 @@ BUILD_IDENTITY_TOKEN := $(shell printf '%s\n' \
 	'HCRTOS_MEDIA=$(HCRTOS_MEDIA)' | cksum | awk '{print $$1}')
 FASTBOOT_CONFIG_TOKEN := $(shell printf '%s\n' \
 	'CC=$(CC)' 'LD=$(LD)' 'OBJCOPY=$(OBJCOPY)' \
-	'FASTBOOT_CFLAGS=$(FASTBOOT_CFLAGS)' | cksum | awk '{print $$1}')
+	'FASTBOOT_CFLAGS=$(FASTBOOT_CFLAGS)' \
+	'FASTBOOT_STAGE_BIN=$(FASTBOOT_STAGE_BIN)' | cksum | awk '{print $$1}')
 DTS_MODE_TOKEN := $(shell printf '%s\n' \
 	'SD_MODE=$(SD_MODE)' 'SD_CLOCK_FREQUENCY=$(SD_CLOCK_FREQUENCY)' \
 	'SD_BUS_WIDTH=$(SD_BUS_WIDTH)' 'SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED)' \
@@ -1106,7 +1107,9 @@ $(FASTBOOT_STAGE_BIN): $(FASTBOOT_STAGE_OUT) | $(BUILD)
 $(FASTBOOT_STUB_OBJ): src/fastboot/stub.S $(FASTBOOT_STAGE_BIN) | $(BUILD)
 	@echo "  AS      $<"
 	$(Q)mkdir -p $(dir $@)
-	$(Q)$(CC) $(FASTBOOT_CFLAGS) -D__ASSEMBLY__ -MD -MP -c $< -o $@
+	$(Q)$(CC) $(FASTBOOT_CFLAGS) -D__ASSEMBLY__ \
+		-DFASTBOOT_STAGE_BIN_PATH=\"$(FASTBOOT_STAGE_BIN)\" \
+		-MD -MP -c $< -o $@
 
 $(FASTBOOT_STUB_OUT): $(FASTBOOT_STUB_OBJ) linker/fastboot/stub.ld \
 	$(FASTBOOT_CONFIG_STAMP) | $(OUT)

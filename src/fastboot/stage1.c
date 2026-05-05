@@ -10,6 +10,8 @@
 #define CHUNK_ADDR ((uint8_t *)FASTBOOT_CHUNK_ADDR)
 #define CHUNK_SIZE (64u * 1024u)
 #define ASD_SKIP 0x200u
+#define RAW_LOAD_LIMIT ((unsigned int)((uintptr_t)FASTBOOT_CHUNK_ADDR - \
+	(uintptr_t)RAW_LOAD_ADDR))
 
 #define FA_READ 0x01u
 
@@ -84,6 +86,28 @@ typedef int (*rom_f_read_fn)(FIL *fp, void *buff, UINT btr, UINT *br);
 typedef int (*rom_f_close_fn)(FIL *fp);
 typedef void (*rom_cache_flush_fn)(void *addr, unsigned long len);
 typedef void (*entry_fn)(void);
+
+enum fastboot_diag_event {
+	FASTBOOT_DIAG_STAGE1_START = 1,
+	FASTBOOT_DIAG_MOUNT = 2,
+	FASTBOOT_DIAG_HANDOFF_FOUND = 3,
+	FASTBOOT_DIAG_HANDOFF_BOOT = 4,
+	FASTBOOT_DIAG_HANDOFF_MISSING = 5,
+	FASTBOOT_DIAG_RAW_OPEN = 10,
+	FASTBOOT_DIAG_RAW_OPEN_FAILED = 11,
+	FASTBOOT_DIAG_RAW_SKIP_FAILED = 12,
+	FASTBOOT_DIAG_RAW_LOADED = 13,
+	FASTBOOT_DIAG_RAW_LOAD_FAILED = 14,
+	FASTBOOT_DIAG_RAW_TOO_LARGE = 15,
+	FASTBOOT_DIAG_ASD_OPEN = 20,
+	FASTBOOT_DIAG_ASD_OPEN_FAILED = 21,
+	FASTBOOT_DIAG_ASD_SIZE_INVALID = 22,
+	FASTBOOT_DIAG_ASD_SKIP_FAILED = 23,
+	FASTBOOT_DIAG_ASD_LOAD_FAILED = 24,
+	FASTBOOT_DIAG_ASD_LOADED = 25,
+	FASTBOOT_DIAG_JUMP = 30,
+	FASTBOOT_DIAG_FAIL = 99
+};
 
 static rom_printf_fn const rom_printf = (rom_printf_fn)0x8101aa50u;
 static rom_f_mount_fn const rom_f_mount = (rom_f_mount_fn)0x8101f044u;
@@ -279,7 +303,8 @@ static int skip_bytes(FIL *fp, unsigned int bytes)
 	return 0;
 }
 
-static int load_stream(FIL *fp, uint8_t *load_addr)
+static int read_stream_bounded(FIL *fp, uint8_t *load_addr,
+		unsigned int max_size, unsigned int *loaded)
 {
 	uint8_t *dst = load_addr;
 	UINT got = 0;
@@ -287,7 +312,13 @@ static int load_stream(FIL *fp, uint8_t *load_addr)
 	int rc;
 
 	for (;;) {
-		rc = rom_f_read(fp, dst, CHUNK_SIZE, &got);
+		unsigned int room = max_size - total;
+		UINT want;
+
+		if (room == 0)
+			return -1;
+		want = room > CHUNK_SIZE ? CHUNK_SIZE : room;
+		rc = rom_f_read(fp, dst, want, &got);
 		if (rc != 0)
 			return -1;
 		if (got == 0)
@@ -298,7 +329,28 @@ static int load_stream(FIL *fp, uint8_t *load_addr)
 
 	rom_printf("fastboot: loaded %u bytes\n", total);
 	rom_cache_flush(load_addr, total);
+	if (loaded)
+		*loaded = total;
 	return total == 0 ? -1 : 0;
+}
+
+static int read_stream_exact(FIL *fp, uint8_t *load_addr, unsigned int size)
+{
+	uint8_t *dst = load_addr;
+	unsigned int remaining = size;
+
+	while (remaining != 0) {
+		UINT want = remaining > CHUNK_SIZE ? CHUNK_SIZE : remaining;
+
+		if (read_exact(fp, dst, want) != 0)
+			return -1;
+		dst += want;
+		remaining -= want;
+	}
+
+	rom_printf("fastboot: loaded %u bytes\n", size);
+	rom_cache_flush(load_addr, size);
+	return size == 0 ? -1 : 0;
 }
 
 static void copy_bytes(uint8_t *dst, const uint8_t *src, unsigned int len)
@@ -314,14 +366,14 @@ static int load_asd_staged(const char *path)
 
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_ASD_START,
 		trace_path_hash(path), (unsigned int)(uintptr_t)ASD_LOAD_ADDR, 0);
-	write_diag(20, 0, path);
+	write_diag(FASTBOOT_DIAG_ASD_OPEN, 0, path);
 	rom_printf("fastboot: open %s staged\n", path);
 	rc = rom_f_open(&file, path, FA_READ);
 	if (rc != 0) {
 		rom_printf("fastboot: open failed %d\n", rc);
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_ASD_DONE,
 			trace_path_hash(path), (unsigned int)rc, 0);
-		write_diag(21, rc, path);
+			write_diag(FASTBOOT_DIAG_ASD_OPEN_FAILED, rc, path);
 		return -1;
 	}
 
@@ -333,7 +385,8 @@ static int load_asd_staged(const char *path)
 		rom_f_close(&file);
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_ASD_DONE,
 			trace_path_hash(path), 22, (unsigned int)file.obj.objsize);
-		write_diag(22, (int)file.obj.objsize, path);
+			write_diag(FASTBOOT_DIAG_ASD_SIZE_INVALID,
+				(int)file.obj.objsize, path);
 		return -1;
 	}
 	payload_size = (unsigned int)file.obj.objsize - ASD_SKIP;
@@ -343,16 +396,16 @@ static int load_asd_staged(const char *path)
 		rom_f_close(&file);
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_ASD_DONE,
 			trace_path_hash(path), 23, 0);
-		write_diag(23, -1, path);
+			write_diag(FASTBOOT_DIAG_ASD_SKIP_FAILED, -1, path);
 		return -1;
 	}
 
-	rc = load_stream(&file, ASD_STAGE_ADDR);
+	rc = read_stream_exact(&file, ASD_STAGE_ADDR, payload_size);
 	rom_f_close(&file);
 	if (rc != 0) {
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_ASD_DONE,
 			trace_path_hash(path), 24, (unsigned int)rc);
-		write_diag(24, rc, path);
+			write_diag(FASTBOOT_DIAG_ASD_LOAD_FAILED, rc, path);
 		return -1;
 	}
 
@@ -361,24 +414,26 @@ static int load_asd_staged(const char *path)
 	rom_printf("fastboot: staged copy %u bytes\n", payload_size);
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_ASD_DONE,
 		trace_path_hash(path), 0, payload_size);
-	write_diag(25, (int)payload_size, path);
+	write_diag(FASTBOOT_DIAG_ASD_LOADED, (int)payload_size, path);
 	return 0;
 }
 
 static int load_file(const char *path, unsigned int skip, uint8_t *load_addr)
 {
+	unsigned int max_size = RAW_LOAD_LIMIT;
+	unsigned int loaded = 0;
 	int rc;
 
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_LOAD_START,
 		trace_path_hash(path), skip, (unsigned int)(uintptr_t)load_addr);
-	write_diag(10, 0, path);
+	write_diag(FASTBOOT_DIAG_RAW_OPEN, 0, path);
 	rom_printf("fastboot: open %s\n", path);
 	rc = rom_f_open(&file, path, FA_READ);
 	if (rc != 0) {
 		rom_printf("fastboot: open failed %d\n", rc);
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_LOAD_DONE,
 			trace_path_hash(path), (unsigned int)rc, 0);
-		write_diag(11, rc, path);
+		write_diag(FASTBOOT_DIAG_RAW_OPEN_FAILED, rc, path);
 		return -1;
 	}
 
@@ -387,15 +442,25 @@ static int load_file(const char *path, unsigned int skip, uint8_t *load_addr)
 		rom_f_close(&file);
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_LOAD_DONE,
 			trace_path_hash(path), 12, 0);
-		write_diag(12, -1, path);
+		write_diag(FASTBOOT_DIAG_RAW_SKIP_FAILED, -1, path);
 		return -1;
 	}
 
-	rc = load_stream(&file, load_addr);
+	if (skip >= max_size) {
+		rom_printf("fastboot: skip exceeds load limit\n");
+		rom_f_close(&file);
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_LOAD_DONE,
+			trace_path_hash(path), 15, skip);
+		write_diag(FASTBOOT_DIAG_RAW_TOO_LARGE, (int)skip, path);
+		return -1;
+	}
+
+	rc = read_stream_bounded(&file, load_addr, max_size - skip, &loaded);
 	rom_f_close(&file);
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_LOAD_DONE,
-		trace_path_hash(path), (unsigned int)rc, 0);
-	write_diag(rc == 0 ? 13 : 14, rc, path);
+		trace_path_hash(path), (unsigned int)rc, loaded);
+	write_diag(rc == 0 ? FASTBOOT_DIAG_RAW_LOADED :
+		FASTBOOT_DIAG_RAW_LOAD_FAILED, rc, path);
 	return rc;
 }
 
@@ -445,7 +510,7 @@ static void jump_to_payload(const char *path)
 	backlight_state = fastboot_backlight_state();
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_JUMP, trace_path_hash(path),
 		(unsigned int)(uintptr_t)ENTRY_ADDR, (unsigned int)backlight_state);
-	write_diag(30, backlight_state, path);
+	write_diag(FASTBOOT_DIAG_JUMP, backlight_state, path);
 	rom_printf("fastboot: jump %p backlight_state=0x%03x\n",
 		ENTRY_ADDR, backlight_state);
 	entry();
@@ -463,30 +528,30 @@ void stage1_main(void)
 	fastboot_backlight_off();
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_BACKLIGHT_OFF,
 		(unsigned int)fastboot_backlight_state(), 0, 0);
-	write_diag(1, 0, "");
+	write_diag(FASTBOOT_DIAG_STAGE1_START, 0, "");
 	rom_printf("\nfastboot: stage1 @ 0x%08x\n", FASTBOOT_STAGE1_ADDR);
 	fastboot_backlight_report("stage1_start");
 
 	rc = rom_f_mount(&fatfs, "", 1);
 	rom_printf("fastboot: mount %d\n", rc);
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_MOUNT_RESULT, (unsigned int)rc, 0, 0);
-	write_diag(2, rc, "");
+	write_diag(FASTBOOT_DIAG_MOUNT, rc, "");
 	if (rc != 0)
 		goto fail;
 
 	if (read_handoff_path(handoff_path, sizeof(handoff_path)) == 0) {
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_HANDOFF_RESULT,
 			0, trace_path_hash(handoff_path), 0);
-		write_diag(3, 0, handoff_path);
+		write_diag(FASTBOOT_DIAG_HANDOFF_FOUND, 0, handoff_path);
 		rom_printf("fastboot: handoff %s\n", handoff_path);
 		if (load_asd_staged(handoff_path) == 0) {
-			write_diag(4, 0, handoff_path);
+			write_diag(FASTBOOT_DIAG_HANDOFF_BOOT, 0, handoff_path);
 			jump_to_payload(handoff_path);
 		}
 	} else {
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_HANDOFF_RESULT,
 			(unsigned int)-1, 0, 0);
-		write_diag(5, -1, "");
+		write_diag(FASTBOOT_DIAG_HANDOFF_MISSING, -1, "");
 	}
 
 	if (load_file("firmware/unifrog.bin", 0, RAW_LOAD_ADDR) == 0)
@@ -503,7 +568,7 @@ void stage1_main(void)
 
 fail:
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_FAIL, 0, 0, 0);
-	write_diag(99, -1, "");
+	write_diag(FASTBOOT_DIAG_FAIL, -1, "");
 	rom_printf("fastboot: no bootable payload\n");
 	for (;;)
 		;

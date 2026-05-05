@@ -64,7 +64,7 @@ _start:
 	.balign 16
 	.globl __stage1_blob_start
 __stage1_blob_start:
-	.incbin "build/fastboot/stage1.bin"
+	.incbin FASTBOOT_STAGE_BIN_PATH
 	.balign 16
 	.globl __stage1_blob_end
 __stage1_blob_end:
