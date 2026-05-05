@@ -76,6 +76,16 @@ extern int unifrog_abi_mkdir_trampoline(const char *path, mode_t mode);
 extern DIR *unifrog_abi_opendir_trampoline(const char *path);
 extern struct dirent *unifrog_abi_readdir_trampoline(DIR *dirp);
 extern int unifrog_abi_closedir_trampoline(DIR *dirp);
+extern size_t unifrog_abi_log_auto_flush_bytes_trampoline(void);
+extern void unifrog_abi_log_set_auto_flush_bytes_trampoline(size_t bytes);
+extern void unifrog_abi_audio_set_system_output_enabled_trampoline(
+   int enabled);
+extern void unifrog_abi_audio_debug_dump_trampoline(void *audio,
+   const char *tag);
+extern void unifrog_abi_input_save_previous_trampoline(void);
+extern void unifrog_abi_input_poll_with_wireless_divisor_trampoline(
+   unsigned wireless_divisor);
+extern uint32_t unifrog_abi_input_menu_buttons_trampoline(void);
 
 static int fdt_read_region(const char *path, uintptr_t *cached_base,
                            uintptr_t *physical_base, size_t *bytes)
@@ -309,6 +319,16 @@ static const struct unifrog_abi unifrog_abi_table = {
    .opendir = unifrog_abi_opendir_trampoline,
    .readdir = unifrog_abi_readdir_trampoline,
    .closedir = unifrog_abi_closedir_trampoline,
+   .log_auto_flush_bytes = unifrog_abi_log_auto_flush_bytes_trampoline,
+   .log_set_auto_flush_bytes =
+      unifrog_abi_log_set_auto_flush_bytes_trampoline,
+   .audio_set_system_output_enabled =
+      unifrog_abi_audio_set_system_output_enabled_trampoline,
+   .audio_debug_dump = unifrog_abi_audio_debug_dump_trampoline,
+   .input_save_previous = unifrog_abi_input_save_previous_trampoline,
+   .input_poll_with_wireless_divisor =
+      unifrog_abi_input_poll_with_wireless_divisor_trampoline,
+   .input_menu_buttons = unifrog_abi_input_menu_buttons_trampoline,
 };
 
 const struct unifrog_abi *unifrog_abi_get(void)

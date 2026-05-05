@@ -1,7 +1,7 @@
 # UniFrog
 
 UniFrog builds a native SF2000 firmware payload, JavaScript frontend package,
-and libretro core modules for an SD-card based setup.
+native modules, and libretro core modules for an SD-card based setup.
 
 The root Makefile is the authoritative entry point. It builds `bisrv.asd`,
 `output/unifrog.bin`, and `output/sdcard/unifrog`.
@@ -53,7 +53,7 @@ make deps-status      Show pins vs each repository policy
 make upgrade-deps     Bump pins by policy and fetch them
 make doctor           Check tools, SDK, and fetched inputs
 make quick-check      Run fast repository, core smoke, JS2300, and frontend checks
-make                  Build firmware and core package
+make                  Build firmware, modules, and core package
 make verify           Build and verify firmware, fastboot, JS, and layout
 make sd-zip           Build output/UniFrog-sdcard.zip
 make clean            Remove generated build/output files
@@ -66,6 +66,11 @@ Dependency status and upgrades follow the policy declared beside each pin; use
 `make quick-check` while iterating. `make verify` is the normal
 verification before handing off changes. If linker scripts or link libraries
 change, run `make clean && make verify`.
+
+The default `HCRTOS_MEDIA=module` keeps the SDK FFmpeg/HCRTOS media player out
+of the boot image and packages it as `/unifrog/modules/hcrtos-media.bin`; video
+actions load that native module from SD. Use `HCRTOS_MEDIA=firmware` only when
+you need the old fully linked boot image for diagnostics.
 
 SD builds boot with the reliable 1-bit profile. Frontend startup reads and ROM
 loads use a guarded `SD_READ_MODE=uhs25` read window by default, then restore
@@ -100,6 +105,8 @@ frontend/              Modular JavaScript frontend and themes
 include/unifrog/       Public UniFrog C interfaces
 js2300/                MQuickJS embedding layer
 linker/                HCRTOS/SF2000 linker scripts
+output/sdcard/unifrog/modules/
+                       Runtime-loaded native modules
 src/                   Native runtime implementation
 tools/asdpack.c        Host tool used to pack and verify ASD images
 unifrog-hcrtos-sdk/    SDK submodule

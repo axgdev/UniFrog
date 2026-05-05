@@ -41,6 +41,9 @@
 #ifndef UNIFROG_FRONTEND_GIT_COMMIT
 #define UNIFROG_FRONTEND_GIT_COMMIT "unknown"
 #endif
+#ifndef UNIFROG_HCRTOS_MEDIA
+#define UNIFROG_HCRTOS_MEDIA "unknown"
+#endif
 
 static void app_main(void *pvParameters);
 static void *frontend_thread(void *arg);
@@ -84,21 +87,23 @@ static void *frontend_thread(void *arg)
          (unsigned long)(storage_done_ms - thread_start_ms),
          (unsigned long)(board_ready_ms - thread_start_ms),
          (unsigned long)(storage_done_ms - board_ready_ms));
-      unifrog_log("unifrog build commit=%s dirty=%d sdk=%s cores=%s js2300=%s frontend=%s\n",
+      unifrog_log("unifrog build commit=%s dirty=%d sdk=%s cores=%s js2300=%s frontend=%s media=%s\n",
          UNIFROG_GIT_COMMIT, UNIFROG_GIT_DIRTY,
          UNIFROG_SDK_GIT_COMMIT, UNIFROG_CORES_GIT_COMMIT,
-         UNIFROG_JS2300_GIT_COMMIT, UNIFROG_FRONTEND_GIT_COMMIT);
+         UNIFROG_JS2300_GIT_COMMIT, UNIFROG_FRONTEND_GIT_COMMIT,
+         UNIFROG_HCRTOS_MEDIA);
       unifrog_diag_memory_snapshot("boot.after_log_reset");
       (void)unifrog_log_flush();
    }
-   printf("Init native %s api=%u storage=%s log_reset=%d log_path=%s commit=%s dirty=%d sdk=%s cores=%s js2300=%s frontend=%s\n",
+   printf("Init native %s api=%u storage=%s log_reset=%d log_path=%s commit=%s dirty=%d sdk=%s cores=%s js2300=%s frontend=%s media=%s\n",
       unifrog_runtime_name(), unifrog_runtime_api_version(),
       storage_ready == 0 ? "ready" :
       storage_ready == -2 ? "deferred" : "timeout",
       log_reset_ret, log_reset_path ? log_reset_path : "?",
       UNIFROG_GIT_COMMIT, UNIFROG_GIT_DIRTY,
       UNIFROG_SDK_GIT_COMMIT, UNIFROG_CORES_GIT_COMMIT,
-      UNIFROG_JS2300_GIT_COMMIT, UNIFROG_FRONTEND_GIT_COMMIT);
+      UNIFROG_JS2300_GIT_COMMIT, UNIFROG_FRONTEND_GIT_COMMIT,
+      UNIFROG_HCRTOS_MEDIA);
    js2300_frontend_main();
 
    unifrog_platform_idle_forever();

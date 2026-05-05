@@ -1,4 +1,6 @@
 #include "js2300_frontend_internal.h"
+#include "unifrog_core_module_loader.h"
+#include "unifrog_mips_call.h"
 
 static int action_key_equals(const char *begin, const char *end,
    const char *key)
@@ -360,6 +362,9 @@ static int run_system_check(void)
       JS2300_FRONTEND_APP_ROOT "/cores/pce-fast.bin",
       JS2300_FRONTEND_APP_ROOT "/cores/qpsx.bin",
       JS2300_FRONTEND_APP_ROOT "/cores/pmp-video.bin",
+#if UNIFROG_HCRTOS_MEDIA_MODULE
+      JS2300_FRONTEND_HCRTOS_MEDIA_MODULE,
+#endif
    };
    char manifest[2048];
    char dirty[16];
@@ -401,6 +406,8 @@ static int run_system_check(void)
          UNIFROG_JS2300_GIT_COMMIT, &stale, &report);
       system_check_manifest_key(manifest, "frontend_commit",
          UNIFROG_FRONTEND_GIT_COMMIT, &stale, &report);
+      system_check_manifest_key(manifest, "hcrtos_media",
+         UNIFROG_HCRTOS_MEDIA, &stale, &report);
    }
 
    printf("unifrog system_check result missing=%u stale=%u\n",
@@ -1846,6 +1853,63 @@ static int run_js_script_file(struct js2300_frontend *frontend,
    return ret;
 }
 
+static int media_module_export_available(
+   const struct unifrog_core_module_exports *exports)
+{
+   return exports &&
+      exports->size >= offsetof(struct unifrog_core_module_exports,
+         native_media_play_video_ex) +
+         sizeof(exports->native_media_play_video_ex) &&
+      exports->native_media_play_video_ex;
+}
+
+static int play_video_media_module(struct js2300_frontend *frontend,
+   const struct unifrog_media_video_options *options)
+{
+   struct unifrog_core_module_loaded loaded;
+   const struct unifrog_core_module_exports *exports;
+   uint32_t load_start_ms;
+   uint32_t play_start_ms;
+   int read_window;
+   int ret = -1;
+
+   memset(&loaded, 0, sizeof(loaded));
+   load_start_ms = unifrog_perf_time_ms();
+   read_window = frontend_start_runtime_read_window(frontend,
+      "hcrtos_media_module");
+   ret = unifrog_core_module_load_file(JS2300_FRONTEND_HCRTOS_MEDIA_MODULE,
+      "hcrtos-media", &loaded);
+   if (read_window)
+      (void)frontend_restore_boot_read_window(frontend,
+         "hcrtos_media_module", 1);
+   printf("js2300 media module load ret=%d ms=%lu path=%s\n",
+      ret, (unsigned long)(unifrog_perf_time_ms() - load_start_ms),
+      JS2300_FRONTEND_HCRTOS_MEDIA_MODULE);
+   if (ret != 0)
+      return ret;
+
+   exports = loaded.exports;
+   if (!media_module_export_available(exports)) {
+      printf("js2300 media module missing native export id=%s size=%u\n",
+         exports && exports->core_id ? exports->core_id : "?",
+         exports ? (unsigned)exports->size : 0u);
+      unifrog_core_module_unload(&loaded);
+      return -1;
+   }
+
+   play_start_ms = unifrog_perf_time_ms();
+   unifrog_fb_close(&frontend->fb);
+   ret = (int)unifrog_mips_call2(loaded.gp_addr,
+      (uintptr_t)exports->native_media_play_video_ex,
+      (uintptr_t)frontend->path, (uintptr_t)options);
+   printf("js2300 media module play ret=%d ms=%lu path=%s\n",
+      ret, (unsigned long)(unifrog_perf_time_ms() - play_start_ms),
+      frontend->path);
+   unifrog_core_module_unload(&loaded);
+   frontend_fb_reopen(frontend, "video_return");
+   return ret;
+}
+
 int run_requested_action(struct js2300_frontend *frontend)
 {
    frontend->relaunch = 1;
@@ -1874,9 +1938,13 @@ int run_requested_action(struct js2300_frontend *frontend)
       memset(&options, 0, sizeof(options));
       options.preset = frontend->video_preset;
       options.disable_audio = frontend->video_disable_audio;
+#if UNIFROG_HCRTOS_MEDIA_FIRMWARE
       unifrog_fb_close(&frontend->fb);
       (void)unifrog_media_play_video_ex(frontend->path, &options);
       frontend_fb_reopen(frontend, "video_return");
+#else
+      (void)play_video_media_module(frontend, &options);
+#endif
       return 0;
    }
    if (strcmp(frontend->action, "continue") == 0) {

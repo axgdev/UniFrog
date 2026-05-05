@@ -18,7 +18,7 @@ extern "C" {
 #define UNIFROG_ABI_MAGIC 0x55464142u
 
 #define UNIFROG_ABI_VERSION_MAJOR_VALUE 0u
-#define UNIFROG_ABI_VERSION_MINOR_VALUE 4u
+#define UNIFROG_ABI_VERSION_MINOR_VALUE 5u
 #define UNIFROG_ABI_VERSION_PATCH_VALUE 0u
 
 #define UNIFROG_ABI_VERSION_ENCODE(major, minor, patch) \
@@ -127,6 +127,14 @@ struct unifrog_abi {
    DIR *(*opendir)(const char *path);
    struct dirent *(*readdir)(DIR *dirp);
    int (*closedir)(DIR *dirp);
+
+   size_t (*log_auto_flush_bytes)(void);
+   void (*log_set_auto_flush_bytes)(size_t bytes);
+   void (*audio_set_system_output_enabled)(int enabled);
+   void (*audio_debug_dump)(void *audio, const char *tag);
+   void (*input_save_previous)(void);
+   void (*input_poll_with_wireless_divisor)(unsigned wireless_divisor);
+   uint32_t (*input_menu_buttons)(void);
 };
 
 const struct unifrog_abi *unifrog_abi_get(void);

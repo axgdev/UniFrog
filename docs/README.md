@@ -9,7 +9,7 @@ Current component docs:
 - `../frontend/README.md`: SD-card JavaScript frontend package
 - `../js2300/README.md`: MQuickJS embedding layer
 - `unifrog-architecture.md`: current firmware/runtime/module boundaries
-- `external-core-loading.md`: SD-loaded core module format and loader details
+- `external-core-loading.md`: SD-loaded module format and loader details
 - `memory-layout.md`: linker and arena memory map
 - `performance-api.md`: CP0/cache/timing support
 - `link-layout-diagnostics.md`: map-file and no-load reservation checks

@@ -13,7 +13,8 @@ Keep this repository small and direct.
 - Dependency pins: `make deps-status` and `make upgrade-deps`; use
   `MODE=head|tag` only to override repository policy.
 - Defaults: `TOOLCHAIN=/opt/mipsel-mti-elf`, `SDK=unifrog-hcrtos-sdk`,
-  `DEPS=.deps`, `SD_MODE=safe`, `SD_READ_MODE=uhs25`
+  `DEPS=.deps`, `SD_MODE=safe`, `SD_READ_MODE=uhs25`,
+  `HCRTOS_MEDIA=module`
 - SD diagnostics: the default `SD_MODE=safe` build can run Developer ->
   Storage test for a quick guarded sweep, or Storage full test for
   `/ROMS/probes/test*.md`. Full test restores safe mode and checkpoints its
@@ -37,6 +38,8 @@ Keep this repository small and direct.
   diagnostics, and crash handling.
 - Package JavaScript source with `.js.mqbc` bytecode and
   `bytecode-manifest.txt`; do not rely on file timestamps for freshness.
+- Keep SDK FFmpeg/HCRTOS media as `/unifrog/modules/hcrtos-media.bin` by
+  default; use `HCRTOS_MEDIA=firmware` only for fully linked diagnostics.
 - Keep the SF2000 board DTS in `board/hc15xx/common/dts/sf2000_min.dts`; the
   SDK rebuild consumes that file instead of carrying a second copy.
 - Keep the mixed-license HCRTOS SDK in the `unifrog-hcrtos-sdk` submodule.

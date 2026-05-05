@@ -76,6 +76,21 @@ SECTIONS
       *(.gnu_extab*)
       *(.got*)
       . = ALIGN(4);
+      _padec_start = .;
+      KEEP(*(.padec.plugin))
+      _padec_end = .;
+      . = ALIGN(4);
+      _pvdec_start = .;
+      KEEP(*(.pvdec.plugin))
+      _pvdec_end = .;
+      . = ALIGN(4);
+      _deca_audio_stream_struct_start = .;
+      KEEP(*(.deca.init))
+      _deca_audio_stream_struct_end = .;
+      _audio_init_struct_start = .;
+      KEEP(*(.audio.init))
+      _audio_init_struct_end = .;
+      . = ALIGN(4);
       __data_end = .;
    }
 

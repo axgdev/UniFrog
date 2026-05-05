@@ -22,6 +22,8 @@ extern "C" {
 #define UNIFROG_CORE_MODULE_ID_MAX 32u
 #define UNIFROG_CORE_MODULE_EXTENSIONS_MAX 128u
 
+struct unifrog_media_video_options;
+
 struct unifrog_core_module_header {
    uint32_t magic;
    uint32_t header_size;
@@ -73,6 +75,9 @@ struct unifrog_core_module_exports {
    size_t (*retro_get_memory_size)(unsigned id);
    void (*retro_cheat_reset)(void);
    void (*retro_cheat_set)(unsigned index, bool enabled, const char *code);
+
+   int (*native_media_play_video_ex)(const char *path,
+      const struct unifrog_media_video_options *options);
 };
 
 typedef const struct unifrog_core_module_exports *

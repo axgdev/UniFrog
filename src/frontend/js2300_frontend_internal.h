@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,9 +67,20 @@
 #ifndef UNIFROG_SD_EXPERIMENTAL
 #define UNIFROG_SD_EXPERIMENTAL 0
 #endif
+#ifndef UNIFROG_HCRTOS_MEDIA
+#define UNIFROG_HCRTOS_MEDIA "unknown"
+#endif
+#ifndef UNIFROG_HCRTOS_MEDIA_MODULE
+#define UNIFROG_HCRTOS_MEDIA_MODULE 0
+#endif
+#ifndef UNIFROG_HCRTOS_MEDIA_FIRMWARE
+#define UNIFROG_HCRTOS_MEDIA_FIRMWARE 0
+#endif
 
 #define JS2300_FRONTEND_APP_ROOT "/media/mmcblk0/unifrog"
 #define JS2300_FRONTEND_ENTRY "main.js"
+#define JS2300_FRONTEND_HCRTOS_MEDIA_MODULE \
+   JS2300_FRONTEND_APP_ROOT "/modules/hcrtos-media.bin"
 #define JS2300_FRONTEND_MAX_PATH 256
 #define JS2300_FRONTEND_MANIFEST JS2300_FRONTEND_APP_ROOT "/manifest.ini"
 #define JS2300_FRONTEND_SYSTEM_CHECK_REPORT \
@@ -188,6 +200,8 @@ int frontend_start_boot_read_window(struct js2300_frontend *frontend,
    const char *tag);
 int frontend_restore_boot_read_window(struct js2300_frontend *frontend,
    const char *tag, int flush);
+int frontend_start_runtime_read_window(struct js2300_frontend *frontend,
+   const char *tag);
 int run_requested_action(struct js2300_frontend *frontend);
 
 #endif

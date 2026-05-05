@@ -19,6 +19,7 @@ JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || ec
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 SD_MODE ?= safe
 SD_READ_MODE ?= $(if $(filter safe,$(SD_MODE)),uhs25,boot)
+HCRTOS_MEDIA ?= module
 
 -include config.mk
 
@@ -30,6 +31,7 @@ MAKEFLAGS += --output-sync=target
 endif
 
 .SUFFIXES:
+.DEFAULT_GOAL := all
 
 # Output names and build directories.
 APP := unifrog
@@ -40,6 +42,7 @@ ASD := bisrv.asd
 FASTBOOT_ASD := fastboot.asd
 FRONTEND_PACKAGE := $(OUT)/sdcard/unifrog
 CORE_PACKAGE := $(OUT)/sdcard/unifrog/cores
+MODULE_PACKAGE := $(OUT)/sdcard/unifrog/modules
 FRONTEND_MANIFEST := $(FRONTEND_PACKAGE)/manifest.ini
 SDCARD_PACKAGE_DIR ?= $(OUT)/sdcard-package
 SDZIP ?= $(OUT)/UniFrog-sdcard.zip
@@ -83,12 +86,16 @@ OPT_AUDIO ?= -Os
 OPT_FLAGS := -O0 -O1 -O2 -O3 -Os -Og -Ofast
 SD_MODES := safe hs1 wide50 wide uhs12 uhs25 uhs
 SD_READ_MODES := boot off none safe hs1 wide50 wide uhs12 uhs25 uhs
+HCRTOS_MEDIA_MODES := module firmware
 
 ifneq ($(filter $(SD_MODE),$(SD_MODES)),$(SD_MODE))
 $(error SD_MODE must be one of: $(SD_MODES))
 endif
 ifneq ($(filter $(SD_READ_MODE),$(SD_READ_MODES)),$(SD_READ_MODE))
 $(error SD_READ_MODE must be one of: $(SD_READ_MODES))
+endif
+ifneq ($(filter $(HCRTOS_MEDIA),$(HCRTOS_MEDIA_MODES)),$(HCRTOS_MEDIA))
+$(error HCRTOS_MEDIA must be one of: $(HCRTOS_MEDIA_MODES))
 endif
 
 SD_CLOCK_FREQUENCY := 198000000
@@ -208,6 +215,9 @@ DEFINES := \
 	-DSOC_HC15XX \
 	-DSF2000 \
 	-DSUPPORT_FFPLAYER \
+	-DUNIFROG_HCRTOS_MEDIA=\"$(HCRTOS_MEDIA)\" \
+	-DUNIFROG_HCRTOS_MEDIA_MODULE=$(if $(filter module,$(HCRTOS_MEDIA)),1,0) \
+	-DUNIFROG_HCRTOS_MEDIA_FIRMWARE=$(if $(filter firmware,$(HCRTOS_MEDIA)),1,0) \
 	-DUNIFROG_SD_MODE=\"$(SD_MODE)\" \
 	-DUNIFROG_SD_READ_MODE=\"$(SD_READ_MODE)\" \
 	-DUNIFROG_SD_EXPERIMENTAL=$(SD_EXPERIMENTAL) \
@@ -264,14 +274,17 @@ WRAPS := \
 
 LDFLAGS := -EL $(OPT_SIZE) --static $(LIBDIRS) $(LDSCRIPTS) --gc-sections -n $(WRAPS) --allow-multiple-definition
 
-# Normal archives are pulled as needed by the linker.
-LDLIBS := \
+HCRTOS_MEDIA_LDLIBS := \
 	-lavformat \
 	-lavcodec \
 	-lavutil \
 	-lswscale \
+	-lviddrv
+
+# Normal archives are pulled as needed by the linker.
+LDLIBS := \
+	$(if $(filter firmware,$(HCRTOS_MEDIA)),$(HCRTOS_MEDIA_LDLIBS)) \
 	-lge \
-	-lviddrv \
 	-lz \
 	-lkernel \
 	-llnx \
@@ -282,9 +295,16 @@ LDLIBS := \
 	-lc \
 	-lgcc
 
-# Media plugins are registered through archive-level constructors/tables, so
-# they must be kept even when there is no direct symbol reference from UniFrog code.
-WHOLE_LIBS := \
+CORE_WHOLE_LIBS := \
+	-lauddrv \
+	-lauddsp \
+	-lmmc \
+	-lmmchosthc15 \
+	-lefuse
+
+# HCRTOS media plugins are large, so the default build links them into a
+# runtime-loaded native module instead of the boot firmware.
+HCRTOS_MEDIA_WHOLE_LIBS := \
 	-lffplayer \
 	-ldsc \
 	-lmp3nddec \
@@ -301,20 +321,14 @@ WHOLE_LIBS := \
 	-lopus \
 	-lradec \
 	-lra \
-	-lauddrv \
-	-lauddsp \
 	-lviddrv_h264dec \
 	-lviddrv_mpeg2dec \
 	-lviddrv_vc1dec \
 	-lviddrv_vp8dec \
 	-lviddrv_mpeg4dec \
-	-lviddrv_imagedec \
-	-lusbdrv \
-	-lusbdrv_hid \
-	-lntfs \
-	-lmmc \
-	-lmmchosthc15 \
-	-lefuse
+	-lviddrv_imagedec
+
+WHOLE_LIBS := $(if $(filter firmware,$(HCRTOS_MEDIA)),$(HCRTOS_MEDIA_WHOLE_LIBS)) $(CORE_WHOLE_LIBS)
 
 FRONTEND_HOST_SOURCES := \
 	src/frontend/js2300_frontend.c \
@@ -356,7 +370,6 @@ UNIFROG_OBJECTS := \
 	$(BUILD)/unifrog_libretro_host.o \
 	$(BUILD)/unifrog_libretro_tramp.o \
 	$(BUILD)/unifrog_log.o \
-	$(BUILD)/unifrog_media.o \
 	$(BUILD)/unifrog_mips_call.o \
 	$(BUILD)/unifrog_panic.o \
 	$(BUILD)/unifrog_path.o \
@@ -367,6 +380,12 @@ UNIFROG_OBJECTS := \
 	$(BUILD)/unifrog_runtime.o \
 	$(BUILD)/unifrog_scpu.o \
 	$(BUILD)/unifrog_text.o
+
+ifeq ($(HCRTOS_MEDIA),firmware)
+UNIFROG_OBJECTS += $(BUILD)/unifrog_media.o
+else
+UNIFROG_OBJECTS += $(BUILD)/unifrog_sdk_optional_stubs.o
+endif
 
 LZ4_SRCS := lz4.c lz4frame.c lz4hc.c xxhash.c
 LZ4_OBJS := $(addprefix $(BUILD)/third_party/lz4/,$(LZ4_SRCS:.c=.o))
@@ -456,6 +475,24 @@ GEARBOY_CORE_BIN := $(CORE_PACKAGE)/gearboy.bin
 PCE_FAST_CORE_BIN := $(CORE_PACKAGE)/pce-fast.bin
 QPSX_CORE_BIN := $(CORE_PACKAGE)/qpsx.bin
 PMP_VIDEO_CORE_BIN := $(CORE_PACKAGE)/pmp-video.bin
+HCRTOS_MEDIA_MODULE_BIN := $(MODULE_PACKAGE)/hcrtos-media.bin
+HCRTOS_MEDIA_MODULE_OUT := $(BUILD)/native_modules/hcrtos_media.out
+HCRTOS_MEDIA_MODULE_ARCHIVE := $(BUILD)/native_modules/hcrtos_media.a
+HCRTOS_MEDIA_MODULE_BINS := $(if $(filter module,$(HCRTOS_MEDIA)),$(HCRTOS_MEDIA_MODULE_BIN))
+HCRTOS_MEDIA_MODULE_OBJECTS := \
+	$(BUILD)/native_modules/unifrog_media_module_entry.o \
+	$(BUILD)/native_modules/unifrog_media_module_support.o \
+	$(BUILD)/native_modules/unifrog_media.o
+HCRTOS_MEDIA_MODULE_LDLIBS = \
+	$(HCRTOS_MEDIA_LDLIBS) \
+	-lauddrv \
+	-lauddsp \
+	-lge \
+	-lz \
+	-lkernel \
+	-llnx \
+	-lpthread \
+	$(CORE_MODULE_LDLIBS)
 LIBRETRO_CORE_BINS := \
 	$(GAMBATTE_CORE_BIN) \
 	$(GPSP_CORE_BIN) \
@@ -480,6 +517,7 @@ LIBRETRO_CORE_MODULE_OUTS := \
 	$(BUILD)/core_modules/pce_fast.out \
 	$(BUILD)/core_modules/qpsx.out \
 	$(BUILD)/core_modules/pmp_video.out
+NATIVE_MODULE_OUTS := $(if $(filter module,$(HCRTOS_MEDIA)),$(HCRTOS_MEDIA_MODULE_OUT))
 UNIFROG_CORE_MODULE_BASE ?= 0x83000000
 CORE_MODULE_CFLAGS := $(CFLAGS) -mno-abicalls -fno-pic
 CORE_MODULE_LDFLAGS := -EL $(OPT_SIZE) --static $(LIBDIRS) \
@@ -505,12 +543,12 @@ endif
 .DELETE_ON_ERROR:
 COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild
 SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores
-PACKAGE_TARGETS := frontend-package core-package sd-zip install refresh-sd refresh-sd-clean
+PACKAGE_TARGETS := frontend-package core-package module-package sd-zip install refresh-sd refresh-sd-clean
 VERIFY_TARGETS := asdcheck fastboot-check layout-check js2300-check frontend-check core-smoke-check
 ADVANCED_TARGETS := sdk dtb lib fastboot size ci-deps ci-toolchain ci-commit-check ci-sd-zip print-config
 .PHONY: $(COMMON_TARGETS) $(SETUP_TARGETS) $(PACKAGE_TARGETS) $(VERIFY_TARGETS) $(ADVANCED_TARGETS) FORCE
 
-all: $(ASD) $(OUT)/unifrog.bin core-package
+all: $(ASD) $(OUT)/unifrog.bin core-package module-package
 setup: deps
 verify: check
 
@@ -554,6 +592,8 @@ help:
 	@echo "  make SD_MODE=safe  Use the default reliable 1-bit SD profile"
 	@echo "                     Developer -> Storage test quick-sweeps SD profiles"
 	@echo "  make SD_READ_MODE=boot  Disable the runtime fast-read ROM window"
+	@echo "  make HCRTOS_MEDIA=module  Keep native media in an SD-loaded module"
+	@echo "  make HCRTOS_MEDIA=firmware  Link native media into unifrog.bin"
 	@echo "  make SD_MODE=hs1   Diagnostic 1-bit high-speed SD build"
 	@echo "  make SD_MODE=wide50 Diagnostic 4-bit high-speed, lower-clock SD build"
 	@echo "  make SD_MODE=wide  Diagnostic 4-bit high-speed SD build"
@@ -576,6 +616,7 @@ print-config:
 	@echo "DTC=$(DTC)"
 	@echo "SD_MODE=$(SD_MODE)"
 	@echo "SD_READ_MODE=$(SD_READ_MODE)"
+	@echo "HCRTOS_MEDIA=$(HCRTOS_MEDIA)"
 	@echo "SD_CLOCK_FREQUENCY=$(SD_CLOCK_FREQUENCY)"
 	@echo "SD_BUS_WIDTH=$(SD_BUS_WIDTH)"
 	@echo "SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED)"
@@ -778,13 +819,21 @@ frontend-package:
 		printf '%s\n' 'cores_commit=$(UNIFROG_CORES_GIT_COMMIT)'; \
 		printf '%s\n' 'js2300_commit=$(UNIFROG_JS2300_GIT_COMMIT)'; \
 		printf '%s\n' 'frontend_commit=$(UNIFROG_FRONTEND_GIT_COMMIT)'; \
+		printf '%s\n' 'hcrtos_media=$(HCRTOS_MEDIA)'; \
 		printf '%s\n' "generated_utc=$$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
 	} > $(FRONTEND_MANIFEST)
 
 core-package: $(JS2300_CORE_BIN) $(LIBRETRO_CORE_BINS)
 	@echo "  COREBIN $(CORE_PACKAGE)"
 
+module-package: $(HCRTOS_MEDIA_MODULE_BINS)
+	@echo "  MODULE  $(if $(HCRTOS_MEDIA_MODULE_BINS),$(MODULE_PACKAGE),disabled)"
+	$(Q)if test -z "$(HCRTOS_MEDIA_MODULE_BINS)"; then rm -rf $(MODULE_PACKAGE); fi
+
 $(CORE_PACKAGE): frontend-package
+	$(Q)mkdir -p $@
+
+$(MODULE_PACKAGE): frontend-package
 	$(Q)mkdir -p $@
 
 $(JS2300_CORE_BIN): $(LIBJS2300) | $(CORE_PACKAGE)
@@ -815,6 +864,24 @@ $(BUILD)/core_modules/support.o: src/unifrog_core_module_support.c include/unifr
 	@echo "  CC      $<"
 	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) $(CORE_MODULE_CFLAGS) -MD -MP -c $< -o $@
+
+$(BUILD)/native_modules/%.o: src/%.c | $(BUILD)
+	@echo "  CC      $< (native module)"
+	$(Q)mkdir -p $(dir $@)
+	$(Q)$(CC) $(CORE_MODULE_CFLAGS) -MD -MP -c $< -o $@
+
+$(HCRTOS_MEDIA_MODULE_ARCHIVE): $(HCRTOS_MEDIA_MODULE_OBJECTS) | $(OUT)
+	@echo "  AR      $@"
+	$(Q)mkdir -p $(dir $@)
+	$(Q)$(AR) rcs $@ $^
+
+$(HCRTOS_MEDIA_MODULE_OUT): $(HCRTOS_MEDIA_MODULE_ARCHIVE) linker/core-module.ld linker/hc15xx/peripherals.ld | $(OUT) sdk
+	@echo "  LD      $@"
+	$(Q)$(LD) $(CORE_MODULE_LDFLAGS) -o $@ -Map $@.map -u unifrog_core_module_entry --start-group $(HCRTOS_MEDIA_MODULE_ARCHIVE) $(HCRTOS_MEDIA_MODULE_LDLIBS) --whole-archive $(HCRTOS_MEDIA_WHOLE_LIBS) --no-whole-archive --end-group
+
+$(HCRTOS_MEDIA_MODULE_BIN): $(HCRTOS_MEDIA_MODULE_OUT) | $(MODULE_PACKAGE)
+	@echo "  OBJCOPY $@"
+	$(Q)$(OBJCOPY) -O binary $< $@
 
 $(BUILD)/third_party/lz4/%.o: src/third_party/lz4/%.c | $(BUILD)
 	@echo "  CC      $<"
@@ -965,7 +1032,7 @@ $(CORE_REV_STAMP): FORCE | $(BUILD)
 	if test "$$value" != "$$old"; then printf '%s\n' "$$value" > $@; fi
 
 $(BUILD_IDENTITY_STAMP): FORCE | $(BUILD)
-	$(Q)value="$(UNIFROG_GIT_COMMIT) $(UNIFROG_GIT_DIRTY) $(UNIFROG_SDK_GIT_COMMIT) $(UNIFROG_CORES_GIT_COMMIT) $(UNIFROG_JS2300_GIT_COMMIT) $(UNIFROG_FRONTEND_GIT_COMMIT) $(SD_MODE) $(SD_READ_MODE) $(SD_EXPERIMENTAL)"; \
+	$(Q)value="$(UNIFROG_GIT_COMMIT) $(UNIFROG_GIT_DIRTY) $(UNIFROG_SDK_GIT_COMMIT) $(UNIFROG_CORES_GIT_COMMIT) $(UNIFROG_JS2300_GIT_COMMIT) $(UNIFROG_FRONTEND_GIT_COMMIT) $(SD_MODE) $(SD_READ_MODE) $(SD_EXPERIMENTAL) $(HCRTOS_MEDIA)"; \
 	old=$$(cat $@ 2>/dev/null || true); \
 	if test "$$value" != "$$old"; then printf '%s\n' "$$value" > $@; fi
 
@@ -1053,20 +1120,21 @@ asdcheck: $(ASD)
 
 fastboot: $(FASTBOOT_ASD) $(OUT)/unifrog.bin
 
-fastboot-check: fastboot core-package
+fastboot-check: fastboot core-package module-package
 	@test -s $(FASTBOOT_ASD)
 	@test -s $(OUT)/unifrog.bin
 	@test -s $(FRONTEND_PACKAGE)/main.js
 	@test -s $(FRONTEND_MANIFEST)
 	@test -s $(JS2300_CORE_BIN)
 	@for bin in $(LIBRETRO_CORE_BINS); do test -s $$bin || exit 1; done
+	@test -z "$(HCRTOS_MEDIA_MODULE_BINS)" || for bin in $(HCRTOS_MEDIA_MODULE_BINS); do test -s $$bin || exit 1; done
 	@echo "  CHECK   $(FASTBOOT_ASD)"
 	$(Q)$(ASDPACK) --check $(FASTBOOT_ASD)
 	@echo "  OK      $(FASTBOOT_ASD)"
 
 fastboot-check: layout-check
 
-layout-check: $(OUT)/$(TARGET).out $(LIBRETRO_CORE_MODULE_OUTS)
+layout-check: $(OUT)/$(TARGET).out $(LIBRETRO_CORE_MODULE_OUTS) $(NATIVE_MODULE_OUTS)
 	@echo "  CHECK   link layout"
 	$(Q)for image in $^; do \
 		ebss_hex=$$($(NM) -n $$image | awk '$$3 == "_ebss" { print $$1; exit }'); \
@@ -1100,7 +1168,7 @@ layout-check: $(OUT)/$(TARGET).out $(LIBRETRO_CORE_MODULE_OUTS)
 	}' || exit 1; \
 	done
 
-check: $(ASD) $(OUT)/unifrog.bin core-package layout-check
+check: $(ASD) $(OUT)/unifrog.bin core-package module-package layout-check
 	@test -s $(ASD)
 	@test -s $(OUT)/unifrog.bin
 	@test -s $(LIBUNIFROG)
@@ -1108,14 +1176,15 @@ check: $(ASD) $(OUT)/unifrog.bin core-package layout-check
 	@test -s $(FRONTEND_MANIFEST)
 	@test -s $(JS2300_CORE_BIN)
 	@for bin in $(LIBRETRO_CORE_BINS); do test -s $$bin || exit 1; done
+	@test -z "$(HCRTOS_MEDIA_MODULE_BINS)" || for bin in $(HCRTOS_MEDIA_MODULE_BINS); do test -s $$bin || exit 1; done
 	@echo "  CHECK   $(ASD)"
 	$(Q)$(ASDPACK) --check $(ASD)
 	@echo "  CHECK   $(OUT)/unifrog.bin"
 	$(Q)test -s $(OUT)/unifrog.bin
 	@echo "  OK      $(ASD)"
 
-size: $(ASD)
-	@ls -lh $(ASD) $(OUT)/$(TARGET).bin $(OUT)/$(TARGET).out $(LIBUNIFROG) $(DTB)
+size: $(ASD) module-package
+	@ls -lh $(ASD) $(OUT)/$(TARGET).bin $(OUT)/$(TARGET).out $(LIBUNIFROG) $(DTB) $(HCRTOS_MEDIA_MODULE_BINS)
 
 install: fastboot-check layout-check
 	@echo "  CLEAN   stale root firmware files"

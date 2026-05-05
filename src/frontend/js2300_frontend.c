@@ -116,6 +116,53 @@ int frontend_restore_boot_read_window(struct js2300_frontend *frontend,
    return ret;
 }
 
+int frontend_start_runtime_read_window(struct js2300_frontend *frontend,
+   const char *tag)
+{
+   char detail[160];
+   char restore_detail[160];
+   int ret;
+   int restore_ret;
+
+   if (!frontend || frontend->boot_read_active ||
+       !frontend_boot_read_profile_enabled())
+      return 0;
+   if (!unifrog_platform_sd_runtime_supported()) {
+      printf("unifrog frontend runtime_read skip profile=%s tag=%s reason=no_runtime\n",
+         UNIFROG_SD_READ_MODE, tag ? tag : "");
+      return 0;
+   }
+
+   frontend->boot_read_old_auto_flush = unifrog_log_auto_flush_bytes();
+   unifrog_log_set_auto_flush_bytes(0);
+   unifrog_log_defer_begin();
+   unifrog_platform_set_storage_log_suspended(1);
+
+   detail[0] = '\0';
+   restore_detail[0] = '\0';
+   printf("unifrog frontend runtime_read begin profile=%s boot=%s tag=%s pending=%u\n",
+      UNIFROG_SD_READ_MODE, UNIFROG_SD_MODE, tag ? tag : "",
+      (unsigned)unifrog_log_pending());
+   ret = unifrog_platform_sd_apply_profile(UNIFROG_SD_READ_MODE, 4, 100,
+      detail, sizeof(detail));
+   printf("unifrog frontend runtime_read switch ret=%d profile=%s detail=%s\n",
+      ret, UNIFROG_SD_READ_MODE, detail);
+   if (ret == 0) {
+      frontend->boot_read_active = 1;
+      return 1;
+   }
+
+   restore_ret = unifrog_platform_sd_restore_boot(4, 100, restore_detail,
+      sizeof(restore_detail));
+   printf("unifrog frontend runtime_read fallback restore_ret=%d detail=%s\n",
+      restore_ret, restore_detail);
+   unifrog_platform_set_storage_log_suspended(0);
+   unifrog_log_defer_end();
+   unifrog_log_set_auto_flush_bytes(frontend->boot_read_old_auto_flush);
+   (void)unifrog_log_flush();
+   return 0;
+}
+
 int js2300_frontend_main(void)
 {
    struct js2300_frontend frontend;

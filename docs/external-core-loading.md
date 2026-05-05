@@ -1,9 +1,9 @@
-# External Core Loading
+# External Module Loading
 
-UniFrog keeps libretro cores outside the main firmware binary. The base
-firmware owns device setup, storage, video, audio, input, logging, recovery,
-and the stable `libunifrog` ABI. Core binaries live on the SD card under
-`/unifrog/cores` and are loaded only when selected content needs them.
+UniFrog keeps libretro cores and large optional native features outside the
+main firmware binary. The base firmware owns boot, storage, input, logging,
+recovery, and the stable `libunifrog` ABI. Core binaries live under
+`/unifrog/cores`; native modules live under `/unifrog/modules`.
 
 ## Fixed Memory Slot
 
@@ -60,9 +60,10 @@ The module header is the first bytes in the file and contains:
   module `$gp`
 - metadata: core id and supported extensions
 
-The module entry returns a `struct unifrog_core_module_exports` table containing
-the libretro API function pointers. The firmware then drives the core through
-the normal libretro host.
+The module entry returns a `struct unifrog_core_module_exports` table. Libretro
+modules fill the libretro function pointers and run through the normal host;
+native modules fill their own optional exports, such as the HCRTOS media
+player entry point.
 
 The module linker must account for every allocatable `NOBITS` reservation in
 the header's memory range. A core-owned executable cache such as gpSP's `.jit`
@@ -124,8 +125,9 @@ Useful diagnostics for this class:
 ## Build Outputs
 
 `make core-package` builds self-contained modules for the known cores and
-places them in `output/sdcard/unifrog/cores/*.bin`. The default firmware link
-does not include libretro core archives:
+places them in `output/sdcard/unifrog/cores/*.bin`. `make module-package`
+builds native modules such as `output/sdcard/unifrog/modules/hcrtos-media.bin`.
+The default firmware link does not include libretro core archives:
 
 ```make
 FIRMWARE_LIBRETRO_CORE_LIBS ?=

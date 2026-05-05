@@ -76,3 +76,10 @@ unifrog_abi_fseeko_trampoline:
    ABI_TRAMP unifrog_abi_opendir_trampoline, opendir
    ABI_TRAMP unifrog_abi_readdir_trampoline, readdir
    ABI_TRAMP unifrog_abi_closedir_trampoline, closedir
+   ABI_TRAMP unifrog_abi_log_auto_flush_bytes_trampoline, unifrog_log_auto_flush_bytes
+   ABI_TRAMP unifrog_abi_log_set_auto_flush_bytes_trampoline, unifrog_log_set_auto_flush_bytes
+   ABI_TRAMP unifrog_abi_audio_set_system_output_enabled_trampoline, unifrog_audio_set_system_output_enabled
+   ABI_TRAMP unifrog_abi_audio_debug_dump_trampoline, unifrog_audio_debug_dump
+   ABI_TRAMP unifrog_abi_input_save_previous_trampoline, unifrog_input_save_previous
+   ABI_TRAMP unifrog_abi_input_poll_with_wireless_divisor_trampoline, unifrog_input_poll_with_wireless_divisor
+   ABI_TRAMP unifrog_abi_input_menu_buttons_trampoline, unifrog_input_menu_buttons

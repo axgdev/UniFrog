@@ -1,7 +1,7 @@
 # UniFrog Architecture
 
 UniFrog is a native SF2000 runtime, an embedded JavaScript layer, an editable
-SD-card frontend, and SD-loaded core modules.
+SD-card frontend, and SD-loaded modules.
 
 ## Runtime Boundary
 
@@ -19,7 +19,7 @@ The build emits:
 bisrv.asd                         Native SF2000 firmware payload
 output/unifrog.bin                Raw firmware binary
 output/libunifrog.a               Runtime archive used by modules
-output/sdcard/unifrog/            SD-card frontend and core package
+output/sdcard/unifrog/            SD-card frontend, modules, and cores
 ```
 
 ## JavaScript Boundary
@@ -43,8 +43,9 @@ Packaged JavaScript ships as source plus manifest-verified MQuickJS bytecode.
 
 ## Core Boundary
 
-Generic emulator modules are libretro cores. UniFrog-specific modules may use
-the versioned ABI table in `include/unifrog/abi.h` for device services.
+Generic emulator modules are libretro cores. UniFrog-specific modules, such as
+`/unifrog/modules/hcrtos-media.bin`, use the same loader and the versioned ABI
+table in `include/unifrog/abi.h` for device services.
 
 ABI rules:
 

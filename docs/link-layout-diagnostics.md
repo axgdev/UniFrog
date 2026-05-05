@@ -88,12 +88,12 @@ make layout-check
 make check
 ```
 
-`layout-check` scans `output/sf2000.out` and the external core module ELFs under
-`build/core_modules/*.out`. It fails if any allocatable no-load section ends
-after `_ebss`. This catches the failure class early for JIT caches, DMA buffers,
-and future fixed reservations. It intentionally checks the ELF layout rather
-than a single symbol name, so new sections are covered without adding a special
-case.
+`layout-check` scans `output/sf2000.out`, external core module ELFs under
+`build/core_modules/*.out`, and native module ELFs under `build/native_modules`.
+It fails if any allocatable no-load section ends after `_ebss`. This catches the
+failure class early for JIT caches, DMA buffers, and future fixed reservations.
+It intentionally checks the ELF layout rather than a single symbol name, so new
+sections are covered without adding a special case.
 
 Runtime diagnostics are still useful when a core runs for a while and then
 freezes. Prefer live, bounded counters over high-volume file logging:
