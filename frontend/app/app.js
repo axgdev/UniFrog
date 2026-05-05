@@ -35,6 +35,8 @@ var dirty = true;
 var prevInput = 0;
 var startupInputGate = true;
 var startupInputGateMask = -1;
+var startupInputGateLogged = false;
+var startupInputGateStartMs = 0;
 var repeatMask = 0;
 var nextRepeatMs = 0;
 var toast = "Ready";
@@ -111,6 +113,11 @@ while (running) {
   if (rawInput !== prevInput) dirty = true;
   updateBattery(now);
   if (startupInputGate) {
+    if (!startupInputGateLogged) {
+      startupInputGateLogged = true;
+      startupInputGateStartMs = now;
+      JS2300.log("frontend input_gate start raw=" + String(rawInput));
+    }
     inputMask = rawInput;
     repeatMask = 0;
     nextRepeatMs = 0;
@@ -138,6 +145,9 @@ while (running) {
     if ((rawInput & startupInputGateMask) === 0) {
       startupInputGate = false;
       startupInputGateMask = 0;
+      startupInputGateLogged = false;
+      JS2300.log("frontend input_gate released ms=" +
+        String(now - startupInputGateStartMs));
     }
   }
   handleInput(input, now);

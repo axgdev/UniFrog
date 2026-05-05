@@ -1,5 +1,18 @@
 /dts-v1/;
 
+#ifndef UNIFROG_SD_BUS_WIDTH
+#define UNIFROG_SD_BUS_WIDTH 4
+#endif
+#ifndef UNIFROG_SD_CAP_HIGHSPEED
+#define UNIFROG_SD_CAP_HIGHSPEED 1
+#endif
+#ifndef UNIFROG_SD_CAP_UHS
+#define UNIFROG_SD_CAP_UHS 1
+#endif
+#ifndef UNIFROG_SD_NO_1V8
+#define UNIFROG_SD_NO_1V8 0
+#endif
+
 #include <dt-bindings/gpio/gpio.h>
 #include <uapi/hcuapi/pinpad.h>
 #include <uapi/hcuapi/pinmux/hc15xx_pinmux.h>
@@ -464,18 +477,23 @@ hcrtos {
 		clock-frequency = <198000000>;
 		interrupts = <10>;
 		pinmux-active = <PINPAD_L16 4 PINPAD_L17 4 PINPAD_L18 4 PINPAD_L19 4 PINPAD_L20 4 PINPAD_L21 4 PINPAD_L22 0>;
-		// bus-width = <8>;
-		// bus-width = <4>;
-		bus-width = <1>;
+		bus-width = <UNIFROG_SD_BUS_WIDTH>;
 		broken-cd;
 		cd-gpios = <PINPAD_L22 1>;
 		//non-removable;
-	
-		// cap-sd-highspeed;
-		// sd-uhs-sdr12;
-		// sd-uhs-sdr25;
-		// sd-uhs-sdr50;
+
+#if UNIFROG_SD_CAP_HIGHSPEED
+		cap-sd-highspeed;
+		supports-highspeed;
+#endif
+#if UNIFROG_SD_CAP_UHS
+		sd-uhs-sdr12;
+		sd-uhs-sdr25;
+		sd-uhs-sdr50;
+#endif
+#if UNIFROG_SD_NO_1V8
 		no-support_1_8v;
+#endif
 		status = "okay";
 	};
 	

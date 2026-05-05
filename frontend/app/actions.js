@@ -259,6 +259,8 @@ function runAction(id, now) {
   } else {
     startupInputGate = true;
     startupInputGateMask = -1;
+    startupInputGateLogged = false;
+    startupInputGateStartMs = 0;
     prevInput = 0;
     repeatMask = 0;
     nextRepeatMs = 0;

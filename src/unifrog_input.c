@@ -29,6 +29,7 @@
 #define KEY_SHIFTER_SETTLE_US 4u
 #define KEY_SHIFTER_CLOCK_LOW_US 3u
 #define KEY_SHIFTER_CLOCK_HIGH_US 3u
+#define INPUT_DEBOUNCE_STABLE_POLLS 1
 
 static int button_state[UNIFROG_BUTTON_COUNT];
 static int button_prev[UNIFROG_BUTTON_COUNT];
@@ -233,7 +234,7 @@ static void update_button_debounce(uint32_t normalized_mask)
          button_raw_count[i] = 0;
       }
 
-      if (button_raw_count[i] >= 2)
+      if (button_raw_count[i] >= INPUT_DEBOUNCE_STABLE_POLLS)
          button_state[i] = raw;
    }
 }

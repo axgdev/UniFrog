@@ -29,6 +29,10 @@ extern unsigned long PINMUXR;
 #define STORAGE_MAX_POLLS 100
 #define STORAGE_POLL_MS 100
 
+#ifndef UNIFROG_SD_MODE
+#define UNIFROG_SD_MODE "unknown"
+#endif
+
 struct storage_mount {
    const char *dev;
    const char *target;
@@ -110,12 +114,15 @@ static void log_storage_config(void)
    (void)fdt_get_property_u_32_index(node, "bus-width", 0, &bus_width);
    (void)fdt_get_property_u_32_index(node, "clock-frequency", 0, &clock);
 
-   printf("unifrog storage config node=%d status=%s clock=%lu bus-width=%lu "
-          "cap-highspeed=%d uhs-sdr12=%d uhs-sdr25=%d uhs-sdr50=%d no-1v8=%d broken-cd=%d\n",
+   printf("unifrog storage config mode=%s node=%d status=%s clock=%lu "
+          "bus-width=%lu cap-highspeed=%d supports-highspeed=%d "
+          "uhs-sdr12=%d uhs-sdr25=%d uhs-sdr50=%d no-1v8=%d broken-cd=%d\n",
+      UNIFROG_SD_MODE,
       node, status,
       (unsigned long)clock,
       (unsigned long)bus_width,
       fdt_property_read_bool(node, "cap-sd-highspeed") ? 1 : 0,
+      fdt_property_read_bool(node, "supports-highspeed") ? 1 : 0,
       fdt_property_read_bool(node, "sd-uhs-sdr12") ? 1 : 0,
       fdt_property_read_bool(node, "sd-uhs-sdr25") ? 1 : 0,
       fdt_property_read_bool(node, "sd-uhs-sdr50") ? 1 : 0,

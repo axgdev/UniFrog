@@ -17,6 +17,7 @@ MQUICKJS_POLICY ?= head
 MQUICKJS_REF ?= ee50431eac9b14b99f722b537ec4cac0c8dd75ab
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
+SD_MODE ?= uhs
 
 -include config.mk
 
@@ -56,6 +57,7 @@ DTS_PRE := $(BUILD)/$(DTS_NAME).dtb.dts.tmp
 DTB := $(BUILD)/$(DTS_NAME).dtb
 DTB_ASM := $(BUILD)/$(DTS_NAME)_dtb.S
 DTB_OBJ := $(BUILD)/$(DTS_NAME)_dtb.o
+DTS_MODE_STAMP := $(BUILD)/sd-mode-$(SD_MODE).stamp
 DTC ?= dtc
 EMBED_DTB ?= 1
 CCACHE ?=
@@ -78,6 +80,28 @@ OPT_SIZE ?= -Os
 OPT_FAST ?= -O2
 OPT_AUDIO ?= -Os
 OPT_FLAGS := -O0 -O1 -O2 -O3 -Os -Og -Ofast
+SD_MODES := safe wide uhs
+
+ifneq ($(filter $(SD_MODE),$(SD_MODES)),$(SD_MODE))
+$(error SD_MODE must be one of: $(SD_MODES))
+endif
+
+ifeq ($(SD_MODE),safe)
+SD_BUS_WIDTH := 1
+SD_CAP_HIGHSPEED := 0
+SD_CAP_UHS := 0
+SD_NO_1V8 := 1
+else ifeq ($(SD_MODE),wide)
+SD_BUS_WIDTH := 4
+SD_CAP_HIGHSPEED := 1
+SD_CAP_UHS := 0
+SD_NO_1V8 := 1
+else
+SD_BUS_WIDTH := 4
+SD_CAP_HIGHSPEED := 1
+SD_CAP_UHS := 1
+SD_NO_1V8 := 0
+endif
 
 GCC_LIBDIR ?= $(firstword $(wildcard $(TOOLCHAIN)/lib/gcc/mipsel-mti-elf/*))
 SYS_LIBDIR := $(TOOLCHAIN)/mipsel-mti-elf/lib
@@ -101,6 +125,10 @@ SDK_INCLUDES := \
 DTS_CPPFLAGS := \
 	-Idts/include \
 	-I$(SDK)/include/hcrtos \
+	-DUNIFROG_SD_BUS_WIDTH=$(SD_BUS_WIDTH) \
+	-DUNIFROG_SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED) \
+	-DUNIFROG_SD_CAP_UHS=$(SD_CAP_UHS) \
+	-DUNIFROG_SD_NO_1V8=$(SD_NO_1V8) \
 	-nostdinc \
 	-undef \
 	-D__ASSEMBLY__ \
@@ -135,6 +163,7 @@ DEFINES := \
 	-DSOC_HC15XX \
 	-DSF2000 \
 	-DSUPPORT_FFPLAYER \
+	-DUNIFROG_SD_MODE=\"$(SD_MODE)\" \
 	-DUNIFROG_GIT_COMMIT=\"$(UNIFROG_GIT_COMMIT)\" \
 	-DUNIFROG_GIT_DIRTY=$(UNIFROG_GIT_DIRTY) \
 	-DUNIFROG_SDK_GIT_COMMIT=\"$(UNIFROG_SDK_GIT_COMMIT)\" \
@@ -474,6 +503,7 @@ help:
 	@echo "Config:"
 	@echo "  make print-config  Show current paths and tools"
 	@echo "  make V=1           Show full compiler/linker commands"
+	@echo "  make SD_MODE=safe  Use the old 1-bit SD profile"
 	@echo "  Override paths in untracked config.mk, or on the command line."
 
 print-config:
@@ -488,6 +518,7 @@ print-config:
 	@echo "MQUICKJS_DIR=$(MQUICKJS_DIR)"
 	@echo "HOSTCC=$(HOSTCC)"
 	@echo "DTC=$(DTC)"
+	@echo "SD_MODE=$(SD_MODE)"
 	@echo "CCACHE=$(if $(CCACHE),$(CCACHE),disabled)"
 	@echo "ARCH_CFLAGS=$(ARCH_CFLAGS)"
 	@echo "OPT_SIZE=$(OPT_SIZE)"
@@ -651,7 +682,8 @@ core-smoke-check:
 
 sdk:
 	$(Q)$(MAKE) -C $(SDK) check TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) CCACHE=$(CCACHE) JOBS=$(JOBS)
+		CROSS_COMPILE=$(CROSS_COMPILE) CCACHE=$(CCACHE) JOBS=$(JOBS) \
+		SD_MODE=$(SD_MODE)
 
 js2300-check:
 	$(Q)$(MAKE) -C $(JS2300) check TOOLCHAIN=$(TOOLCHAIN) \
@@ -800,7 +832,15 @@ $(FASTBOOT_STUB_BIN): $(FASTBOOT_STUB_OUT)
 	@echo "  OBJCOPY $@"
 	$(Q)$(OBJCOPY) -O binary $< $@
 
-$(DTS_PRE): $(DTS) | $(BUILD)
+$(DTS_MODE_STAMP): | $(BUILD)
+	$(Q)printf '%s\n' \
+		"SD_MODE=$(SD_MODE)" \
+		"SD_BUS_WIDTH=$(SD_BUS_WIDTH)" \
+		"SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED)" \
+		"SD_CAP_UHS=$(SD_CAP_UHS)" \
+		"SD_NO_1V8=$(SD_NO_1V8)" > $@
+
+$(DTS_PRE): $(DTS) $(DTS_MODE_STAMP) | $(BUILD)
 	@echo "  CPP     $<"
 	$(Q)$(CC) $(DTS_CPPFLAGS) -Wp,-MD,$@.d -E -o $@ $<
 
