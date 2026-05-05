@@ -44,6 +44,8 @@ FRONTEND_PACKAGE := $(OUT)/sdcard/unifrog
 CORE_PACKAGE := $(OUT)/sdcard/unifrog/cores
 MODULE_PACKAGE := $(OUT)/sdcard/unifrog/modules
 FRONTEND_MANIFEST := $(FRONTEND_PACKAGE)/manifest.ini
+SDCARD_BIOS_PACKAGE := $(OUT)/sdcard/bios/bisrv.asd
+SDCARD_FIRMWARE_PACKAGE := $(OUT)/sdcard/firmware/unifrog.bin
 SDCARD_PACKAGE_DIR ?= $(OUT)/sdcard-package
 SDZIP ?= $(OUT)/UniFrog-sdcard.zip
 ZIP_COMPRESSION ?= -9
@@ -663,12 +665,12 @@ $(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 .DELETE_ON_ERROR:
 COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild
 SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores
-PACKAGE_TARGETS := frontend-package core-package module-package sd-zip install refresh-sd refresh-sd-clean
+PACKAGE_TARGETS := frontend-package core-package module-package sdcard-package sd-zip install refresh-sd refresh-sd-clean
 VERIFY_TARGETS := asdcheck fastboot-check layout-check js2300-check frontend-check core-smoke-check
 ADVANCED_TARGETS := sdk dtb lib fastboot size ci-deps ci-toolchain ci-commit-check ci-sd-zip print-config
 .PHONY: $(COMMON_TARGETS) $(SETUP_TARGETS) $(PACKAGE_TARGETS) $(VERIFY_TARGETS) $(ADVANCED_TARGETS)
 
-all: $(ASD) $(OUT)/unifrog.bin core-package module-package
+all: $(ASD) sdcard-package
 setup: deps
 
 verify:
@@ -695,6 +697,7 @@ help:
 	@echo "  make deps-cores    Fetch only libretro core sources"
 	@echo ""
 	@echo "Packaging and device:"
+	@echo "  make sdcard-package Build the complete $(OUT)/sdcard tree"
 	@echo "  make sd-zip        Build $(SDZIP)"
 	@echo "  make install       Copy firmware and SD files to SDCARD=$(SDCARD)"
 	@echo "  make refresh-sd    Build, install, and sync SD files"
@@ -962,11 +965,24 @@ ifeq ($(HCRTOS_MEDIA_MODULE_BINS),)
 	$(Q)rm -rf $(MODULE_PACKAGE)
 endif
 
+sdcard-package: $(SDCARD_BIOS_PACKAGE) $(SDCARD_FIRMWARE_PACKAGE) core-package module-package
+
 $(CORE_PACKAGE):
 	$(Q)mkdir -p $@
 
 $(MODULE_PACKAGE):
 	$(Q)mkdir -p $@
+
+$(dir $(SDCARD_BIOS_PACKAGE)) $(dir $(SDCARD_FIRMWARE_PACKAGE)):
+	$(Q)mkdir -p $@
+
+$(SDCARD_BIOS_PACKAGE): $(FASTBOOT_ASD) | $(dir $(SDCARD_BIOS_PACKAGE))
+	@echo "  SDCARD  $@"
+	$(Q)if test -f $@ && cmp -s $< $@; then touch $@; else cp $< $@; fi
+
+$(SDCARD_FIRMWARE_PACKAGE): $(OUT)/unifrog.bin | $(dir $(SDCARD_FIRMWARE_PACKAGE))
+	@echo "  SDCARD  $@"
+	$(Q)if test -f $@ && cmp -s $< $@; then touch $@; else cp $< $@; fi
 
 $(JS2300_CORE_BIN): $(LIBJS2300) | $(CORE_PACKAGE)
 	@echo "  COREBIN $@"
@@ -1239,9 +1255,11 @@ asdcheck: $(ASD)
 
 fastboot: $(FASTBOOT_ASD) $(OUT)/unifrog.bin
 
-fastboot-check: fastboot core-package module-package
+fastboot-check: sdcard-package
 	@test -s $(FASTBOOT_ASD)
 	@test -s $(OUT)/unifrog.bin
+	@test -s $(SDCARD_BIOS_PACKAGE)
+	@test -s $(SDCARD_FIRMWARE_PACKAGE)
 	@test -s $(FRONTEND_PACKAGE)/main.js
 	@test -s $(FRONTEND_MANIFEST)
 	@test -s $(JS2300_CORE_BIN)
@@ -1287,9 +1305,11 @@ layout-check: $(OUT)/$(TARGET).out $(LIBRETRO_CORE_MODULE_OUTS) $(NATIVE_MODULE_
 	}' || exit 1; \
 	done
 
-check: $(ASD) $(OUT)/unifrog.bin core-package module-package layout-check
+check: $(ASD) sdcard-package layout-check
 	@test -s $(ASD)
 	@test -s $(OUT)/unifrog.bin
+	@test -s $(SDCARD_BIOS_PACKAGE)
+	@test -s $(SDCARD_FIRMWARE_PACKAGE)
 	@test -s $(LIBUNIFROG)
 	@test -s $(FRONTEND_PACKAGE)/main.js
 	@test -s $(FRONTEND_MANIFEST)

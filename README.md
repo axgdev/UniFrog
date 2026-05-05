@@ -4,7 +4,7 @@ UniFrog builds a native SF2000 firmware payload, JavaScript frontend package,
 native modules, and libretro core modules for an SD-card based setup.
 
 The root Makefile is the authoritative entry point. It builds `bisrv.asd`,
-`output/unifrog.bin`, and `output/sdcard/unifrog`.
+`output/unifrog.bin`, and the complete `output/sdcard` layout.
 
 ## Requirements
 

@@ -19,6 +19,8 @@ The build emits:
 bisrv.asd                         Native SF2000 firmware payload
 output/unifrog.bin                Raw firmware binary
 output/libunifrog.a               Runtime archive used by modules
+output/sdcard/bios/bisrv.asd      Fastboot image installed as stock firmware
+output/sdcard/firmware/unifrog.bin  Raw firmware loaded by fastboot
 output/sdcard/unifrog/            SD-card frontend, modules, and cores
 ```
 
