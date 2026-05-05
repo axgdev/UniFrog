@@ -774,7 +774,7 @@ print-config:
 deps: deps-sdk deps-mquickjs deps-cores
 
 deps-alpine:
-	apk add git make dtc tcc tcc-libs-static musl-dev ccache curl tar xz zip patch imagemagick
+	apk add git make dtc tcc tcc-libs-static musl-dev ccache curl tar xz zip patch
 
 deps-ubuntu:
 	@echo "sudo apt-get update && sudo apt-get install -y git make device-tree-compiler tcc ccache curl xz-utils zip patch"
@@ -883,7 +883,6 @@ doctor:
 	@command -v $(OBJCOPY) >/dev/null || { echo "missing: $(OBJCOPY)"; exit 1; }
 	@command -v $(HOSTCC) >/dev/null || { echo "missing: $(HOSTCC)"; exit 1; }
 	@command -v $(DTC) >/dev/null || { echo "missing: $(DTC)"; exit 1; }
-	@command -v magick >/dev/null || { echo "missing: magick"; exit 1; }
 	@test -n "$(GCC_LIBDIR)" || { echo "missing: GCC libdir under $(TOOLCHAIN)/lib/gcc/mipsel-mti-elf"; exit 1; }
 	@test -d "$(SYS_LIBDIR)" || { echo "missing: $(SYS_LIBDIR)"; exit 1; }
 	@test -d "$(SDK)/include" || { echo "missing: $(SDK)/include"; exit 1; }
@@ -1136,29 +1135,29 @@ $(FASTBOOT_STUB_BIN): $(FASTBOOT_STUB_OUT)
 	@echo "  OBJCOPY $@"
 	$(Q)$(OBJCOPY) -O binary $< $@
 
-$(BOOT_LOGO_TOOL): tools/bootlogo.c $(BUILD_CONFIG_STAMP) | $(BUILD)
+$(BOOT_LOGO_TOOL): tools/bootlogo.c $(CORE_SUPPORT_ROOT)/zlib/inflate.c $(BUILD_CONFIG_STAMP) | $(BUILD)
 	@echo "  HOSTCC  $@"
 	$(Q)mkdir -p $(dir $@)
-	$(Q)$(HOSTCC) $(HOSTCFLAGS) $< -o $@
+	$(Q)$(HOSTCC) $(HOSTCFLAGS) -I$(CORE_SUPPORT_ROOT)/zlib \
+		tools/bootlogo.c \
+		$(CORE_SUPPORT_ROOT)/zlib/adler32.c \
+		$(CORE_SUPPORT_ROOT)/zlib/crc32.c \
+		$(CORE_SUPPORT_ROOT)/zlib/inffast.c \
+		$(CORE_SUPPORT_ROOT)/zlib/inflate.c \
+		$(CORE_SUPPORT_ROOT)/zlib/inftrees.c \
+		$(CORE_SUPPORT_ROOT)/zlib/uncompr.c \
+		$(CORE_SUPPORT_ROOT)/zlib/zutil.c \
+		-o $@
 
-$(BOOT_LOGO_PPM): $(BOOT_LOGO_SRC) | $(BUILD)
-	@echo "  IMAGE   $@"
-	$(Q)mkdir -p $(dir $@)
-	$(Q)magick $< -resize 320x240! ppm:$@
-
-$(BOOT_LOGO_STAMP): $(BOOT_LOGO_PPM) $(BOOT_LOGO_TOOL) $(BUILD_IDENTITY_STAMP)
+$(BOOT_LOGO_STAMP): $(BOOT_LOGO_SRC) $(BOOT_LOGO_TOOL) $(BUILD_IDENTITY_STAMP)
 	@echo "  BOOTLOGO $(UNIFROG_BOOT_VERSION)"
-	$(Q)$(BOOT_LOGO_TOOL) $(BOOT_LOGO_PPM) "$(UNIFROG_BOOT_VERSION)" $(BOOT_LOGO_STAMPED_PPM) $(BOOT_LOGO_RGB565_INC)
+	$(Q)$(BOOT_LOGO_TOOL) $(BOOT_LOGO_SRC) "$(UNIFROG_BOOT_VERSION)" $(BOOT_LOGO_STAMPED_PPM) $(BOOT_LOGO_RGB565_INC)
 	$(Q)touch $@
 
 $(BOOT_LOGO_STAMPED_PPM) $(BOOT_LOGO_RGB565_INC): $(BOOT_LOGO_STAMP)
 
-$(BOOT_LOGO_STAMPED_PNG): $(BOOT_LOGO_STAMPED_PPM)
-	@echo "  PNG     $@"
-	$(Q)magick $< -strip -define png:compression-level=9 -define png:compression-strategy=0 PNG8:$@
-
-boot-logo-check: $(BOOT_LOGO_STAMPED_PNG) $(BOOT_LOGO_RGB565_INC)
-	@test -s $(BOOT_LOGO_STAMPED_PNG)
+boot-logo-check: $(BOOT_LOGO_STAMPED_PPM) $(BOOT_LOGO_RGB565_INC)
+	@test -s $(BOOT_LOGO_STAMPED_PPM)
 	@test -s $(BOOT_LOGO_RGB565_INC)
 	@echo "  OK      boot logo"
 
