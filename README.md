@@ -60,7 +60,8 @@ make clean            Remove generated build/output files
 make distclean        Also clean sub-build outputs
 ```
 
-`make deps` and `make check` remain supported aliases for the same workflow.
+`make deps` remains a supported alias for `make setup`; `make check` is the
+firmware/package/layout build check used inside the fuller `make verify` gate.
 Dependency status and upgrades follow the policy declared beside each pin; use
 `MODE=head` or `MODE=tag` only for an explicit one-off override. Use
 `make quick-check` while iterating. `make verify` is the normal

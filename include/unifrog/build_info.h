@@ -1,0 +1,52 @@
+#ifndef UNIFROG_BUILD_INFO_H
+#define UNIFROG_BUILD_INFO_H
+
+#ifndef UNIFROG_GIT_COMMIT
+#define UNIFROG_GIT_COMMIT "unknown"
+#endif
+
+#ifndef UNIFROG_GIT_DIRTY
+#define UNIFROG_GIT_DIRTY 1
+#endif
+
+#ifndef UNIFROG_SDK_GIT_COMMIT
+#define UNIFROG_SDK_GIT_COMMIT "unknown"
+#endif
+
+#ifndef UNIFROG_CORES_GIT_COMMIT
+#define UNIFROG_CORES_GIT_COMMIT "unknown"
+#endif
+
+#ifndef UNIFROG_JS2300_GIT_COMMIT
+#define UNIFROG_JS2300_GIT_COMMIT "unknown"
+#endif
+
+#ifndef UNIFROG_FRONTEND_GIT_COMMIT
+#define UNIFROG_FRONTEND_GIT_COMMIT "unknown"
+#endif
+
+#ifndef UNIFROG_SD_MODE
+#define UNIFROG_SD_MODE "unknown"
+#endif
+
+#ifndef UNIFROG_SD_READ_MODE
+#define UNIFROG_SD_READ_MODE "boot"
+#endif
+
+#ifndef UNIFROG_SD_EXPERIMENTAL
+#define UNIFROG_SD_EXPERIMENTAL 0
+#endif
+
+#ifndef UNIFROG_HCRTOS_MEDIA
+#define UNIFROG_HCRTOS_MEDIA "unknown"
+#endif
+
+#ifndef UNIFROG_HCRTOS_MEDIA_MODULE
+#define UNIFROG_HCRTOS_MEDIA_MODULE 0
+#endif
+
+#ifndef UNIFROG_HCRTOS_MEDIA_FIRMWARE
+#define UNIFROG_HCRTOS_MEDIA_FIRMWARE 0
+#endif
+
+#endif

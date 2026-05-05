@@ -556,7 +556,11 @@ ADVANCED_TARGETS := sdk dtb lib fastboot size ci-deps ci-toolchain ci-commit-che
 
 all: $(ASD) $(OUT)/unifrog.bin core-package module-package
 setup: deps
-verify: check
+
+verify:
+	$(Q)$(MAKE) --no-print-directory quick-check
+	$(Q)$(MAKE) --no-print-directory check
+	$(Q)$(MAKE) --no-print-directory fastboot-check
 
 help:
 	@echo "$(APP) common workflow:"
@@ -568,7 +572,7 @@ help:
 	@echo "  make deps          Same as make setup"
 	@echo "  make deps-status   Show pins vs policy, or override MODE=head|tag"
 	@echo "  make upgrade-deps  Bump pins by policy, or override MODE=head|tag"
-	@echo "  make check         Same as make verify"
+	@echo "  make check         Build firmware, SD files, and link layout check"
 	@echo ""
 	@echo "Setup:"
 	@echo "  make deps-alpine   Install Alpine host packages"
@@ -583,7 +587,7 @@ help:
 	@echo ""
 	@echo "Focused checks:"
 	@echo "  make repo-check core-smoke-check js2300-check frontend-check"
-	@echo "  make layout-check asdcheck"
+	@echo "  make layout-check asdcheck fastboot-check"
 	@echo "  make -C cores help"
 	@echo "  make -C frontend help"
 	@echo "  make -C js2300 help"

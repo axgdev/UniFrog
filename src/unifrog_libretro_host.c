@@ -22,6 +22,7 @@
 #include <unifrog/audio.h>
 #include <unifrog/abi.h>
 #include <unifrog/backlight.h>
+#include <unifrog/build_info.h>
 #include <unifrog/diag.h>
 #include <unifrog/fb.h>
 #include <unifrog/gfx.h>
@@ -43,16 +44,6 @@
 #include "unifrog_mips_call.h"
 
 #define printf unifrog_log
-
-#ifndef UNIFROG_SD_MODE
-#define UNIFROG_SD_MODE "unknown"
-#endif
-#ifndef UNIFROG_SD_READ_MODE
-#define UNIFROG_SD_READ_MODE "boot"
-#endif
-#ifndef UNIFROG_SD_EXPERIMENTAL
-#define UNIFROG_SD_EXPERIMENTAL 0
-#endif
 
 #define DEFAULT_SAMPLE_RATE 32000u
 #define LIBRETRO_AUDIO_OUTPUT_RATE 32000u
@@ -105,21 +96,6 @@
 #define LIBRETRO_FS_PROBE_SAMPLE 64u
 #define LIBRETRO_FS_PROBE_MAX_LOGS 12u
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
-#ifndef UNIFROG_GIT_COMMIT
-#define UNIFROG_GIT_COMMIT "unknown"
-#endif
-
-#ifndef UNIFROG_GIT_DIRTY
-#define UNIFROG_GIT_DIRTY 1
-#endif
-
-#ifndef UNIFROG_SDK_GIT_COMMIT
-#define UNIFROG_SDK_GIT_COMMIT "unknown"
-#endif
-
-#ifndef UNIFROG_CORES_GIT_COMMIT
-#define UNIFROG_CORES_GIT_COMMIT "unknown"
-#endif
 
 #define ROM_ALLOC_MAGIC 0x5546524du
 

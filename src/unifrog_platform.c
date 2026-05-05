@@ -15,6 +15,7 @@
 
 #include <cpu_func.h>
 #include <fastboot/handoff.h>
+#include <unifrog/build_info.h>
 #include <unifrog/boot_logo.h>
 #include <unifrog/boot_trace.h>
 #include <unifrog/log.h>
@@ -33,13 +34,6 @@ extern unsigned long PINMUXR;
 #define STORAGE_MAX_POLLS 100
 #define STORAGE_POLL_MS 100
 #define SD_RUNTIME_QUIESCE_MS 100u
-
-#ifndef UNIFROG_SD_MODE
-#define UNIFROG_SD_MODE "unknown"
-#endif
-#ifndef UNIFROG_SD_EXPERIMENTAL
-#define UNIFROG_SD_EXPERIMENTAL 0
-#endif
 
 struct storage_mount {
    const char *dev;

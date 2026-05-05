@@ -11,6 +11,7 @@
 
 #include <pthread.h>
 
+#include <unifrog/build_info.h>
 #include <frontend/js2300_frontend.h>
 #include <unifrog/boot_logo.h>
 #include <unifrog/boot_trace.h>
@@ -20,32 +21,7 @@
 #include <unifrog/platform.h>
 #include <unifrog/runtime.h>
 
-#ifndef UNIFROG_GIT_COMMIT
-#define UNIFROG_GIT_COMMIT "unknown"
-#endif
-
-#ifndef UNIFROG_GIT_DIRTY
-#define UNIFROG_GIT_DIRTY 1
-#endif
-
-#ifndef UNIFROG_SDK_GIT_COMMIT
-#define UNIFROG_SDK_GIT_COMMIT "unknown"
-#endif
-
-#ifndef UNIFROG_CORES_GIT_COMMIT
-#define UNIFROG_CORES_GIT_COMMIT "unknown"
-#endif
-
-#ifndef UNIFROG_JS2300_GIT_COMMIT
-#define UNIFROG_JS2300_GIT_COMMIT "unknown"
-#endif
-
-#ifndef UNIFROG_FRONTEND_GIT_COMMIT
-#define UNIFROG_FRONTEND_GIT_COMMIT "unknown"
-#endif
-#ifndef UNIFROG_HCRTOS_MEDIA
-#define UNIFROG_HCRTOS_MEDIA "unknown"
-#endif
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 static void app_main(void *pvParameters);
 static void *frontend_thread(void *arg);
@@ -189,6 +165,7 @@ __initcall(sf2000_start)
 static void app_main(void *pvParameters)
 {
    int module_ret;
+   int exclude_count = (int)ARRAY_SIZE(fast_ui_boot_excludes);
    uint32_t module_start_ms;
    uint32_t module_done_ms;
 
@@ -198,19 +175,14 @@ static void app_main(void *pvParameters)
       unifrog_perf_time_ms(), 0, 0);
    module_start_ms = unifrog_perf_time_ms();
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_MODULE_INIT_BEGIN,
-      module_start_ms,
-      (uint32_t)(sizeof(fast_ui_boot_excludes) / sizeof(fast_ui_boot_excludes[0])),
-      0);
-   module_ret = module_init2("all",
-      (int)(sizeof(fast_ui_boot_excludes) / sizeof(fast_ui_boot_excludes[0])),
-      fast_ui_boot_excludes);
+      module_start_ms, (uint32_t)exclude_count, 0);
+   module_ret = module_init2("all", exclude_count, fast_ui_boot_excludes);
    module_done_ms = unifrog_perf_time_ms();
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_MODULE_INIT_DONE,
       module_done_ms, module_done_ms - module_start_ms, (uint32_t)module_ret);
    printf("unifrog fast_ui_boot module_init ret=%d ms=%lu excludes=%lu\n",
       module_ret, (unsigned long)(module_done_ms - module_start_ms),
-      (unsigned long)(sizeof(fast_ui_boot_excludes) /
-         sizeof(fast_ui_boot_excludes[0])));
+      (unsigned long)exclude_count);
    if (module_ret != 0)
       printf("module_init all failed ret=%d, starting frontend fallback\n", module_ret);
    else

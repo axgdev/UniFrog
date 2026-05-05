@@ -1,39 +1,26 @@
 #include "js2300_frontend_internal.h"
 
-int frontend_fb_open(struct js2300_frontend *frontend)
+static void frontend_fb_set_handoff_buffers(struct unifrog_fb *fb,
+   int preserve_logo)
 {
-   int preserve_logo;
-   unsigned flags;
-   unsigned i;
+   if (preserve_logo && fb->buffer_count >= 2)
+      return;
+   if (unifrog_fb_set_buffer_count(fb, 2) != 0)
+      (void)unifrog_fb_set_buffer_count(fb, 1);
+}
 
-   preserve_logo = unifrog_boot_logo_is_active();
-   flags = preserve_logo ? UNIFROG_FB_OPEN_PRESERVE : UNIFROG_FB_OPEN_DEFAULT;
-   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_FB_OPEN_BEGIN,
-      unifrog_perf_time_ms(), (uint32_t)preserve_logo, 0);
-   if (unifrog_fb_open(&frontend->fb, flags) != 0) {
-      printf("unifrog js fb open failed\n");
-      return -1;
+static void frontend_fb_clear_buffers(struct unifrog_fb *fb)
+{
+   for (unsigned i = 0; i < fb->buffer_count; i++) {
+      struct unifrog_surface surface = unifrog_fb_surface_for_buffer(fb, i);
+
+      unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height, 0);
+      unifrog_fb_flush_buffer(fb, i);
    }
-   if (preserve_logo) {
-      if (frontend->fb.buffer_count < 2 &&
-          unifrog_fb_set_buffer_count(&frontend->fb, 2) != 0)
-         (void)unifrog_fb_set_buffer_count(&frontend->fb, 1);
-   } else {
-      if (unifrog_fb_set_buffer_count(&frontend->fb, 2) != 0)
-         (void)unifrog_fb_set_buffer_count(&frontend->fb, 1);
-      for (i = 0; i < frontend->fb.buffer_count; i++) {
-         struct unifrog_surface surface =
-            unifrog_fb_surface_for_buffer(&frontend->fb, i);
-         unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height, 0);
-         unifrog_fb_flush_buffer(&frontend->fb, i);
-      }
-   }
-   if (!preserve_logo)
-      (void)unifrog_fb_pan(&frontend->fb, frontend->fb.current_buffer);
-   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_FB_CLEAR_DONE,
-      unifrog_perf_time_ms(), frontend->fb.width,
-      (frontend->fb.height << 16) | (uint32_t)preserve_logo);
-   unifrog_boot_trace_log("boot.fb_clear_done");
+}
+
+static void frontend_video_state_reset(struct js2300_frontend *frontend)
+{
    frontend->draw_buffer = frontend->fb.current_buffer;
    frontend->frame_open = 0;
    frontend->frame_draw_ops = 0;
@@ -43,6 +30,31 @@ int frontend_fb_open(struct js2300_frontend *frontend)
    frontend->pending_av_valid = 0;
    frontend->video_present_count = 0;
    frontend->video_present_log_count = 0;
+}
+
+int frontend_fb_open(struct js2300_frontend *frontend)
+{
+   int preserve_logo;
+   unsigned flags;
+
+   preserve_logo = unifrog_boot_logo_is_active();
+   flags = preserve_logo ? UNIFROG_FB_OPEN_PRESERVE : UNIFROG_FB_OPEN_DEFAULT;
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_FB_OPEN_BEGIN,
+      unifrog_perf_time_ms(), (uint32_t)preserve_logo, 0);
+   if (unifrog_fb_open(&frontend->fb, flags) != 0) {
+      printf("unifrog js fb open failed\n");
+      return -1;
+   }
+   frontend_fb_set_handoff_buffers(&frontend->fb, preserve_logo);
+   if (!preserve_logo) {
+      frontend_fb_clear_buffers(&frontend->fb);
+      (void)unifrog_fb_pan(&frontend->fb, frontend->fb.current_buffer);
+   }
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_FB_CLEAR_DONE,
+      unifrog_perf_time_ms(), frontend->fb.width,
+      (frontend->fb.height << 16) | (uint32_t)preserve_logo);
+   unifrog_boot_trace_log("boot.fb_clear_done");
+   frontend_video_state_reset(frontend);
    if (preserve_logo) {
       unifrog_boot_logo_release_early();
       printf("unifrog boot_logo preserved current=%u buffers=%u\n",
