@@ -171,8 +171,6 @@ void host_exit(void *opaque, const char *reason);
 
 void frontend_configure_host(struct js2300_frontend *frontend,
    struct js2300_host *host);
-int frontend_start_boot_read_window(struct js2300_frontend *frontend,
-   const char *tag);
 int frontend_restore_boot_read_window(struct js2300_frontend *frontend,
    const char *tag, int flush);
 int frontend_start_runtime_read_window(struct js2300_frontend *frontend,

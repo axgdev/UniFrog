@@ -264,9 +264,6 @@ int js2300_frontend_main(void)
       snprintf(diag_tag, sizeof(diag_tag), "frontend.created.%u", relaunch);
       unifrog_diag_memory_snapshot(diag_tag);
       if (ret == 0) {
-         if (relaunch == 0)
-            (void)frontend_start_boot_read_window(&frontend,
-               "frontend_launch");
          run_start_ms = unifrog_perf_time_ms();
          ret = js2300_runtime_run(runtime);
          printf("unifrog js phase=runtime_run relaunch=%u ms=%lu ret=%d\n",

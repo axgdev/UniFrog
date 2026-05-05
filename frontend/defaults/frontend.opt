@@ -22,7 +22,7 @@ auto_index=0
 home_layout=grid
 ### [language] :[en] :[en|zh-Hans|hi|es|fr|ar|bn|pt|ru|ur|id|de|ja|sw|mr|te|tr|ta|vi|ko]
 language=en
-### [font] :[/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf] :[NotoSans-Regular|NotoSansArabic|NotoSansDevanagari|NotoSansBengali|NotoSansTamil|NotoSansTelugu|NotoSansCJKsc]
+### [font] :[/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf] :[NotoSans-Regular|NotoSansArabic|NotoSansDevanagari|NotoSansBengali|NotoSansTamil|NotoSansTelugu|NotoSansCJKjp|NotoSansCJKsc]
 font=/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf
 ### [font_size] :[12] :[10|11|12|13|14|15]
 font_size=12

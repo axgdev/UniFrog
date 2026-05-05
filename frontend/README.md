@@ -104,8 +104,8 @@ accept absolute paths or paths relative to `icon_root`.
 `make -C frontend package` includes them as `/unifrog/fonts` when present. The
 default theme loads the Latin/Greek/Cyrillic Noto Sans file only to keep normal
 startup memory low. Users and language-specific themes can add Arabic,
-Devanagari, Bengali, Tamil, Telugu, or CJK fallback files when they need those
-scripts.
+Devanagari, Bengali, Tamil, Telugu, Japanese, or CJK fallback files when they
+need those scripts.
 
 System icons live under `/unifrog/themes/system-icons/icons`. The packaged
 library subdirectory contains optimized cropped console images from the source

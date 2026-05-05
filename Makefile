@@ -23,6 +23,7 @@ NOTO_SANS_BENGALI_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted
 NOTO_SANS_TAMIL_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansTamil/NotoSansTamil-Regular.ttf
 NOTO_SANS_TELUGU_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansTelugu/NotoSansTelugu-Regular.ttf
 NOTO_SANS_CJK_URL ?= https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf
+NOTO_SANS_JP_URL ?= https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 SD_MODE ?= safe
@@ -826,7 +827,8 @@ deps-fonts:
 	fetch_font "$(NOTO_SANS_BENGALI_URL)" NotoSansBengali-Regular.ttf; \
 	fetch_font "$(NOTO_SANS_TAMIL_URL)" NotoSansTamil-Regular.ttf; \
 	fetch_font "$(NOTO_SANS_TELUGU_URL)" NotoSansTelugu-Regular.ttf; \
-	fetch_font "$(NOTO_SANS_CJK_URL)" NotoSansCJKsc-Regular.otf
+	fetch_font "$(NOTO_SANS_CJK_URL)" NotoSansCJKsc-Regular.otf; \
+	fetch_font "$(NOTO_SANS_JP_URL)" NotoSansCJKjp-Regular.otf
 
 deps-status:
 	@set -e; \

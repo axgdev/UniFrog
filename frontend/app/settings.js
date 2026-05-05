@@ -66,7 +66,7 @@ function writeUserOptions() {
   text += "auto_index=" + String(config.autoIndex) + "\n";
   text += "### [language] :[" + config.language + "] :[en|zh-Hans|hi|es|fr|ar|bn|pt|ru|ur|id|de|ja|sw|mr|te|tr|ta|vi|ko]\n";
   text += "language=" + config.language + "\n";
-  text += "### [font] :[" + config.font + "] :[NotoSans-Regular|NotoSansArabic|NotoSansDevanagari|NotoSansBengali|NotoSansTamil|NotoSansTelugu|NotoSansCJKsc]\n";
+  text += "### [font] :[" + config.font + "] :[NotoSans-Regular|NotoSansArabic|NotoSansDevanagari|NotoSansBengali|NotoSansTamil|NotoSansTelugu|NotoSansCJKjp|NotoSansCJKsc]\n";
   text += "font=" + config.font + "\n";
   text += "### [font_size] :[" + String(config.fontSize) + "] :[10|11|12|13|14|15]\n";
   text += "font_size=" + String(config.fontSize) + "\n";

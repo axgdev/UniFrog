@@ -100,6 +100,7 @@ var fontOptions = [
   { label: "Bengali", value: "/media/mmcblk0/unifrog/fonts/NotoSansBengali-Regular.ttf" },
   { label: "Tamil", value: "/media/mmcblk0/unifrog/fonts/NotoSansTamil-Regular.ttf" },
   { label: "Telugu", value: "/media/mmcblk0/unifrog/fonts/NotoSansTelugu-Regular.ttf" },
+  { label: "Japanese", value: "/media/mmcblk0/unifrog/fonts/NotoSansCJKjp-Regular.otf" },
   { label: "CJK", value: "/media/mmcblk0/unifrog/fonts/NotoSansCJKsc-Regular.otf" }
 ];
 var fontSizeOptions = [
