@@ -71,6 +71,7 @@ function repeated(mask, button, now, delay, interval) {
 }
 
 function openSystems(now) {
+  ensureIndexLoaded(now, 1);
   pushNav();
   selected = 0;
   scroll = 0;
@@ -97,6 +98,7 @@ function openSystemList(now) {
 function openSystemByName(name, now) {
   var i;
 
+  ensureIndexLoaded(now, 1);
   for (i = 0; i < systems.length; i++) {
     if (systems[i] === name) {
       openSystemIndex(i, now);
@@ -107,6 +109,7 @@ function openSystemByName(name, now) {
 }
 
 function openMediaIndex(now) {
+  ensureIndexLoaded(now, 1);
   if (mediaItems.length === 0) {
     openBrowser("Media", "/media/mmcblk0", "media");
     return;

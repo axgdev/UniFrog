@@ -24,6 +24,8 @@ var mediaItems = [];
 var systems = [];
 var systemCounts = [];
 var systemItemLists = [];
+var indexLoaded = false;
+var indexLoadPending = true;
 var currentItems = [];
 var currentSystem = "";
 var currentListTitle = "";
@@ -73,9 +75,10 @@ var NAV_STACK_MAX = 16;
 JS2300.log("unifrog frontend start");
 loadSettings();
 loadThemeFile();
-loadIndex();
-if (config.autoIndex)
+if (config.autoIndex) {
+  indexLoadPending = false;
   indexGames(JS2300.now());
+}
 loadSystemCheckReport(JS2300.now());
 nextBatteryMs = JS2300.now() + 750;
 
@@ -134,6 +137,8 @@ while (running) {
   } else {
     JS2300.sleep(16);
   }
+  if (indexLoadPending && frontendReadyLogged)
+    ensureIndexLoaded(JS2300.now(), 1);
   prevInput = input;
 }
 

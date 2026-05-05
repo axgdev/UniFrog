@@ -16,6 +16,10 @@
 #define JS2300_MAX_BYTECODE_PATH 192u
 #define JS2300_MAX_BYTECODE_MANIFEST_BYTES (64u * 1024u)
 #define JS2300_MAX_PRELOAD_DEPTH 12u
+#define JS2300_BYTECODE_FILE_CACHE_ENTRIES 32u
+#define JS2300_BYTECODE_FILE_CACHE_MAX_BYTES (512u * 1024u)
+#define JS2300_BYTECODE_FILE_CACHE_MAX_FILE_BYTES (128u * 1024u)
+#define JS2300_MAX_CACHE_PATH 256u
 #define JS2300_MAX_SCRIPT_BYTES (512u * 1024u)
 #define JS2300_MAX_TEXT_FILE_BYTES (2u * 1024u * 1024u)
 #define JS2300_MAX_RECTS 128u
@@ -79,6 +83,14 @@ struct js2300_preloaded_bytecode {
    int used;
 };
 
+struct js2300_bytecode_file_cache_entry {
+   char path[JS2300_MAX_CACHE_PATH];
+   char *data;
+   size_t size;
+   uint64_t hash;
+   uint32_t last_used;
+};
+
 struct js2300_runtime {
    struct js2300_config config;
    struct js2300_host host;
@@ -103,6 +115,10 @@ struct js2300_runtime {
 };
 
 static struct js2300_runtime *active_runtime;
+static struct js2300_bytecode_file_cache_entry
+   bytecode_file_cache[JS2300_BYTECODE_FILE_CACHE_ENTRIES];
+static uint32_t bytecode_file_cache_counter;
+static size_t bytecode_file_cache_bytes;
 
 const char *js2300_version_string(void)
 {
@@ -261,6 +277,165 @@ static uint64_t fnv1a64(const void *data, size_t len)
       hash *= 1099511628211ull;
    }
    return hash;
+}
+
+static char *duplicate_bytes(const char *data, size_t size)
+{
+   char *copy;
+
+   if (!data)
+      return NULL;
+   copy = (char *)malloc(size + 1u);
+   if (!copy)
+      return NULL;
+   if (size)
+      memcpy(copy, data, size);
+   copy[size] = '\0';
+   return copy;
+}
+
+static void bytecode_file_cache_clear_slot(
+   struct js2300_bytecode_file_cache_entry *slot)
+{
+   if (!slot || !slot->data)
+      return;
+   if (bytecode_file_cache_bytes >= slot->size)
+      bytecode_file_cache_bytes -= slot->size;
+   else
+      bytecode_file_cache_bytes = 0;
+   free(slot->data);
+   memset(slot, 0, sizeof(*slot));
+}
+
+static struct js2300_bytecode_file_cache_entry *bytecode_file_cache_find(
+   const char *path, size_t size, uint64_t hash)
+{
+   if (!path)
+      return NULL;
+   for (unsigned i = 0; i < JS2300_BYTECODE_FILE_CACHE_ENTRIES; i++) {
+      struct js2300_bytecode_file_cache_entry *slot =
+         &bytecode_file_cache[i];
+
+      if (slot->data && slot->size == size && slot->hash == hash &&
+          strcmp(slot->path, path) == 0) {
+         slot->last_used = ++bytecode_file_cache_counter;
+         return slot;
+      }
+   }
+   return NULL;
+}
+
+static struct js2300_bytecode_file_cache_entry *bytecode_file_cache_pick_slot(
+   const char *path)
+{
+   struct js2300_bytecode_file_cache_entry *oldest = NULL;
+
+   for (unsigned i = 0; i < JS2300_BYTECODE_FILE_CACHE_ENTRIES; i++) {
+      struct js2300_bytecode_file_cache_entry *slot =
+         &bytecode_file_cache[i];
+
+      if (slot->data && strcmp(slot->path, path) == 0)
+         return slot;
+      if (!slot->data)
+         return slot;
+      if (!oldest || slot->last_used < oldest->last_used)
+         oldest = slot;
+   }
+   return oldest;
+}
+
+static void bytecode_file_cache_store(const char *path, const char *data,
+                                      size_t size, uint64_t hash)
+{
+   struct js2300_bytecode_file_cache_entry *slot;
+   char *copy;
+   size_t path_len;
+
+   if (!path || !data || size == 0 ||
+       size > JS2300_BYTECODE_FILE_CACHE_MAX_FILE_BYTES ||
+       size > JS2300_BYTECODE_FILE_CACHE_MAX_BYTES)
+      return;
+   path_len = strlen(path);
+   if (path_len == 0 || path_len >= JS2300_MAX_CACHE_PATH)
+      return;
+
+   while (bytecode_file_cache_bytes + size >
+          JS2300_BYTECODE_FILE_CACHE_MAX_BYTES) {
+      struct js2300_bytecode_file_cache_entry *oldest = NULL;
+
+      for (unsigned i = 0; i < JS2300_BYTECODE_FILE_CACHE_ENTRIES; i++) {
+         struct js2300_bytecode_file_cache_entry *candidate =
+            &bytecode_file_cache[i];
+
+         if (candidate->data &&
+             (!oldest || candidate->last_used < oldest->last_used))
+            oldest = candidate;
+      }
+      if (!oldest)
+         break;
+      bytecode_file_cache_clear_slot(oldest);
+   }
+
+   slot = bytecode_file_cache_pick_slot(path);
+   if (!slot)
+      return;
+   bytecode_file_cache_clear_slot(slot);
+
+   copy = duplicate_bytes(data, size);
+   if (!copy)
+      return;
+   memcpy(slot->path, path, path_len + 1u);
+   slot->data = copy;
+   slot->size = size;
+   slot->hash = hash;
+   slot->last_used = ++bytecode_file_cache_counter;
+   bytecode_file_cache_bytes += size;
+}
+
+static char *read_bytecode_file_cached(const char *path, size_t max_bytes,
+                                       size_t expected_size,
+                                       uint64_t expected_hash,
+                                       size_t *out_len,
+                                       uint64_t *out_hash,
+                                       int *out_cache_hit)
+{
+   struct js2300_bytecode_file_cache_entry *cached;
+   char *buf;
+   uint64_t hash;
+   size_t len = 0;
+
+   if (out_len)
+      *out_len = 0;
+   if (out_hash)
+      *out_hash = 0;
+   if (out_cache_hit)
+      *out_cache_hit = 0;
+
+   cached = bytecode_file_cache_find(path, expected_size, expected_hash);
+   if (cached) {
+      buf = duplicate_bytes(cached->data, cached->size);
+      if (buf) {
+         if (out_len)
+            *out_len = cached->size;
+         if (out_hash)
+            *out_hash = cached->hash;
+         if (out_cache_hit)
+            *out_cache_hit = 1;
+         return buf;
+      }
+   }
+
+   buf = read_file(path, max_bytes, &len);
+   if (!buf)
+      return NULL;
+   hash = fnv1a64(buf, len);
+   if (len == expected_size && hash == expected_hash)
+      bytecode_file_cache_store(path, buf, len, hash);
+   if (out_len)
+      *out_len = len;
+   if (out_hash)
+      *out_hash = hash;
+   return buf;
 }
 
 static char *build_bytecode_path(const char *script_path)
@@ -618,6 +793,7 @@ static int preload_bytecode_path(struct js2300_runtime *runtime,
    size_t bytecode_len = 0;
    uint64_t source_hash;
    uint64_t bytecode_hash;
+   int bytecode_cache_hit = 0;
    JSValue ret;
    JSValue *root;
    char line[224];
@@ -645,17 +821,17 @@ static int preload_bytecode_path(struct js2300_runtime *runtime,
    if (!bytecode_path)
       return -1;
 
-   bytecode = read_file(bytecode_path,
+   bytecode = read_bytecode_file_cached(bytecode_path,
       runtime->config.bytecode_cache_bytes ?
       runtime->config.bytecode_cache_bytes : JS2300_DEFAULT_BYTECODE_CACHE_BYTES,
-      &bytecode_len);
+      entry->bytecode_size, entry->bytecode_hash, &bytecode_len,
+      &bytecode_hash, &bytecode_cache_hit);
    if (!bytecode) {
       log_bytecode_skip(runtime, path, "read_bytecode");
       free(bytecode_path);
       return -1;
    }
 
-   bytecode_hash = fnv1a64(bytecode, bytecode_len);
    if (bytecode_len != entry->bytecode_size ||
        bytecode_hash != entry->bytecode_hash) {
       log_bytecode_skip(runtime, path, "bytecode_changed");
@@ -727,9 +903,9 @@ static int preload_bytecode_path(struct js2300_runtime *runtime,
    *root = ret;
 
    snprintf(line, sizeof(line),
-      "js2300 bytecode preload ms=%lu bytes=%lu path=%s",
+      "js2300 bytecode preload ms=%lu bytes=%lu cache=%d path=%s",
       (unsigned long)(host_millis(runtime) - start_ms),
-      (unsigned long)bytecode_len, path);
+      (unsigned long)bytecode_len, bytecode_cache_hit, path);
    host_log(runtime, line);
 
    preload_load_literals(runtime, source, source_len, depth);

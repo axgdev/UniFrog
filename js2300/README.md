@@ -41,6 +41,10 @@ To keep `load("...")` fast and reliable, JS2300 preloads manifest-matched
 entry scripts and literal `load()` dependencies before attaching the `JS2300.*`
 API. The JS2300-owned MQuickJS build raises the ROM atom-table limit for these
 preloaded bytecode files.
+Verified raw bytecode bytes are kept in a small per-boot memory cache, so
+frontend relaunches and repeated quick-menu opens avoid rereading `.mqbc` files
+from SD. Source bytes are still read and hashed against the manifest before
+bytecode is executed.
 
 ## Contract
 

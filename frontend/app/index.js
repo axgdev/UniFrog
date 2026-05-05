@@ -148,11 +148,24 @@ function parseIndex(text, append) {
 }
 
 function loadIndex() {
+  var start = JS2300.now();
   var gameText = JS2300.fs.readText ? JS2300.fs.readText(INDEX_PATH) : null;
   var mediaText = JS2300.fs.readText ? JS2300.fs.readText(MEDIA_INDEX_PATH) : null;
   clearIndexData();
   parseIndex(gameText ? gameText : "", 1);
   parseIndex(mediaText ? mediaText : "", 1);
+  indexLoaded = true;
+  indexLoadPending = false;
+  JS2300.log("frontend index loaded games=" + String(indexItems.length) +
+    " media=" + String(mediaItems.length) + " ms=" +
+    String(JS2300.now() - start));
+}
+
+function ensureIndexLoaded(now, quiet) {
+  if (!indexLoaded)
+    loadIndex();
+  if (!quiet)
+    showToast(String(indexItems.length) + " games", now);
 }
 
 function skipDir(name, full) {
@@ -243,6 +256,8 @@ function indexGames(now) {
   }
   parseIndex(scan.gameText, 0);
   parseIndex(scan.mediaText, 1);
+  indexLoaded = true;
+  indexLoadPending = false;
   showToast(String(scan.games) + " games indexed", now);
   clearNav();
   view = HOME;
