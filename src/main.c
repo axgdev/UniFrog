@@ -12,6 +12,7 @@
 #include <pthread.h>
 
 #include <frontend/js2300_frontend.h>
+#include <unifrog/diag.h>
 #include <unifrog/log.h>
 #include <unifrog/perf.h>
 #include <unifrog/platform.h>
@@ -58,10 +59,21 @@ static void *frontend_thread(void *arg)
    (void)arg;
 
    thread_start_ms = unifrog_perf_time_ms();
+   unifrog_diag_memory_snapshot("boot.thread_start");
    unifrog_platform_init_board();
    board_ready_ms = unifrog_perf_time_ms();
+   unifrog_log("unifrog boot_time stage=board_ready total_ms=%lu board_ms=%lu\n",
+      (unsigned long)(board_ready_ms - thread_start_ms),
+      (unsigned long)(board_ready_ms - thread_start_ms));
+   unifrog_diag_memory_snapshot("boot.board_ready");
    storage_ready = unifrog_platform_wait_for_storage();
    storage_done_ms = unifrog_perf_time_ms();
+   unifrog_log("unifrog boot_time stage=storage_wait_done total_ms=%lu board_ms=%lu storage_ms=%lu ret=%d\n",
+      (unsigned long)(storage_done_ms - thread_start_ms),
+      (unsigned long)(board_ready_ms - thread_start_ms),
+      (unsigned long)(storage_done_ms - board_ready_ms),
+      storage_ready);
+   unifrog_diag_memory_snapshot("boot.storage_wait_done");
 
    if (storage_ready == 0) {
       log_reset_ret = unifrog_log_reset();
@@ -76,6 +88,7 @@ static void *frontend_thread(void *arg)
          UNIFROG_GIT_COMMIT, UNIFROG_GIT_DIRTY,
          UNIFROG_SDK_GIT_COMMIT, UNIFROG_CORES_GIT_COMMIT,
          UNIFROG_JS2300_GIT_COMMIT, UNIFROG_FRONTEND_GIT_COMMIT);
+      unifrog_diag_memory_snapshot("boot.after_log_reset");
       (void)unifrog_log_flush();
    }
    printf("Init native %s api=%u storage=%s log_reset=%d log_path=%s commit=%s dirty=%d sdk=%s cores=%s js2300=%s frontend=%s\n",

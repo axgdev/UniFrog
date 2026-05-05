@@ -149,16 +149,19 @@ function parseIndex(text, append) {
 
 function loadIndex() {
   var start = JS2300.now();
+  var readStart = start;
   var gameText = JS2300.fs.readText ? JS2300.fs.readText(INDEX_PATH) : null;
   var mediaText = JS2300.fs.readText ? JS2300.fs.readText(MEDIA_INDEX_PATH) : null;
+  var readDone = JS2300.now();
   clearIndexData();
   parseIndex(gameText ? gameText : "", 1);
   parseIndex(mediaText ? mediaText : "", 1);
   indexLoaded = true;
   indexLoadPending = false;
   JS2300.log("frontend index loaded games=" + String(indexItems.length) +
-    " media=" + String(mediaItems.length) + " ms=" +
-    String(JS2300.now() - start));
+    " media=" + String(mediaItems.length) + " read_ms=" +
+    String(readDone - readStart) + " parse_ms=" +
+    String(JS2300.now() - readDone) + " ms=" + String(JS2300.now() - start));
 }
 
 function ensureIndexLoaded(now, quiet) {

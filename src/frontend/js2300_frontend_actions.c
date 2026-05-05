@@ -541,6 +541,9 @@ static int run_js_script_file(struct js2300_frontend *frontend,
    struct js2300_runtime *runtime = NULL;
    char root[JS2300_FRONTEND_MAX_PATH];
    char entry[96];
+   uint32_t start_ms;
+   uint32_t create_start_ms;
+   uint32_t run_start_ms;
    int ret;
 
    if (!frontend || split_script_path(path, root, sizeof(root),
@@ -552,14 +555,28 @@ static int run_js_script_file(struct js2300_frontend *frontend,
    config.entry_script = entry;
    config.heap_bytes = 8u * 1024u * 1024u;
    frontend_configure_host(frontend, &host);
-   printf("js2300 script launch root=%s script=%s\n", root, entry);
+   start_ms = unifrog_perf_time_ms();
+   printf("js2300 script launch root=%s script=%s heap=%u\n",
+      root, entry, (unsigned)config.heap_bytes);
+   unifrog_diag_memory_snapshot("script.launch");
    (void)unifrog_log_flush();
+   create_start_ms = unifrog_perf_time_ms();
    ret = js2300_runtime_create(&config, &host, &runtime);
-   if (ret == 0)
+   printf("js2300 script phase=runtime_create ms=%lu ret=%d\n",
+      (unsigned long)(unifrog_perf_time_ms() - create_start_ms), ret);
+   unifrog_diag_memory_snapshot("script.created");
+   if (ret == 0) {
+      run_start_ms = unifrog_perf_time_ms();
       ret = js2300_runtime_run(runtime);
+      printf("js2300 script phase=runtime_run ms=%lu ret=%d\n",
+         (unsigned long)(unifrog_perf_time_ms() - run_start_ms), ret);
+   }
+   unifrog_diag_memory_snapshot("script.after_run");
    js2300_runtime_destroy(runtime);
-   printf("js2300 script done ret=%d path=%s action=%s\n",
-      ret, path, frontend->action);
+   unifrog_diag_memory_snapshot("script.destroyed");
+   printf("js2300 script done ret=%d ms=%lu path=%s action=%s\n",
+      ret, (unsigned long)(unifrog_perf_time_ms() - start_ms), path,
+      frontend->action);
    (void)unifrog_log_flush();
    return ret;
 }
@@ -569,14 +586,20 @@ int run_requested_action(struct js2300_frontend *frontend)
    frontend->relaunch = 1;
    printf("js2300 run action dispatch action=%s path=%s preset=%d\n",
       frontend->action, frontend->path, frontend->video_preset);
+   unifrog_diag_memory_snapshot("action.dispatch");
    (void)unifrog_log_flush();
    if (strcmp(frontend->action, "run") == 0) {
+      uint32_t action_start_ms = unifrog_perf_time_ms();
       int ret = unifrog_libretro_run_path_ex(frontend->path,
          &frontend->run_options);
 
-      printf("js2300 run action core ret=%d path=%s\n", ret, frontend->path);
+      printf("js2300 run action core ret=%d ms=%lu path=%s\n",
+         ret, (unsigned long)(unifrog_perf_time_ms() - action_start_ms),
+         frontend->path);
+      unifrog_diag_memory_snapshot("action.core_return");
       (void)unifrog_log_flush();
       frontend_fb_reopen(frontend, "libretro_return");
+      unifrog_diag_memory_snapshot("action.fb_reopen");
       frontend->input_recovered = 1;
       return 0;
    }

@@ -22,6 +22,7 @@
 #include <unifrog/backlight.h>
 #include <unifrog/battery.h>
 #include <unifrog/boot.h>
+#include <unifrog/diag.h>
 #include <unifrog/fb.h>
 #include <unifrog/gfx.h>
 #include <unifrog/input.h>

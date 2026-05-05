@@ -22,6 +22,7 @@
 #include <unifrog/audio.h>
 #include <unifrog/abi.h>
 #include <unifrog/backlight.h>
+#include <unifrog/diag.h>
 #include <unifrog/fb.h>
 #include <unifrog/gfx.h>
 #include <unifrog/input.h>
@@ -2280,11 +2281,15 @@ static int quick_js_run(const struct libretro_core_api *core,
 
    start_us = host_time_us();
    printf("unifrog quick_js start entry=%s\n", LIBRETRO_QUICK_JS_ENTRY);
+   unifrog_diag_memory_snapshot("quick_js.start");
    (void)unifrog_log_flush_force();
    ret = js2300_runtime_create(&config, &js_host, &runtime);
+   unifrog_diag_memory_snapshot("quick_js.created");
    if (ret == 0)
       ret = js2300_runtime_run(runtime);
+   unifrog_diag_memory_snapshot("quick_js.after_run");
    js2300_runtime_destroy(runtime);
+   unifrog_diag_memory_snapshot("quick_js.destroyed");
    if (ret != 0)
       host.quick_js_action = QUICK_JS_ACTION_RETURN_MENU;
    printf("unifrog quick_js done ret=%d action=%d ms=%u\n",
@@ -2674,12 +2679,18 @@ static void *rom_alloc_aligned(size_t size)
       printf("unifrog libretro rom alloc appmem size=%u total=%u ptr=0x%08lx aligned=%lu\n",
          (unsigned)size, (unsigned)total, (unsigned long)aligned,
          (unsigned long)(aligned & 31u));
+      unifrog_diag_memory_snapshot("libretro.rom_alloc_appmem");
       return (void *)aligned;
    }
 
+   unifrog_diag_memory_snapshot("libretro.before_rom_alloc_heap");
    raw = malloc(total);
-   if (!raw)
+   if (!raw) {
+      printf("unifrog libretro rom alloc heap failed size=%u total=%u\n",
+         (unsigned)size, (unsigned)total);
+      unifrog_diag_memory_snapshot("libretro.rom_alloc_heap_failed");
       return NULL;
+   }
    aligned = ((uintptr_t)(raw + sizeof(*header)) + 31u) & ~(uintptr_t)31u;
    header = ((struct rom_alloc_header *)aligned) - 1;
    header->magic = ROM_ALLOC_MAGIC;
@@ -2687,6 +2698,10 @@ static void *rom_alloc_aligned(size_t size)
    header->raw = raw;
    header->reserved_bytes = total;
    header->payload_size = size;
+   printf("unifrog libretro rom alloc heap size=%u total=%u raw=0x%08lx ptr=0x%08lx aligned=%lu\n",
+      (unsigned)size, (unsigned)total, (unsigned long)(uintptr_t)raw,
+      (unsigned long)aligned, (unsigned long)(aligned & 31u));
+   unifrog_diag_memory_snapshot("libretro.rom_alloc_heap");
    return (void *)aligned;
 }
 
@@ -2706,6 +2721,7 @@ static void rom_free_aligned(void *ptr)
       unifrog_abi_application_memory_release_top(header->raw);
    else
       free(header->raw);
+   unifrog_diag_memory_snapshot("libretro.rom_free");
 }
 
 static int file_size(FILE *file, size_t *out_size)
@@ -5075,12 +5091,14 @@ static int run_core(const struct libretro_core_api *core, const char *path,
       host.audio_enabled, host.audio_gain, host.scpu_target_mhz,
       host.options.ge_clock, host.options.backlight_level,
       host.options.frameskip, display_mode_label(host.display_mode));
+   unifrog_diag_memory_snapshot("libretro.run_start");
    (void)unifrog_log_flush();
    host_apply_runtime_options();
    (void)unifrog_log_flush();
    loading_draw("LOADING GAME", "START", 2);
    api_version = CORE_CALL0_RET(core, core->api_version);
    printf("unifrog libretro %s api=%u\n", core->id, api_version);
+   unifrog_diag_memory_snapshot("libretro.after_api_version");
    (void)unifrog_log_flush();
 
    printf("unifrog libretro step=set_callbacks\n");
@@ -5119,6 +5137,7 @@ static int run_core(const struct libretro_core_api *core, const char *path,
       (void)unifrog_log_flush();
    }
    probe_rom_seek_path(path);
+   unifrog_diag_memory_snapshot("libretro.before_content_prepare");
    content_start_us = host_time_us();
    if (info.need_fullpath) {
       content_kind = "fullpath";
@@ -5222,6 +5241,7 @@ static int run_core(const struct libretro_core_api *core, const char *path,
       core->id, host_elapsed_ms(content_start_us, content_done_us),
       content_kind, content_cache, (unsigned)rom_size,
       game.path ? game.path : "", path);
+   unifrog_diag_memory_snapshot("libretro.after_content_prepare");
    (void)unifrog_log_flush();
 
    printf("unifrog libretro step=retro_init\n");
@@ -5230,6 +5250,7 @@ static int run_core(const struct libretro_core_api *core, const char *path,
    stage_start_us = host_time_us();
    CORE_CALL0_VOID(core, core->init);
    core_initialized = 1;
+   unifrog_diag_memory_snapshot("libretro.after_core_init_call");
 
    memset(&info, 0, sizeof(info));
    CORE_CALL1_VOID(core, core->get_system_info, &info);
@@ -5241,6 +5262,7 @@ static int run_core(const struct libretro_core_api *core, const char *path,
       info.valid_extensions ? info.valid_extensions : "?");
    printf("unifrog load_time core=%s stage=core_init ms=%u\n",
       core->id, host_elapsed_ms(stage_start_us, core_init_done_us));
+   unifrog_diag_memory_snapshot("libretro.after_core_init");
    (void)unifrog_log_flush();
 
    memset(&av, 0, sizeof(av));
@@ -5276,6 +5298,7 @@ static int run_core(const struct libretro_core_api *core, const char *path,
          core->id, host_elapsed_ms(retro_load_start_us,
          retro_load_done_us));
       printf("unifrog libretro load failed path=%s\n", path);
+      unifrog_diag_memory_snapshot("libretro.retro_load_failed");
       goto out_unload;
    }
    retro_load_done_us = host_time_us();
@@ -5284,11 +5307,13 @@ static int run_core(const struct libretro_core_api *core, const char *path,
    printf("unifrog libretro step=retro_load_game_ok\n");
    printf("unifrog load_time core=%s stage=retro_load_game ms=%u ok=1\n",
       core->id, host_elapsed_ms(retro_load_start_us, retro_load_done_us));
+   unifrog_diag_memory_snapshot("libretro.after_retro_load_game");
    save_load_start_us = host_time_us();
    quick_load_all_memory_files(core, path);
    save_load_done_us = host_time_us();
    printf("unifrog load_time core=%s stage=save_memory_load ms=%u\n",
       core->id, host_elapsed_ms(save_load_start_us, save_load_done_us));
+   unifrog_diag_memory_snapshot("libretro.after_save_memory_load");
 
    loading_draw("LOADING GAME", "READY", 100);
    loading_close();
@@ -5299,6 +5324,7 @@ static int run_core(const struct libretro_core_api *core, const char *path,
        host.ge_clock) == 0) {
       host.presenter_open = 1;
       unifrog_presenter_clear(&host.presenter, 0xff000000u);
+      unifrog_diag_memory_snapshot("libretro.after_presenter_open");
    } else {
       printf("unifrog libretro presenter open failed\n");
       goto out_unload;
@@ -5349,6 +5375,7 @@ static int run_core(const struct libretro_core_api *core, const char *path,
          LIBRETRO_AUDIO_VOLUME, host.audio_gain, LIBRETRO_AUDIO_ROUTE,
          volume_ret, mute_ret, silence_ret, start_ret, unmute_ret,
          output_ret);
+      unifrog_diag_memory_snapshot("libretro.after_audio_open");
       (void)unifrog_log_flush();
    } else {
       printf("unifrog libretro audio open failed\n");
@@ -5365,6 +5392,7 @@ static int run_core(const struct libretro_core_api *core, const char *path,
       host_elapsed_ms(save_load_start_us, save_load_done_us),
       content_kind, content_cache, (unsigned)rom_size);
    printf("unifrog libretro step=run_loop fps=%u\n", host.fps);
+   unifrog_diag_memory_snapshot("libretro.before_run_loop");
    (void)unifrog_log_flush();
    host_pace_begin();
    unifrog_log_defer_begin();
@@ -5428,12 +5456,14 @@ static int run_core(const struct libretro_core_api *core, const char *path,
    ret = 0;
 
 out_unload:
+   unifrog_diag_memory_snapshot("libretro.out_unload");
    libretro_watchdog_stop();
    if (game_loaded)
       quick_save_all_memory_files(core, path);
    if (core_initialized)
       CORE_CALL0_VOID(core, core->unload_game);
 out_deinit:
+   unifrog_diag_memory_snapshot("libretro.out_deinit");
    libretro_watchdog_stop();
    host_report_perf(core->id, 1);
    unifrog_log_defer_end();
@@ -5447,6 +5477,7 @@ out_deinit:
 out_finish:
    host.content_alloc_appmem = 0;
    rom_free_aligned(rom_data);
+   unifrog_diag_memory_snapshot("libretro.out_finish");
    loading_close();
    host_restore_runtime_options();
    unifrog_input_recover_after_core();
@@ -5505,8 +5536,10 @@ static int libretro_load_external_core(const char *id, const char *core_path,
       unifrog_text_copy(path, sizeof(path), core_path);
    else
       snprintf(path, sizeof(path), "/media/mmcblk0/unifrog/cores/%s.bin", id);
+   unifrog_diag_memory_snapshot("libretro.before_external_core_load");
    if (unifrog_core_module_load_file(path, id, loaded) != 0)
       return -1;
+   unifrog_diag_memory_snapshot("libretro.after_external_core_load");
 
    exports = loaded->exports;
    memset(api, 0, sizeof(*api));
@@ -5546,6 +5579,7 @@ static int libretro_load_external_core(const char *id, const char *core_path,
    if (!libretro_core_available(api)) {
       printf("unifrog libretro external_core incomplete id=%s\n", id);
       unifrog_core_module_unload(loaded);
+      unifrog_diag_memory_snapshot("libretro.external_core_unloaded_incomplete");
       return -1;
    }
    return 0;
@@ -5564,6 +5598,7 @@ static int run_core_id(const char *id, const char *path,
    if (!canonical)
       return -1;
 
+   unifrog_diag_memory_snapshot("libretro.core_id_start");
    unifrog_input_recover_core_transition("core_load");
    core = libretro_builtin_core_for_id(canonical);
    if (!core &&
@@ -5578,8 +5613,10 @@ static int run_core_id(const char *id, const char *path,
    }
 
    ret = run_core(core, path, options);
-   if (loaded_external)
+   if (loaded_external) {
       unifrog_core_module_unload(&loaded);
+      unifrog_diag_memory_snapshot("libretro.after_external_core_unload");
+   }
    return ret;
 }
 
@@ -5662,6 +5699,7 @@ int unifrog_libretro_run_path_ex(const char *path,
       libretro_default_core_id_for_path(path);
    printf("unifrog libretro dispatch path=%s requested_core=%s\n",
       path, options && options->core_id[0] ? options->core_id : "auto");
+   unifrog_diag_memory_snapshot("libretro.dispatch");
    (void)unifrog_log_flush();
    if (core_id) {
       ret = run_core_id(core_id, path, options);

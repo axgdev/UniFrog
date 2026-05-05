@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <errno.h>
 #include <dirent.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -12,6 +13,8 @@
 #include <kernel/delay.h>
 
 #include <fastboot/handoff.h>
+#include <unifrog/log.h>
+#include <unifrog/perf.h>
 #include <unifrog/runtime.h>
 
 #define CLOCK_GATE0_REG 0xb8800060u
@@ -37,6 +40,7 @@ static const struct storage_mount storage_mounts[] = {
    {"/dev/mmcblk0p2", "/media/mmcblk0p2"},
 };
 static unsigned storage_mounted_mask;
+static unsigned storage_mount_attempts;
 
 int mount(const char *source, const char *target,
    const char *filesystemtype, unsigned long mountflags, const void *data);
@@ -168,51 +172,135 @@ static int directory_has_entries(const char *path)
 int unifrog_platform_mount_storage(void)
 {
    int mounted = -1;
+   uint32_t start_ms = unifrog_perf_time_ms();
 
    (void)mkdir("/media", 0777);
 
    for (unsigned i = 0; i < sizeof(storage_mounts) / sizeof(storage_mounts[0]); i++) {
+      uint32_t target_start_ms;
+      int had_entries;
+      int vfat_ret;
+      int vfat_errno = 0;
+      int ntfs_ret;
+      int ntfs_errno = 0;
+
       (void)mkdir(storage_mounts[i].target, 0777);
 
-      if (directory_has_entries(storage_mounts[i].target))
+      target_start_ms = unifrog_perf_time_ms();
+      had_entries = directory_has_entries(storage_mounts[i].target);
+      if (had_entries) {
+         unifrog_log("unifrog storage mount target=%s already_ready=1 ms=%lu mask=0x%lx\n",
+            storage_mounts[i].target,
+            (unsigned long)(unifrog_perf_time_ms() - target_start_ms),
+            (unsigned long)storage_mounted_mask);
          return 0;
+      }
       if (storage_mounted_mask & (1u << i))
          continue;
 
-      if (mount(storage_mounts[i].dev, storage_mounts[i].target,
-            "vfat", 0, NULL) == 0) {
+      storage_mount_attempts++;
+      target_start_ms = unifrog_perf_time_ms();
+      errno = 0;
+      vfat_ret = mount(storage_mounts[i].dev, storage_mounts[i].target,
+         "vfat", 0, NULL);
+      vfat_errno = errno;
+      if (vfat_ret == 0) {
          storage_mounted_mask |= 1u << i;
          mounted = 0;
-      } else if (mount(storage_mounts[i].dev, storage_mounts[i].target,
-            "ntfs", 0, NULL) == 0) {
+         unifrog_log("unifrog storage mount attempt=%lu dev=%s target=%s fs=vfat ret=0 errno=%d ms=%lu mask=0x%lx\n",
+            (unsigned long)storage_mount_attempts, storage_mounts[i].dev,
+            storage_mounts[i].target, vfat_errno,
+            (unsigned long)(unifrog_perf_time_ms() - target_start_ms),
+            (unsigned long)storage_mounted_mask);
+      } else {
+         unifrog_log("unifrog storage mount attempt=%lu dev=%s target=%s fs=vfat ret=%d errno=%d ms=%lu\n",
+            (unsigned long)storage_mount_attempts, storage_mounts[i].dev,
+            storage_mounts[i].target, vfat_ret, vfat_errno,
+            (unsigned long)(unifrog_perf_time_ms() - target_start_ms));
+      }
+      if (vfat_ret == 0)
+         continue;
+
+      storage_mount_attempts++;
+      target_start_ms = unifrog_perf_time_ms();
+      errno = 0;
+      ntfs_ret = mount(storage_mounts[i].dev, storage_mounts[i].target,
+         "ntfs", 0, NULL);
+      ntfs_errno = errno;
+      if (ntfs_ret == 0) {
          storage_mounted_mask |= 1u << i;
          mounted = 0;
+         unifrog_log("unifrog storage mount attempt=%lu dev=%s target=%s fs=ntfs ret=0 errno=%d ms=%lu mask=0x%lx\n",
+            (unsigned long)storage_mount_attempts, storage_mounts[i].dev,
+            storage_mounts[i].target, ntfs_errno,
+            (unsigned long)(unifrog_perf_time_ms() - target_start_ms),
+            (unsigned long)storage_mounted_mask);
+      } else {
+         unifrog_log("unifrog storage mount attempt=%lu dev=%s target=%s fs=ntfs ret=%d errno=%d ms=%lu\n",
+            (unsigned long)storage_mount_attempts, storage_mounts[i].dev,
+            storage_mounts[i].target, ntfs_ret, ntfs_errno,
+            (unsigned long)(unifrog_perf_time_ms() - target_start_ms));
       }
    }
 
+   unifrog_log("unifrog storage mount summary ret=%d ms=%lu mask=0x%lx attempts=%lu\n",
+      mounted, (unsigned long)(unifrog_perf_time_ms() - start_ms),
+      (unsigned long)storage_mounted_mask,
+      (unsigned long)storage_mount_attempts);
    return mounted;
 }
 
 int unifrog_platform_wait_for_storage(void)
 {
    int stable = 0;
+   uint32_t wait_start_ms = unifrog_perf_time_ms();
 
    for (int i = 0; i < STORAGE_MAX_POLLS; i++) {
-      (void)unifrog_platform_mount_storage();
+      uint32_t poll_start_ms = unifrog_perf_time_ms();
+      uint32_t mount_done_ms;
+      int mount_ret;
+      int root_ready;
+      int p1_ready;
+      int p2_ready;
 
-      if (directory_has_entries(UNIFROG_SD_ROOT) ||
-         directory_has_entries("/media/mmcblk0p1") ||
-         directory_has_entries("/media/mmcblk0p2"))
+      mount_ret = unifrog_platform_mount_storage();
+      mount_done_ms = unifrog_perf_time_ms();
+
+      root_ready = directory_has_entries(UNIFROG_SD_ROOT);
+      p1_ready = directory_has_entries("/media/mmcblk0p1");
+      p2_ready = directory_has_entries("/media/mmcblk0p2");
+
+      if (root_ready || p1_ready || p2_ready)
          stable++;
       else
          stable = 0;
 
-      if (stable >= STORAGE_STABLE_SAMPLES)
+      unifrog_log("unifrog storage poll=%d mount_ret=%d mount_ms=%lu check_ms=%lu total_ms=%lu root=%d p1=%d p2=%d stable=%d/%d mask=0x%lx\n",
+         i, mount_ret,
+         (unsigned long)(mount_done_ms - poll_start_ms),
+         (unsigned long)(unifrog_perf_time_ms() - mount_done_ms),
+         (unsigned long)(unifrog_perf_time_ms() - wait_start_ms),
+         root_ready, p1_ready, p2_ready, stable,
+         STORAGE_STABLE_SAMPLES,
+         (unsigned long)storage_mounted_mask);
+
+      if (stable >= STORAGE_STABLE_SAMPLES) {
+         unifrog_log("unifrog storage ready polls=%d total_ms=%lu attempts=%lu mask=0x%lx\n",
+            i + 1,
+            (unsigned long)(unifrog_perf_time_ms() - wait_start_ms),
+            (unsigned long)storage_mount_attempts,
+            (unsigned long)storage_mounted_mask);
          return 0;
+      }
 
       msleep(STORAGE_POLL_MS);
    }
 
+   unifrog_log("unifrog storage timeout total_ms=%lu attempts=%lu mask=0x%lx stable=%d/%d\n",
+      (unsigned long)(unifrog_perf_time_ms() - wait_start_ms),
+      (unsigned long)storage_mount_attempts,
+      (unsigned long)storage_mounted_mask,
+      stable, STORAGE_STABLE_SAMPLES);
    return -1;
 }
 

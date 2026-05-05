@@ -5,6 +5,7 @@
 #include <unifrog/audio.h>
 #include <unifrog/battery.h>
 #include <unifrog/boot.h>
+#include <unifrog/diag.h>
 #include <unifrog/fb.h>
 #include <unifrog/ge.h>
 #include <unifrog/gfx.h>

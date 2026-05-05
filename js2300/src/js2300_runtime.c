@@ -1224,20 +1224,48 @@ int js2300_runtime_run(struct js2300_runtime *runtime)
 {
    char *path;
    JSValue ret;
+   uint32_t run_start_ms;
+   uint32_t phase_start_ms;
+   uint32_t phase_done_ms;
+   char line[192];
 
    if (!runtime)
       return -1;
 
+   run_start_ms = host_millis(runtime);
+   snprintf(line, sizeof(line),
+      "js2300 runtime phase=run_start heap=%lu stack=%lu bytecode_cache=%lu root=%s entry=%s",
+      (unsigned long)runtime->config.heap_bytes,
+      (unsigned long)runtime->config.stack_bytes,
+      (unsigned long)runtime->config.bytecode_cache_bytes,
+      runtime->config.app_root ? runtime->config.app_root : "",
+      runtime->config.entry_script ? runtime->config.entry_script : "");
+   host_log(runtime, line);
+
+   phase_start_ms = host_millis(runtime);
    path = build_entry_path(&runtime->config);
    if (!path)
       return -1;
+   phase_done_ms = host_millis(runtime);
+   snprintf(line, sizeof(line), "js2300 runtime phase=entry_path ms=%lu path=%s",
+      (unsigned long)(phase_done_ms - phase_start_ms), path);
+   host_log(runtime, line);
 
+   phase_start_ms = host_millis(runtime);
    runtime->heap = calloc(1, runtime->config.heap_bytes);
    if (!runtime->heap) {
       free(path);
       return -1;
    }
+   phase_done_ms = host_millis(runtime);
+   snprintf(line, sizeof(line),
+      "js2300 runtime phase=heap_alloc ms=%lu ptr=0x%08lx bytes=%lu",
+      (unsigned long)(phase_done_ms - phase_start_ms),
+      (unsigned long)(uintptr_t)runtime->heap,
+      (unsigned long)runtime->config.heap_bytes);
+   host_log(runtime, line);
 
+   phase_start_ms = host_millis(runtime);
    runtime->ctx = JS_NewContext(runtime->heap, runtime->config.heap_bytes,
                                 &js2300_stdlib);
    if (!runtime->ctx) {
@@ -1245,11 +1273,33 @@ int js2300_runtime_run(struct js2300_runtime *runtime)
       free(path);
       return -1;
    }
+   phase_done_ms = host_millis(runtime);
+   snprintf(line, sizeof(line),
+      "js2300 runtime phase=context_create ms=%lu ctx=0x%08lx",
+      (unsigned long)(phase_done_ms - phase_start_ms),
+      (unsigned long)(uintptr_t)runtime->ctx);
+   host_log(runtime, line);
 
    active_runtime = runtime;
    host_log(runtime, "js2300 eval start");
+   phase_start_ms = host_millis(runtime);
    (void)preload_bytecode_path(runtime, path, 0);
+   phase_done_ms = host_millis(runtime);
+   snprintf(line, sizeof(line),
+      "js2300 runtime phase=bytecode_preload ms=%lu entries=%lu buffers=%lu bytes=%lu",
+      (unsigned long)(phase_done_ms - phase_start_ms),
+      (unsigned long)runtime->preloaded_bytecode_count,
+      (unsigned long)runtime->bytecode_buffer_count,
+      (unsigned long)runtime->config.bytecode_cache_bytes);
+   host_log(runtime, line);
+   phase_start_ms = host_millis(runtime);
    ret = eval_script_file(runtime, path, "entry");
+   phase_done_ms = host_millis(runtime);
+   snprintf(line, sizeof(line),
+      "js2300 runtime phase=entry_eval ms=%lu exception=%d",
+      (unsigned long)(phase_done_ms - phase_start_ms),
+      JS_IsException(ret) ? 1 : 0);
+   host_log(runtime, line);
    if (JS_IsException(ret)) {
       JSCStringBuf buf;
       JSValue exc = JS_GetException(runtime->ctx);
@@ -1263,7 +1313,13 @@ int js2300_runtime_run(struct js2300_runtime *runtime)
    }
 
    js2300_runtime_gc(runtime, "eval_done");
-   host_log(runtime, "js2300 eval done");
+   snprintf(line, sizeof(line),
+      "js2300 eval done total_ms=%lu native_calls=%lu gc=%lu input_polls=%lu",
+      (unsigned long)(host_millis(runtime) - run_start_ms),
+      (unsigned long)runtime->native_call_count,
+      (unsigned long)runtime->gc_count,
+      (unsigned long)runtime->input_poll_count);
+   host_log(runtime, line);
    js2300_close_context(runtime);
    free(path);
    return 0;

@@ -58,6 +58,10 @@ int js2300_frontend_main(void)
       size_t old_auto_flush;
       const char *recover_tag;
       unsigned relaunch = launch_count++;
+      uint32_t launch_ms;
+      uint32_t create_start_ms;
+      uint32_t run_start_ms;
+      char diag_tag[48];
 
       frontend.relaunch = 0;
       frontend.action[0] = 0;
@@ -80,23 +84,45 @@ int js2300_frontend_main(void)
          config.app_root, config.entry_script,
          (unsigned long)(unifrog_perf_time_ms() - frontend_start_ms),
          relaunch);
+      snprintf(diag_tag, sizeof(diag_tag), "frontend.launch.%u", relaunch);
+      unifrog_diag_memory_snapshot(diag_tag);
       unifrog_log_flush();
 
+      create_start_ms = unifrog_perf_time_ms();
       ret = js2300_runtime_create(&config, &host, &runtime);
+      launch_ms = unifrog_perf_time_ms();
       printf("unifrog boot_time stage=js_runtime_created total_ms=%lu ret=%d relaunch=%u\n",
-         (unsigned long)(unifrog_perf_time_ms() - frontend_start_ms),
+         (unsigned long)(launch_ms - frontend_start_ms),
          ret, relaunch);
-      if (ret == 0)
+      printf("unifrog js phase=runtime_create relaunch=%u ms=%lu heap=%u stack=%u bytecode_cache=%u ret=%d\n",
+         relaunch, (unsigned long)(launch_ms - create_start_ms),
+         (unsigned)config.heap_bytes, (unsigned)config.stack_bytes,
+         (unsigned)config.bytecode_cache_bytes, ret);
+      snprintf(diag_tag, sizeof(diag_tag), "frontend.created.%u", relaunch);
+      unifrog_diag_memory_snapshot(diag_tag);
+      if (ret == 0) {
+         run_start_ms = unifrog_perf_time_ms();
          ret = js2300_runtime_run(runtime);
+         printf("unifrog js phase=runtime_run relaunch=%u ms=%lu ret=%d\n",
+            relaunch, (unsigned long)(unifrog_perf_time_ms() - run_start_ms),
+            ret);
+      }
+      snprintf(diag_tag, sizeof(diag_tag), "frontend.after_run.%u", relaunch);
+      unifrog_diag_memory_snapshot(diag_tag);
       js2300_runtime_destroy(runtime);
+      snprintf(diag_tag, sizeof(diag_tag), "frontend.destroyed.%u", relaunch);
+      unifrog_diag_memory_snapshot(diag_tag);
       unifrog_log_set_auto_flush_bytes(old_auto_flush);
       printf("unifrog js done ret=%d action=%s path=%s\n",
          ret, frontend.action, frontend.path);
 
-      if (ret == 0 && frontend.action[0])
+      if (ret == 0 && frontend.action[0]) {
+         unifrog_diag_memory_snapshot("frontend.before_action");
          ret = run_requested_action(&frontend);
-      else
+         unifrog_diag_memory_snapshot("frontend.after_action");
+      } else {
          unifrog_log_flush();
+      }
    } while (ret == 0 && frontend.relaunch);
 
    frontend_icon_cache_clear(&frontend);

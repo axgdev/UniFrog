@@ -343,20 +343,30 @@ int host_fs_read_text(void *opaque, const char *path,
 {
    FILE *file;
    size_t got;
+   uint32_t start = unifrog_perf_time_ms();
    (void)opaque;
 
    if (!path || !out || out_size == 0)
       return -1;
    file = fopen(path, "rb");
-   if (!file)
+   if (!file) {
+      printf("js2300 fs read_text open_fail path=%s ms=%lu\n",
+         path, (unsigned long)(unifrog_perf_time_ms() - start));
       return -1;
+   }
    got = fread(out, 1, out_size - 1, file);
    if (ferror(file)) {
       fclose(file);
+      printf("js2300 fs read_text read_fail path=%s bytes=%u ms=%lu\n",
+         path, (unsigned)got,
+         (unsigned long)(unifrog_perf_time_ms() - start));
       return -1;
    }
    out[got] = '\0';
    fclose(file);
+   printf("js2300 fs read_text path=%s bytes=%u cap=%u ms=%lu\n",
+      path, (unsigned)got, (unsigned)out_size,
+      (unsigned long)(unifrog_perf_time_ms() - start));
    return (int)got;
 }
 
@@ -366,6 +376,7 @@ int host_fs_write_text(void *opaque, const char *path,
    char tmp[JS2300_FRONTEND_MAX_PATH + 8];
    FILE *file;
    int ret = -1;
+   uint32_t start = unifrog_perf_time_ms();
    (void)opaque;
 
    if (!path || !path[0] || !text)
@@ -390,6 +401,9 @@ int host_fs_write_text(void *opaque, const char *path,
    }
    if (ret != 0)
       unlink(tmp);
+   printf("js2300 fs write_text path=%s bytes=%u ms=%lu ret=%d\n",
+      path, (unsigned)size,
+      (unsigned long)(unifrog_perf_time_ms() - start), ret);
    return ret;
 }
 
@@ -484,4 +498,3 @@ done:
       (unsigned long)result->ms, (unsigned long)result->truncated, ret);
    return ret;
 }
-

@@ -71,15 +71,31 @@ var motionUntilMs = 0;
 var nextMarqueeMs = 0;
 var IMAGE_LOADS_PER_FRAME = 2;
 var NAV_STACK_MAX = 16;
+var frontendStartupStartMs = JS2300.now();
+var frontendPhaseStartMs = frontendStartupStartMs;
+
+function frontendPhase(stage) {
+  if (typeof frontendStartupMark === "function") {
+    frontendStartupMark(stage, frontendPhaseStartMs);
+  } else {
+    JS2300.log("frontend phase=" + stage + " ms=" +
+      String(JS2300.now() - frontendPhaseStartMs));
+  }
+  frontendPhaseStartMs = JS2300.now();
+}
 
 JS2300.log("unifrog frontend start");
 loadSettings();
+frontendPhase("settings_loaded");
 loadThemeFile();
+frontendPhase("theme_loaded");
 if (config.autoIndex) {
   indexLoadPending = false;
   indexGames(JS2300.now());
+  frontendPhase("auto_index_done");
 }
 loadSystemCheckReport(JS2300.now());
+frontendPhase("system_check_loaded");
 nextBatteryMs = JS2300.now() + 750;
 
 while (running) {
@@ -99,7 +115,12 @@ while (running) {
     }
     if ((rawInput & startupInputGateMask) !== 0 && input === 0) {
       if (dirty) {
+        var gateDrawStart = JS2300.now();
         draw(now);
+        if (!frontendReadyLogged)
+          JS2300.log("frontend phase=first_draw ms=" +
+            String(JS2300.now() - gateDrawStart) + " total_ms=" +
+            String(JS2300.now() - frontendStartupStartMs));
         dirty = false;
         noteFrontendReady(now);
       } else {
@@ -125,7 +146,12 @@ while (running) {
     nextMarqueeMs = now + 140;
   }
   if (dirty) {
+    var drawStart = JS2300.now();
     draw(now);
+    if (!frontendReadyLogged)
+      JS2300.log("frontend phase=first_draw ms=" +
+        String(JS2300.now() - drawStart) + " total_ms=" +
+        String(JS2300.now() - frontendStartupStartMs));
     dirty = false;
     if (deferImageLoads) {
       deferImageLoads = false;

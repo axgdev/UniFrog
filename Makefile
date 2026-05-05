@@ -270,6 +270,7 @@ UNIFROG_OBJECTS := \
 	$(BUILD)/unifrog_battery.o \
 	$(BUILD)/unifrog_boot.o \
 	$(BUILD)/unifrog_core_module_loader.o \
+	$(BUILD)/unifrog_diag.o \
 	$(BUILD)/unifrog_fb.o \
 	$(BUILD)/unifrog_ge.o \
 	$(BUILD)/unifrog_gfx.o \
