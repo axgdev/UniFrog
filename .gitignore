@@ -8,6 +8,7 @@
 /js2300/build/
 /js2300/output/
 /config.mk
+/.ccache/
 /asdpack
 /bisrv*.asd
 /fastboot*.asd

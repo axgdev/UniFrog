@@ -55,6 +55,8 @@ make doctor           Check tools, SDK, and fetched inputs
 make quick-check      Run fast repository, core smoke, JS2300, and frontend checks
 make                  Build firmware, modules, and core package
 make verify           Build and verify firmware, fastboot, JS, and layout
+make fastboot-only-check
+                      Build and verify only the fastboot ASD
 make sd-zip           Build output/UniFrog-sdcard.zip
 make clean            Remove generated build/output files
 make distclean        Also clean sub-build outputs
@@ -67,6 +69,9 @@ Dependency status and upgrades follow the policy declared beside each pin; use
 `make quick-check` while iterating. `make verify` is the normal
 verification before handing off changes. If linker scripts or link libraries
 change, run `make clean && make verify`.
+
+If `ccache` is installed, the build uses it automatically. Set `CCACHE=` in
+`config.mk` or on the command line to disable it.
 
 The default `HCRTOS_MEDIA=module` keeps the SDK FFmpeg/HCRTOS media player out
 of the boot image and packages it as `/unifrog/modules/hcrtos-media.bin`; video

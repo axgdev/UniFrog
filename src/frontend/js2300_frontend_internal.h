@@ -179,5 +179,8 @@ int frontend_restore_boot_read_window(struct js2300_frontend *frontend,
 int frontend_start_runtime_read_window(struct js2300_frontend *frontend,
    const char *tag);
 int run_requested_action(struct js2300_frontend *frontend);
+int run_storage_test(struct js2300_frontend *frontend);
+int run_storage_full_test(struct js2300_frontend *frontend);
+int run_storage_mode_test(struct js2300_frontend *frontend, const char *profile);
 
 #endif

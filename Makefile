@@ -65,7 +65,7 @@ DTB_ASM := $(BUILD)/$(DTS_NAME)_dtb.S
 DTB_OBJ := $(BUILD)/$(DTS_NAME)_dtb.o
 DTC ?= dtc
 EMBED_DTB ?= 1
-CCACHE ?=
+CCACHE ?= $(shell command -v ccache 2>/dev/null)
 CCACHE_PREFIX := $(if $(CCACHE),$(CCACHE) )
 
 # Cross tools for the device image, plus a host compiler for the ASD packer.
@@ -349,7 +349,8 @@ FRONTEND_HOST_SOURCES := \
 	src/frontend/js2300_frontend.c \
 	src/frontend/js2300_frontend_actions.c \
 	src/frontend/js2300_frontend_bindings.c \
-	src/frontend/js2300_frontend_catalog.c
+	src/frontend/js2300_frontend_catalog.c \
+	src/frontend/js2300_frontend_storage.c
 FRONTEND_HOST_OBJECTS := $(patsubst src/%.c,$(BUILD)/%.o,$(FRONTEND_HOST_SOURCES))
 
 APP_OBJECTS := \
@@ -667,8 +668,8 @@ $(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild
 SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores
 PACKAGE_TARGETS := frontend-package core-package module-package sdcard-package sd-zip install refresh-sd refresh-sd-clean
-VERIFY_TARGETS := asdcheck fastboot-check layout-check js2300-check frontend-check core-smoke-check
-ADVANCED_TARGETS := sdk dtb lib fastboot size ci-deps ci-toolchain ci-commit-check ci-sd-zip print-config
+VERIFY_TARGETS := asdcheck fastboot-check fastboot-only-check layout-check js2300-check frontend-check core-smoke-check
+ADVANCED_TARGETS := sdk dtb lib fastboot fastboot-only size ci-deps ci-toolchain ci-commit-check ci-sd-zip print-config
 .PHONY: $(COMMON_TARGETS) $(SETUP_TARGETS) $(PACKAGE_TARGETS) $(VERIFY_TARGETS) $(ADVANCED_TARGETS)
 
 all: $(ASD) sdcard-package
@@ -705,6 +706,7 @@ help:
 	@echo ""
 	@echo "Focused checks:"
 	@echo "  make repo-check core-smoke-check js2300-check frontend-check"
+	@echo "  make fastboot-only-check"
 	@echo "  make layout-check asdcheck fastboot-check"
 	@echo "  make -C cores help"
 	@echo "  make -C frontend help"
@@ -1163,60 +1165,24 @@ $(LIBJS2300): $(JS2300_INPUTS) $(MQUICKJS_INPUTS) $(JS2300_CONFIG_STAMP)
 		CROSS_COMPILE=$(CROSS_COMPILE) MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR))
 	$(Q)test -s $@ && touch $@
 
-$(GAMBATTE_CORE_LIB): $(GAMBATTE_BUILD_DEPS)
-	@echo "  CORE    gambatte"
-	$(Q)$(MAKE) -C $(CORES) gambatte $(CORE_MAKE_ARGS)
-	$(Q)test -s $@ && touch $@
+define CORE_ARCHIVE_RULE
+$(1): $(2) $(3)
+	@echo "  CORE    $(4)"
+	$(Q)$(MAKE) -C $(CORES) $(4) $(CORE_MAKE_ARGS)
+	$(Q)test -s $$@ && touch $$@
+endef
 
-$(GPSP_CORE_LIB): $(GPSP_BUILD_DEPS)
-	@echo "  CORE    gpsp"
-	$(Q)$(MAKE) -C $(CORES) gpsp $(CORE_MAKE_ARGS)
-	$(Q)test -s $@ && touch $@
-
-$(PICODRIVE_CORE_LIB): $(PICODRIVE_BUILD_DEPS) $(CHD_SUPPORT_CORE_LIB)
-	@echo "  CORE    picodrive"
-	$(Q)$(MAKE) -C $(CORES) picodrive $(CORE_MAKE_ARGS)
-	$(Q)test -s $@ && touch $@
-
-$(SNES9X2005_CORE_LIB): $(SNES9X2005_BUILD_DEPS)
-	@echo "  CORE    snes9x2005"
-	$(Q)$(MAKE) -C $(CORES) snes9x2005 $(CORE_MAKE_ARGS)
-	$(Q)test -s $@ && touch $@
-
-$(SNES9X2002_CORE_LIB): $(SNES9X2002_BUILD_DEPS)
-	@echo "  CORE    snes9x2002"
-	$(Q)$(MAKE) -C $(CORES) snes9x2002 $(CORE_MAKE_ARGS)
-	$(Q)test -s $@ && touch $@
-
-$(QUICKNES_CORE_LIB): $(QUICKNES_BUILD_DEPS)
-	@echo "  CORE    quicknes"
-	$(Q)$(MAKE) -C $(CORES) quicknes $(CORE_MAKE_ARGS)
-	$(Q)test -s $@ && touch $@
-
-$(FCEUMM_CORE_LIB): $(FCEUMM_BUILD_DEPS)
-	@echo "  CORE    fceumm"
-	$(Q)$(MAKE) -C $(CORES) fceumm $(CORE_MAKE_ARGS)
-	$(Q)test -s $@ && touch $@
-
-$(GEARBOY_CORE_LIB): $(GEARBOY_BUILD_DEPS)
-	@echo "  CORE    gearboy"
-	$(Q)$(MAKE) -C $(CORES) gearboy $(CORE_MAKE_ARGS)
-	$(Q)test -s $@ && touch $@
-
-$(PCE_FAST_CORE_LIB): $(PCE_FAST_BUILD_DEPS) $(CHD_SUPPORT_CORE_LIB)
-	@echo "  CORE    pce-fast"
-	$(Q)$(MAKE) -C $(CORES) pce-fast $(CORE_MAKE_ARGS)
-	$(Q)test -s $@ && touch $@
-
-$(QPSX_CORE_LIB): $(QPSX_BUILD_DEPS)
-	@echo "  CORE    qpsx"
-	$(Q)$(MAKE) -C $(CORES) qpsx $(CORE_MAKE_ARGS)
-	$(Q)test -s $@ && touch $@
-
-$(PMP_VIDEO_CORE_LIB): $(PMP_VIDEO_BUILD_DEPS)
-	@echo "  CORE    pmp-video"
-	$(Q)$(MAKE) -C $(CORES) pmp-video $(CORE_MAKE_ARGS)
-	$(Q)test -s $@ && touch $@
+$(eval $(call CORE_ARCHIVE_RULE,$(GAMBATTE_CORE_LIB),$(GAMBATTE_BUILD_DEPS),,gambatte))
+$(eval $(call CORE_ARCHIVE_RULE,$(GPSP_CORE_LIB),$(GPSP_BUILD_DEPS),,gpsp))
+$(eval $(call CORE_ARCHIVE_RULE,$(PICODRIVE_CORE_LIB),$(PICODRIVE_BUILD_DEPS),$(CHD_SUPPORT_CORE_LIB),picodrive))
+$(eval $(call CORE_ARCHIVE_RULE,$(SNES9X2005_CORE_LIB),$(SNES9X2005_BUILD_DEPS),,snes9x2005))
+$(eval $(call CORE_ARCHIVE_RULE,$(SNES9X2002_CORE_LIB),$(SNES9X2002_BUILD_DEPS),,snes9x2002))
+$(eval $(call CORE_ARCHIVE_RULE,$(QUICKNES_CORE_LIB),$(QUICKNES_BUILD_DEPS),,quicknes))
+$(eval $(call CORE_ARCHIVE_RULE,$(FCEUMM_CORE_LIB),$(FCEUMM_BUILD_DEPS),,fceumm))
+$(eval $(call CORE_ARCHIVE_RULE,$(GEARBOY_CORE_LIB),$(GEARBOY_BUILD_DEPS),,gearboy))
+$(eval $(call CORE_ARCHIVE_RULE,$(PCE_FAST_CORE_LIB),$(PCE_FAST_BUILD_DEPS),$(CHD_SUPPORT_CORE_LIB),pce-fast))
+$(eval $(call CORE_ARCHIVE_RULE,$(QPSX_CORE_LIB),$(QPSX_BUILD_DEPS),,qpsx))
+$(eval $(call CORE_ARCHIVE_RULE,$(PMP_VIDEO_CORE_LIB),$(PMP_VIDEO_BUILD_DEPS),,pmp-video))
 
 $(LIBRETRO_COMMON_LIB): $(LIBRETRO_COMMON_BUILD_DEPS)
 	@echo "  CORELIB libretro-common"
@@ -1257,6 +1223,14 @@ asdcheck: $(ASD)
 	$(Q)$(ASDPACK) --check $(ASD)
 
 fastboot: $(FASTBOOT_ASD) $(OUT)/unifrog.bin
+
+fastboot-only: $(FASTBOOT_ASD)
+
+fastboot-only-check: fastboot-only
+	@test -s $(FASTBOOT_ASD)
+	@echo "  CHECK   $(FASTBOOT_ASD)"
+	$(Q)$(ASDPACK) --check $(FASTBOOT_ASD)
+	@echo "  OK      $(FASTBOOT_ASD)"
 
 fastboot-check: sdcard-package
 	@test -s $(FASTBOOT_ASD)
