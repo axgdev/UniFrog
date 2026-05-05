@@ -14,15 +14,19 @@ int frontend_fb_open(struct js2300_frontend *frontend)
       printf("unifrog js fb open failed\n");
       return -1;
    }
-   if (unifrog_fb_set_buffer_count(&frontend->fb, 2) != 0)
-      (void)unifrog_fb_set_buffer_count(&frontend->fb, 1);
-   for (i = 0; i < frontend->fb.buffer_count; i++) {
-      struct unifrog_surface surface =
-         unifrog_fb_surface_for_buffer(&frontend->fb, i);
-      if (preserve_logo && i == frontend->fb.current_buffer)
-         continue;
-      unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height, 0);
-      unifrog_fb_flush_buffer(&frontend->fb, i);
+   if (preserve_logo) {
+      if (frontend->fb.buffer_count < 2 &&
+          unifrog_fb_set_buffer_count(&frontend->fb, 2) != 0)
+         (void)unifrog_fb_set_buffer_count(&frontend->fb, 1);
+   } else {
+      if (unifrog_fb_set_buffer_count(&frontend->fb, 2) != 0)
+         (void)unifrog_fb_set_buffer_count(&frontend->fb, 1);
+      for (i = 0; i < frontend->fb.buffer_count; i++) {
+         struct unifrog_surface surface =
+            unifrog_fb_surface_for_buffer(&frontend->fb, i);
+         unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height, 0);
+         unifrog_fb_flush_buffer(&frontend->fb, i);
+      }
    }
    if (!preserve_logo)
       (void)unifrog_fb_pan(&frontend->fb, frontend->fb.current_buffer);
@@ -32,6 +36,9 @@ int frontend_fb_open(struct js2300_frontend *frontend)
    unifrog_boot_trace_log("boot.fb_clear_done");
    frontend->draw_buffer = frontend->fb.current_buffer;
    frontend->frame_open = 0;
+   frontend->frame_draw_ops = 0;
+   frontend->frame_has_visible_content = 0;
+   frontend->boot_logo_present_skips = 0;
    if (preserve_logo) {
       unifrog_boot_logo_release_early();
       printf("unifrog boot_logo preserved current=%u buffers=%u\n",
@@ -68,6 +75,8 @@ static void frontend_begin_frame(struct js2300_frontend *frontend)
    if (frontend->fb.buffer_count > 1)
       frontend->draw_buffer = (frontend->fb.current_buffer + 1) % frontend->fb.buffer_count;
    frontend->frame_open = 1;
+   frontend->frame_draw_ops = 0;
+   frontend->frame_has_visible_content = 0;
 }
 
 void host_log(void *opaque, const char *message)
@@ -115,6 +124,9 @@ void host_video_clear(void *opaque, uint16_t color)
    struct unifrog_surface surface;
 
    frontend_begin_frame(frontend);
+   frontend->frame_draw_ops++;
+   if (color != 0)
+      frontend->frame_has_visible_content = 1;
    surface = frontend_surface(frontend);
    unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height, color);
 }
@@ -126,10 +138,14 @@ void host_video_rects(void *opaque, const struct js2300_rect *rects,
    struct unifrog_surface surface;
 
    frontend_begin_frame(frontend);
+   frontend->frame_draw_ops += (unsigned)count;
    surface = frontend_surface(frontend);
-   for (size_t i = 0; i < count; i++)
+   for (size_t i = 0; i < count; i++) {
+      if (rects[i].w > 0 && rects[i].h > 0 && rects[i].color != 0)
+         frontend->frame_has_visible_content = 1;
       unifrog_gfx_fill_rect(&surface, rects[i].x, rects[i].y,
          rects[i].w, rects[i].h, rects[i].color);
+   }
 }
 
 void host_video_text(void *opaque, int x, int y, const char *text,
@@ -139,6 +155,9 @@ void host_video_text(void *opaque, int x, int y, const char *text,
    struct unifrog_surface surface;
 
    frontend_begin_frame(frontend);
+   frontend->frame_draw_ops++;
+   if (text && text[0] && color != 0)
+      frontend->frame_has_visible_content = 1;
    surface = frontend_surface(frontend);
    unifrog_gfx_draw_text(&surface, x, y, text, color, 1);
 }
@@ -210,6 +229,8 @@ int host_video_image(void *opaque, const char *path,
    if (!icon || !icon->loaded)
       return -1;
    frontend_begin_frame(frontend);
+   frontend->frame_draw_ops++;
+   frontend->frame_has_visible_content = 1;
    surface = frontend_surface(frontend);
    unifrog_png_draw(&surface, &icon->image, x, y, w, h);
    return 0;
@@ -223,10 +244,24 @@ void host_video_present(void *opaque)
       unifrog_fb_wait_vsync(&frontend->fb);
       return;
    }
+   if (unifrog_boot_logo_is_active() &&
+       !frontend->frame_has_visible_content) {
+      if (frontend->boot_logo_present_skips < 4)
+         printf("unifrog boot_logo keep skip_present=%u ops=%u buffer=%u\n",
+            frontend->boot_logo_present_skips + 1u,
+            frontend->frame_draw_ops, frontend->draw_buffer);
+      frontend->boot_logo_present_skips++;
+      frontend->frame_open = 0;
+      return;
+   }
    unifrog_fb_flush_buffer(&frontend->fb, frontend->draw_buffer);
    unifrog_fb_wait_vsync(&frontend->fb);
-   unifrog_fb_pan(&frontend->fb, frontend->draw_buffer);
-   unifrog_boot_logo_mark_replaced();
+   if (unifrog_fb_pan(&frontend->fb, frontend->draw_buffer) == 0 &&
+       unifrog_boot_logo_is_active()) {
+      unifrog_boot_logo_mark_replaced();
+      printf("unifrog boot_logo replaced buffer=%u ops=%u\n",
+         frontend->draw_buffer, frontend->frame_draw_ops);
+   }
    frontend->frame_open = 0;
 }
 

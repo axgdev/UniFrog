@@ -127,6 +127,9 @@ struct js2300_frontend {
    int video_disable_audio;
    unsigned draw_buffer;
    int frame_open;
+   unsigned frame_draw_ops;
+   int frame_has_visible_content;
+   unsigned boot_logo_present_skips;
    int relaunch;
    int input_recovered;
    int boot_read_active;
