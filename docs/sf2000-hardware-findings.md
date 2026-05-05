@@ -88,8 +88,9 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
   switching timing/bus width under a mounted filesystem would need explicit
   driver support.
 - Experimental SD builds defer file-log flushes during game launch where
-  possible so ROM/core reads are not competing with diagnostic writes on an
-  unstable bus.
+  possible and retry storage recovery around frontend, index, and ROM reads.
+  This improves observability and transient recovery, but it is not a substitute
+  for a stable bus.
 - Trust the `unifrog storage config` line when comparing SD modes. It reports
   the DTB profile actually seen by the kernel (`bus-width`, high-speed, UHS,
   and 1.8 V flags).
@@ -101,6 +102,9 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 - The SDK file UART appends lazily after mount and syncs only after larger
   chunks. It must not open and `fsync()` `/log.txt` immediately on every mount
   notification because that competes with early SD probing.
+- If a transient file UART write or sync fails, the logger closes the file
+  descriptor but keeps the mount name so the delayed worker can reopen and retry
+  instead of waiting for a fresh mount notification.
 - HCRTOS FAT append semantics must be real, not just `O_APPEND` in the stored
   file flags. The FAT mount has to seek to end on open and before each append
   write, otherwise UniFrog flushes and file UART writes can overwrite earlier

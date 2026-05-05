@@ -420,6 +420,12 @@ int host_action(void *opaque, const char *id)
    if (frontend->action[0])
       return 0;
 
+   if (strcmp(id, "storage:experimental") == 0)
+      return UNIFROG_SD_EXPERIMENTAL ? 1 : 0;
+   if (strcmp(id, "storage:recover") == 0)
+      return unifrog_platform_recover_storage("js_action", 4, 100) == 0 ?
+         1 : -1;
+
    run_path = parse_run_action(frontend, id);
    if (run_path) {
       char path[JS2300_FRONTEND_MAX_PATH];
@@ -439,7 +445,8 @@ int host_action(void *opaque, const char *id)
          frontend->run_options.frameskip,
          frontend->run_options.display_mode);
       unifrog_diag_memory_snapshot("frontend.warm_run_start");
-      (void)unifrog_log_flush();
+      if (!UNIFROG_SD_EXPERIMENTAL)
+         (void)unifrog_log_flush();
       start_ms = unifrog_perf_time_ms();
       ret = unifrog_libretro_run_path_ex(path, &frontend->run_options);
       printf("js2300 action run warm ret=%d ms=%lu path=%s\n",

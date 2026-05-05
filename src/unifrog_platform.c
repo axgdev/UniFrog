@@ -206,8 +206,11 @@ int unifrog_platform_mount_storage(void)
             (unsigned long)storage_mounted_mask);
          return 0;
       }
-      if (storage_mounted_mask & (1u << i))
-         continue;
+      if (storage_mounted_mask & (1u << i)) {
+         unifrog_log("unifrog storage mount stale_mask target=%s bit=%u mask=0x%lx\n",
+            storage_mounts[i].target, i, (unsigned long)storage_mounted_mask);
+         storage_mounted_mask &= ~(1u << i);
+      }
 
       storage_mount_attempts++;
       target_start_ms = unifrog_perf_time_ms();
@@ -259,6 +262,47 @@ int unifrog_platform_mount_storage(void)
       (unsigned long)storage_mounted_mask,
       (unsigned long)storage_mount_attempts);
    return mounted;
+}
+
+int unifrog_platform_storage_ready(void)
+{
+   return directory_has_entries(UNIFROG_SD_ROOT) ||
+      directory_has_entries("/media/mmcblk0p1") ||
+      directory_has_entries("/media/mmcblk0p2");
+}
+
+int unifrog_platform_recover_storage(const char *tag, unsigned attempts,
+   unsigned delay_ms)
+{
+   uint32_t start_ms = unifrog_perf_time_ms();
+
+   if (attempts == 0)
+      attempts = 1;
+   if (unifrog_platform_storage_ready()) {
+      unifrog_log("unifrog storage recover tag=%s ready=1 attempts=0 total_ms=0 mask=0x%lx\n",
+         tag ? tag : "", (unsigned long)storage_mounted_mask);
+      return 0;
+   }
+
+   for (unsigned i = 0; i < attempts; i++) {
+      int mount_ret = unifrog_platform_mount_storage();
+      int ready = unifrog_platform_storage_ready();
+
+      unifrog_log("unifrog storage recover tag=%s attempt=%u mount_ret=%d ready=%d total_ms=%lu mask=0x%lx\n",
+         tag ? tag : "", i + 1u, mount_ret, ready,
+         (unsigned long)(unifrog_perf_time_ms() - start_ms),
+         (unsigned long)storage_mounted_mask);
+      if (ready)
+         return 0;
+      if (delay_ms)
+         msleep(delay_ms);
+   }
+
+   unifrog_log("unifrog storage recover tag=%s failed attempts=%u total_ms=%lu mask=0x%lx\n",
+      tag ? tag : "", attempts,
+      (unsigned long)(unifrog_perf_time_ms() - start_ms),
+      (unsigned long)storage_mounted_mask);
+   return -1;
 }
 
 int unifrog_platform_wait_for_storage(void)

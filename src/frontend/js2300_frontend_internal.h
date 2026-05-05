@@ -32,6 +32,7 @@
 #include <unifrog/panic.h>
 #include <unifrog/path.h>
 #include <unifrog/perf.h>
+#include <unifrog/platform.h>
 #include <unifrog/png.h>
 #include <unifrog/text.h>
 
@@ -54,6 +55,12 @@
 #endif
 #ifndef UNIFROG_FRONTEND_GIT_COMMIT
 #define UNIFROG_FRONTEND_GIT_COMMIT "unknown"
+#endif
+#ifndef UNIFROG_SD_MODE
+#define UNIFROG_SD_MODE "unknown"
+#endif
+#ifndef UNIFROG_SD_EXPERIMENTAL
+#define UNIFROG_SD_EXPERIMENTAL 0
 #endif
 
 #define JS2300_FRONTEND_APP_ROOT "/media/mmcblk0/unifrog"

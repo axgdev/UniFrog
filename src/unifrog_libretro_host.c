@@ -29,6 +29,7 @@
 #include <unifrog/log.h>
 #include <unifrog/panic.h>
 #include <unifrog/perf.h>
+#include <unifrog/platform.h>
 #include <unifrog/presenter.h>
 #include <unifrog/scpu.h>
 #include <unifrog/text.h>
@@ -94,6 +95,7 @@
 #define LIBRETRO_COMPRESSED_GROW_INITIAL (2u * 1024u * 1024u)
 #define LIBRETRO_COMPRESSED_STREAM_FIRST_INPUT (4u * 1024u * 1024u)
 #define LIBRETRO_CONTENT_READ_CHUNK (512u * 1024u)
+#define LIBRETRO_CONTENT_READ_CHUNK_EXPERIMENTAL (64u * 1024u)
 #define LIBRETRO_CONTENT_STREAM_IN (64u * 1024u)
 #define LIBRETRO_CONTENT_STREAM_OUT (256u * 1024u)
 #define LIBRETRO_FS_PROBE_MIN_SIZE (512u * 1024u)
@@ -515,6 +517,25 @@ static const unsigned quick_backlight_levels[] = {
 static const unsigned quick_scpu_mhz_options[] = {
    198, 297, 396, 594, 702, 756, 810, 864, 918,
 };
+
+static size_t libretro_content_read_chunk(void)
+{
+   return UNIFROG_SD_EXPERIMENTAL ?
+      LIBRETRO_CONTENT_READ_CHUNK_EXPERIMENTAL :
+      LIBRETRO_CONTENT_READ_CHUNK;
+}
+
+static unsigned libretro_storage_attempts(void)
+{
+   return UNIFROG_SD_EXPERIMENTAL ? 3u : 1u;
+}
+
+static int libretro_recover_storage(const char *tag)
+{
+   if (!UNIFROG_SD_EXPERIMENTAL)
+      return -1;
+   return unifrog_platform_recover_storage(tag, 4, 100);
+}
 
 void unifrog_libretro_run_options_init(
    struct unifrog_libretro_run_options *options)
@@ -1140,6 +1161,12 @@ out:
    return ret;
 }
 
+static unsigned libretro_watchdog_load_stall_polls(void)
+{
+   return UNIFROG_SD_EXPERIMENTAL ? 120u :
+      LIBRETRO_WATCHDOG_LOAD_STALL_POLLS;
+}
+
 static void libretro_watchdog_task(void *arg)
 {
    unsigned stable_polls = 0;
@@ -1169,7 +1196,7 @@ static void libretro_watchdog_task(void *arg)
          last_heartbeat = watchdog_heartbeat;
       }
       if (watchdog_phase == LIBRETRO_WATCHDOG_PHASE_LOAD &&
-          stable_polls >= LIBRETRO_WATCHDOG_LOAD_STALL_POLLS) {
+          stable_polls >= libretro_watchdog_load_stall_polls()) {
          unifrog_panic_screen_labeled("UNIFROG CORE HANG",
             "PHASE", watchdog_phase,
             "MARK", watchdog_marker,
@@ -1332,6 +1359,7 @@ static void loading_draw(const char *title, const char *detail, unsigned percent
    if (percent > 100)
       percent = 100;
    host.loading_percent = percent;
+   libretro_watchdog_load_progress(detail ? detail : title, percent, 100);
    buffer = host.loading_fb.current_buffer;
    if (host.loading_fb.buffer_count > 1)
       buffer = (host.loading_fb.current_buffer + 1) % host.loading_fb.buffer_count;
@@ -2855,9 +2883,10 @@ static int read_fd_fully_to_buffer(int fd, const char *path, uint8_t *data,
       size_t chunk = size - done;
       ssize_t got;
       unsigned progress;
+      size_t max_chunk = libretro_content_read_chunk();
 
-      if (chunk > LIBRETRO_CONTENT_READ_CHUNK)
-         chunk = LIBRETRO_CONTENT_READ_CHUNK;
+      if (chunk > max_chunk)
+         chunk = max_chunk;
       got = read(fd, data + done, chunk);
       if (got <= 0) {
          printf("unifrog libretro file read failed path=%s size=%u done=%u got=%d errno=%d label=%s\n",
@@ -2880,52 +2909,64 @@ static int read_fd_fully_to_buffer(int fd, const char *path, uint8_t *data,
 static int read_path_aligned_direct(const char *path, uint8_t **out_data,
    size_t *out_size, const char *label)
 {
-   struct stat st;
-   uint8_t *data = NULL;
-   size_t size;
-   uint64_t start_us;
-   uint64_t end_us;
-   int fd = -1;
-   int ret = -1;
+   unsigned attempts = libretro_storage_attempts();
 
    if (!path || !out_data || !out_size)
       return -1;
    *out_data = NULL;
    *out_size = 0;
-   if (stat(path, &st) != 0 || st.st_size <= 0)
-      return -1;
-   size = (size_t)st.st_size;
-   data = rom_alloc_aligned(size);
-   if (!data) {
-      printf("unifrog libretro rom alloc failed path=%s size=%u label=%s\n",
-         path, (unsigned)size, label ? label : "");
-      return -1;
-   }
-   fd = open(path, O_RDONLY);
-   if (fd < 0) {
-      printf("unifrog libretro rom open failed path=%s errno=%d label=%s\n",
-         path, errno, label ? label : "");
-      goto out;
-   }
-   start_us = host_time_us();
-   if (read_fd_fully_to_buffer(fd, path, data, size, "LOADING ROM",
-       label ? label : "READING", 12, 58) != 0)
-      goto out;
-   end_us = host_time_us();
 
-   *out_data = data;
-   *out_size = size;
-   data = NULL;
-   printf("unifrog load_time stage=file_read mode=fd_aligned ms=%u bytes=%u chunk=%u label=%s path=%s\n",
-      host_elapsed_ms(start_us, end_us), (unsigned)size,
-      (unsigned)LIBRETRO_CONTENT_READ_CHUNK, label ? label : "", path);
-   ret = 0;
+   for (unsigned attempt = 0; attempt < attempts; attempt++) {
+      struct stat st;
+      uint8_t *data = NULL;
+      size_t size;
+      uint64_t start_us;
+      uint64_t end_us;
+      int fd = -1;
 
-out:
-   if (fd >= 0)
+      if (stat(path, &st) != 0 || st.st_size <= 0) {
+         printf("unifrog libretro rom stat failed path=%s errno=%d attempt=%u label=%s\n",
+            path, errno, attempt + 1u, label ? label : "");
+         if (attempt + 1u < attempts)
+            (void)libretro_recover_storage("rom_stat");
+         continue;
+      }
+      size = (size_t)st.st_size;
+      data = rom_alloc_aligned(size);
+      if (!data) {
+         printf("unifrog libretro rom alloc failed path=%s size=%u label=%s\n",
+            path, (unsigned)size, label ? label : "");
+         return -1;
+      }
+      fd = open(path, O_RDONLY);
+      if (fd < 0) {
+         printf("unifrog libretro rom open failed path=%s errno=%d attempt=%u label=%s\n",
+            path, errno, attempt + 1u, label ? label : "");
+         rom_free_aligned(data);
+         if (attempt + 1u < attempts)
+            (void)libretro_recover_storage("rom_open");
+         continue;
+      }
+      start_us = host_time_us();
+      if (read_fd_fully_to_buffer(fd, path, data, size, "LOADING ROM",
+          label ? label : "READING", 12, 58) == 0) {
+         end_us = host_time_us();
+         close(fd);
+         *out_data = data;
+         *out_size = size;
+         printf("unifrog load_time stage=file_read mode=fd_aligned ms=%u bytes=%u chunk=%u label=%s attempts=%u path=%s\n",
+            host_elapsed_ms(start_us, end_us), (unsigned)size,
+            (unsigned)libretro_content_read_chunk(), label ? label : "",
+            attempt + 1u, path);
+         return 0;
+      }
       close(fd);
-   rom_free_aligned(data);
-   return ret;
+      rom_free_aligned(data);
+      if (attempt + 1u < attempts)
+         (void)libretro_recover_storage("rom_read");
+   }
+
+   return -1;
 }
 
 static uint32_t hash_u32(uint32_t hash, uint32_t value)
@@ -3564,6 +3605,60 @@ static int zip_load_rom_data_stream(FILE *file, const char *zip_path,
       out_data, out_size, out_name, out_name_size);
 }
 
+static int zip_load_rom_data_stream_path(const char *zip_path,
+   const struct retro_system_info *info, uint8_t **out_data,
+   size_t *out_size, char *out_name, size_t out_name_size)
+{
+   unsigned attempts = libretro_storage_attempts();
+
+   if (!zip_path || !info || !out_data || !out_size)
+      return -1;
+   for (unsigned attempt = 0; attempt < attempts; attempt++) {
+      FILE *file = fopen(zip_path, "rb");
+      int ret;
+
+      if (!file) {
+         printf("unifrog libretro zip open failed path=%s attempt=%u errno=%d\n",
+            zip_path, attempt + 1u, errno);
+         ret = -1;
+      } else {
+         ret = zip_load_rom_data_stream(file, zip_path, info, out_data,
+            out_size, out_name, out_name_size);
+         fclose(file);
+      }
+      if (ret == 0) {
+         if (attempt > 0)
+            printf("unifrog libretro zip recovered path=%s attempts=%u\n",
+               zip_path, attempt + 1u);
+         return 0;
+      }
+      if (attempt + 1u < attempts)
+         (void)libretro_recover_storage("zip_memory");
+   }
+
+   return -1;
+}
+
+static int read_path_memory_with_fallback(const char *path,
+   uint8_t **out_data, size_t *out_size, const char *label)
+{
+   FILE *file;
+   int ret;
+
+   if (read_path_aligned_direct(path, out_data, out_size, label) == 0)
+      return 0;
+
+   file = fopen(path, "rb");
+   if (!file) {
+      printf("unifrog libretro rom fallback open failed path=%s errno=%d label=%s\n",
+         path ? path : "", errno, label ? label : "");
+      return -1;
+   }
+   ret = read_file_aligned(file, path, out_data, out_size, label);
+   fclose(file);
+   return ret;
+}
+
 static int read_file_aligned(FILE *file, const char *path, uint8_t **out_data,
    size_t *out_size, const char *label)
 {
@@ -3582,9 +3677,10 @@ static int read_file_aligned(FILE *file, const char *path, uint8_t **out_data,
    }
    for (size_t done = 0; done < size;) {
       size_t chunk = size - done;
+      size_t max_chunk = libretro_content_read_chunk();
 
-      if (chunk > LIBRETRO_CONTENT_READ_CHUNK)
-         chunk = LIBRETRO_CONTENT_READ_CHUNK;
+      if (chunk > max_chunk)
+         chunk = max_chunk;
       if (fread(data + done, 1, chunk, file) != chunk) {
          printf("unifrog libretro rom read failed path=%s size=%u done=%u label=%s\n",
             path ? path : "", (unsigned)size, (unsigned)done,
@@ -3647,7 +3743,7 @@ static int read_path_heap_sequential(const char *path, uint8_t **out_data,
    data = NULL;
    printf("unifrog load_time stage=file_read mode=fd_heap ms=%u bytes=%u chunk=%u label=%s path=%s\n",
       host_elapsed_ms(start_us, end_us), (unsigned)size,
-      (unsigned)LIBRETRO_CONTENT_READ_CHUNK, label ? label : "", path);
+      (unsigned)libretro_content_read_chunk(), label ? label : "", path);
    ret = 0;
 
 out:
@@ -5165,6 +5261,8 @@ static int run_core(const struct libretro_core_api *core, const char *path,
          core->id, path);
       (void)unifrog_log_flush();
    }
+   libretro_watchdog_start();
+   libretro_watchdog_enter(LIBRETRO_WATCHDOG_PHASE_LOAD, 0);
    probe_rom_seek_path(path);
    unifrog_diag_memory_snapshot("libretro.before_content_prepare");
    content_start_us = host_time_us();
@@ -5201,7 +5299,6 @@ static int run_core(const struct libretro_core_api *core, const char *path,
       loading_draw("LOADING ROM", "OPENING", 12);
    } else {
       const char *read_path = path;
-      FILE *file;
 
       if (path_is_wrapped_compressed(path)) {
          content_kind = "compressed_memory";
@@ -5218,44 +5315,20 @@ static int run_core(const struct libretro_core_api *core, const char *path,
          }
       } else {
          content_kind = path_is_zip(read_path) ? "zip_memory" : "raw_memory";
-         file = fopen(read_path, "rb");
-         if (!file) {
-            printf("unifrog libretro rom open failed path=%s source=%s\n",
-               read_path, path);
-            goto out_finish;
-         }
          if (path_is_zip(read_path)) {
-            if (zip_load_rom_data_stream(file, read_path, &info, &rom_data,
-                &rom_size, NULL, 0) != 0) {
-               fclose(file);
+            if (zip_load_rom_data_stream_path(read_path, &info, &rom_data,
+                &rom_size, NULL, 0) != 0)
                goto out_finish;
-            }
          } else {
-            if (read_path_aligned_direct(read_path, &rom_data, &rom_size,
-                "READING") != 0 &&
-                read_file_aligned(file, read_path, &rom_data, &rom_size,
-                "READING") != 0) {
-               fclose(file);
+            if (read_path_memory_with_fallback(read_path, &rom_data,
+                &rom_size, "READING") != 0)
                goto out_finish;
-            }
          }
-         fclose(file);
       }
       if (!rom_data) {
-         file = fopen(read_path, "rb");
-         if (!file) {
-            printf("unifrog libretro rom open failed path=%s source=%s\n",
-               read_path, path);
+         if (read_path_memory_with_fallback(read_path, &rom_data,
+             &rom_size, "READ CACHE") != 0)
             goto out_finish;
-         }
-         if (read_path_aligned_direct(read_path, &rom_data, &rom_size,
-             "READ CACHE") != 0 &&
-             read_file_aligned(file, read_path, &rom_data, &rom_size,
-             "READ CACHE") != 0) {
-            fclose(file);
-            goto out_finish;
-         }
-         fclose(file);
       }
       game.data = rom_data;
       game.size = rom_size;
@@ -5317,7 +5390,6 @@ static int run_core(const struct libretro_core_api *core, const char *path,
    loading_draw("LOADING GAME", "CORE LOAD", 72);
    printf("unifrog libretro step=retro_load_game\n");
    (void)unifrog_log_flush();
-   libretro_watchdog_start();
    libretro_watchdog_enter(LIBRETRO_WATCHDOG_PHASE_LOAD, 0);
    retro_load_start_us = host_time_us();
    if (!CORE_CALL1_RET(core, core->load_game, &game)) {
@@ -5504,6 +5576,7 @@ out_deinit:
    if (core_initialized)
       CORE_CALL0_VOID(core, core->deinit);
 out_finish:
+   libretro_watchdog_stop();
    host.content_alloc_appmem = 0;
    rom_free_aligned(rom_data);
    unifrog_diag_memory_snapshot("libretro.out_finish");
@@ -5721,6 +5794,12 @@ int unifrog_libretro_run_path_ex(const char *path,
    if (!path) {
       printf("unifrog libretro dispatch failed path=null\n");
       (void)unifrog_log_flush();
+      return -1;
+   }
+   if (UNIFROG_SD_EXPERIMENTAL &&
+       unifrog_platform_recover_storage("libretro_dispatch", 4, 100) != 0) {
+      printf("unifrog libretro dispatch storage_unavailable path=%s mode=%s\n",
+         path, UNIFROG_SD_MODE);
       return -1;
    }
 

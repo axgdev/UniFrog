@@ -268,6 +268,7 @@ function runAction(id, now) {
     showToast("Returned", now);
     dirty = true;
   }
+  return ret;
 }
 
 function runLaunchGame(now) {
@@ -279,6 +280,7 @@ function runLaunchGame(now) {
   var fs = launchFrameskipOptions[launchFrameskipIndex].value;
   var display = launchDisplayOptions[launchDisplayIndex].value;
   var core = launchCoreOptions[launchCoreIndex].value;
+  var experimentalStorage = JS2300.system.action("storage:experimental") > 0;
   var options = "audio=" + String(audio) + ",gain=" + String(gain) +
     ",cpu=" + String(cpu) + ",ge=" + String(ge) +
     ",backlight=" + String(backlight) + ",fs=" + String(fs) +
@@ -292,8 +294,10 @@ function runLaunchGame(now) {
   config.display = display;
   config.lastPath = pendingGamePath;
   config.lastCore = core;
-  writeSettings();
-  runAction("run+" + options + ":" + pendingGamePath, now);
+  if (!experimentalStorage)
+    writeSettings();
+  if (runAction("run+" + options + ":" + pendingGamePath, now) >= 0 && experimentalStorage)
+    writeSettings();
 }
 
 function openEntry(now) {

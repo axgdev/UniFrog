@@ -47,6 +47,18 @@ void host_log(void *opaque, const char *message)
    printf("js2300: %s\n", message ? message : "");
 }
 
+static unsigned frontend_storage_attempts(void)
+{
+   return UNIFROG_SD_EXPERIMENTAL ? 3u : 1u;
+}
+
+static int frontend_recover_storage(const char *tag)
+{
+   if (!UNIFROG_SD_EXPERIMENTAL)
+      return -1;
+   return unifrog_platform_recover_storage(tag, 4, 100);
+}
+
 int host_flush_log(void *opaque)
 {
    (void)opaque;
@@ -303,13 +315,23 @@ int host_fs_list(void *opaque, const char *path,
    struct dirent *entry;
    int count = 0;
    uint32_t start = unifrog_perf_time_ms();
+   unsigned attempts = frontend_storage_attempts();
    (void)opaque;
 
    if (!path || !entries || max_entries == 0)
       return -1;
-   dir = opendir(path);
+   dir = NULL;
+   for (unsigned attempt = 0; attempt < attempts && !dir; attempt++) {
+      dir = opendir(path);
+      if (!dir && attempt + 1u < attempts) {
+         printf("js2300 fs list open_fail path=%s attempt=%u errno=%d\n",
+            path, attempt + 1u, errno);
+         (void)frontend_recover_storage("js_fs_list");
+      }
+   }
    if (!dir) {
-      printf("js2300 fs list open_fail path=%s\n", path);
+      printf("js2300 fs list open_fail path=%s attempts=%u errno=%d\n",
+         path, attempts, errno);
       return -1;
    }
    while ((entry = readdir(dir)) != NULL && (size_t)count < max_entries) {
@@ -344,43 +366,50 @@ int host_fs_read_text(void *opaque, const char *path,
    FILE *file;
    size_t got;
    uint32_t start = unifrog_perf_time_ms();
+   unsigned attempts = frontend_storage_attempts();
    (void)opaque;
 
    if (!path || !out || out_size == 0)
       return -1;
-   file = fopen(path, "rb");
-   if (!file) {
-      printf("js2300 fs read_text open_fail path=%s ms=%lu\n",
-         path, (unsigned long)(unifrog_perf_time_ms() - start));
-      return -1;
-   }
-   got = fread(out, 1, out_size - 1, file);
-   if (ferror(file)) {
+
+   for (unsigned attempt = 0; attempt < attempts; attempt++) {
+      file = fopen(path, "rb");
+      if (!file) {
+         printf("js2300 fs read_text open_fail path=%s attempt=%u errno=%d ms=%lu\n",
+            path, attempt + 1u, errno,
+            (unsigned long)(unifrog_perf_time_ms() - start));
+         if (attempt + 1u < attempts)
+            (void)frontend_recover_storage("js_read_text_open");
+         continue;
+      }
+      got = fread(out, 1, out_size - 1, file);
+      if (!ferror(file)) {
+         out[got] = '\0';
+         fclose(file);
+         printf("js2300 fs read_text path=%s bytes=%u cap=%u ms=%lu attempts=%u\n",
+            path, (unsigned)got, (unsigned)out_size,
+            (unsigned long)(unifrog_perf_time_ms() - start),
+            attempt + 1u);
+         return (int)got;
+      }
       fclose(file);
-      printf("js2300 fs read_text read_fail path=%s bytes=%u ms=%lu\n",
-         path, (unsigned)got,
+      printf("js2300 fs read_text read_fail path=%s bytes=%u attempt=%u ms=%lu\n",
+         path, (unsigned)got, attempt + 1u,
          (unsigned long)(unifrog_perf_time_ms() - start));
-      return -1;
+      if (attempt + 1u < attempts)
+         (void)frontend_recover_storage("js_read_text_read");
    }
-   out[got] = '\0';
-   fclose(file);
-   printf("js2300 fs read_text path=%s bytes=%u cap=%u ms=%lu\n",
-      path, (unsigned)got, (unsigned)out_size,
-      (unsigned long)(unifrog_perf_time_ms() - start));
-   return (int)got;
+
+   return -1;
 }
 
-int host_fs_write_text(void *opaque, const char *path,
+static int frontend_write_text_once(const char *path,
    const char *text, size_t size)
 {
    char tmp[JS2300_FRONTEND_MAX_PATH + 8];
    FILE *file;
    int ret = -1;
-   uint32_t start = unifrog_perf_time_ms();
-   (void)opaque;
 
-   if (!path || !path[0] || !text)
-      return -1;
    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
    file = fopen(tmp, "wb");
    if (!file) {
@@ -401,9 +430,36 @@ int host_fs_write_text(void *opaque, const char *path,
    }
    if (ret != 0)
       unlink(tmp);
-   printf("js2300 fs write_text path=%s bytes=%u ms=%lu ret=%d\n",
+   return ret;
+}
+
+int host_fs_write_text(void *opaque, const char *path,
+   const char *text, size_t size)
+{
+   uint32_t start = unifrog_perf_time_ms();
+   unsigned attempts = frontend_storage_attempts();
+   int ret = -1;
+   (void)opaque;
+
+   if (!path || !path[0] || !text)
+      return -1;
+
+   for (unsigned attempt = 0; attempt < attempts; attempt++) {
+      ret = frontend_write_text_once(path, text, size);
+      if (ret == 0) {
+         printf("js2300 fs write_text path=%s bytes=%u ms=%lu attempts=%u ret=0\n",
+            path, (unsigned)size,
+            (unsigned long)(unifrog_perf_time_ms() - start),
+            attempt + 1u);
+         return 0;
+      }
+      if (attempt + 1u < attempts)
+         (void)frontend_recover_storage("js_write_text");
+   }
+
+   printf("js2300 fs write_text path=%s bytes=%u ms=%lu attempts=%u ret=%d\n",
       path, (unsigned)size,
-      (unsigned long)(unifrog_perf_time_ms() - start), ret);
+      (unsigned long)(unifrog_perf_time_ms() - start), attempts, ret);
    return ret;
 }
 
@@ -417,7 +473,7 @@ static int frontend_tmp_path(char *tmp, size_t tmp_size, const char *path)
    return len > 0 && (size_t)len < tmp_size ? 0 : -1;
 }
 
-int host_fs_index(void *opaque, const char *root,
+static int host_fs_index_once(const char *root,
    const char *game_index_path, const char *media_index_path,
    struct js2300_fs_index_result *result)
 {
@@ -428,7 +484,6 @@ int host_fs_index(void *opaque, const char *root,
    struct frontend_index_scan scan;
    uint32_t start = unifrog_perf_time_ms();
    int ret = -1;
-   (void)opaque;
 
    if (!root || !root[0] || !game_index_path || !media_index_path || !result)
       return -1;
@@ -496,5 +551,33 @@ done:
       (unsigned long)result->games, (unsigned long)result->media,
       (unsigned long)result->files, (unsigned long)result->dirs,
       (unsigned long)result->ms, (unsigned long)result->truncated, ret);
+   return ret;
+}
+
+int host_fs_index(void *opaque, const char *root,
+   const char *game_index_path, const char *media_index_path,
+   struct js2300_fs_index_result *result)
+{
+   uint32_t start = unifrog_perf_time_ms();
+   unsigned attempts = frontend_storage_attempts();
+   int ret = -1;
+   (void)opaque;
+
+   for (unsigned attempt = 0; attempt < attempts; attempt++) {
+      ret = host_fs_index_once(root, game_index_path, media_index_path,
+         result);
+      if (ret == 0) {
+         if (attempt > 0)
+            printf("js2300 fs index recovered attempts=%u total_ms=%lu\n",
+               attempt + 1u,
+               (unsigned long)(unifrog_perf_time_ms() - start));
+         return 0;
+      }
+      if (attempt + 1u < attempts)
+         (void)frontend_recover_storage("js_fs_index");
+   }
+
+   printf("js2300 fs index failed attempts=%u total_ms=%lu ret=%d\n",
+      attempts, (unsigned long)(unifrog_perf_time_ms() - start), ret);
    return ret;
 }

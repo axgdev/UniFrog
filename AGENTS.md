@@ -14,8 +14,8 @@ Keep this repository small and direct.
   `MODE=head|tag` only to override repository policy.
 - Defaults: `TOOLCHAIN=/opt/mipsel-mti-elf`, `SDK=unifrog-hcrtos-sdk`,
   `DEPS=.deps`, `SD_MODE=safe`
-- SD diagnostics: `SD_MODE=wide|uhs` are experimental and defer file-log
-  flushes during game launch where possible.
+- SD diagnostics: `SD_MODE=wide|uhs` are experimental; they defer launch-time
+  log writes and retry storage recovery, but `safe` remains the default.
 - Local overrides belong in untracked `config.mk`.
 
 ## Scope
