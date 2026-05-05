@@ -78,7 +78,8 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 
 - The SD/MMC path is sensitive to signal integrity. A flat SD extender cable caused frequent CRC errors and automount churn.
 - The default build uses the reliable 1-bit SD profile. Developer -> Storage
-  test can run a guarded runtime sweep from that safe boot: it buffers logs,
+  test can run a quick guarded runtime sweep from that safe boot: it buffers
+  logs, shows progress on screen, verifies a safe restart first,
   unmounts/remounts storage between profiles, records host caps/timing/mount
   status, restores the safe boot profile, then writes the report.
 - `SD_MODE=hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, and `uhs` remain
@@ -88,10 +89,11 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
   reports invalid `bus-width` values, so 2-bit and 3-bit profiles are not valid
   experiments.
 - Runtime profile switching is diagnostic-only. The storage test stops file
-  logging, unmounts the filesystem, restarts the MMC host with patched runtime
-  caps, remounts for read tests, and restores the saved boot profile before any
-  final file writes. If an unstable mode wedges inside the MMC command path,
-  software recovery may still fail.
+  logging, requires a clean unmount, restarts the MMC host with patched runtime
+  caps, remounts for short read probes, and restores the saved boot profile
+  before any final file writes. It does not use lazy unmount before stopping the
+  MMC host. If an unstable mode wedges inside the MMC command path, software
+  recovery may still fail.
 - Experimental SD builds defer file-log flushes during game launch where
   possible and retry storage recovery around frontend, index, and ROM reads.
   This improves observability and transient recovery, but it is not a substitute

@@ -68,8 +68,9 @@ verification before handing off changes. If linker scripts or link libraries
 change, run `make clean && make verify`.
 
 SD builds default to the reliable 1-bit profile. In that safe build, Developer
--> Storage test runs a guarded runtime sweep: it buffers logs, unmounts storage,
-tries `hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, and `uhs`, then restores the
+-> Storage test runs a quick guarded runtime sweep: it buffers logs, shows
+progress on screen, verifies a safe restart first, requires clean unmounts,
+tries `hs1`, `wide50`, `uhs12`, `uhs25`, `wide`, and `uhs`, then restores the
 safe boot profile before writing `/unifrog/storage-test-result.txt` and the
 frontend report. Fixed-profile diagnostic boot builds are still available with
 `SD_MODE=hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, or `uhs`; these modes are

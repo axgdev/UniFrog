@@ -546,7 +546,7 @@ help:
 	@echo "  make print-config  Show current paths and tools"
 	@echo "  make V=1           Show full compiler/linker commands"
 	@echo "  make SD_MODE=safe  Use the default reliable 1-bit SD profile"
-	@echo "                     Developer -> Storage test sweeps SD profiles at runtime"
+	@echo "                     Developer -> Storage test quick-sweeps SD profiles"
 	@echo "  make SD_MODE=hs1   Diagnostic 1-bit high-speed SD build"
 	@echo "  make SD_MODE=wide50 Diagnostic 4-bit high-speed, lower-clock SD build"
 	@echo "  make SD_MODE=wide  Diagnostic 4-bit high-speed SD build"

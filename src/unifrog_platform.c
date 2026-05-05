@@ -71,10 +71,6 @@ extern void mmc_start_host(void *host);
 extern const char hc_mmc_host_hw_ops[];
 extern void fileuart_set_storage_suspended(int suspended);
 
-#ifndef MNT_DETACH
-#define MNT_DETACH (1u << 1)
-#endif
-
 #define SD_DEVICE_DRIVER_DATA_OFFSET 64u
 #define SD_MMC_HOST_PARENT_OFFSET 0u
 #define SD_MMC_HOST_F_MAX_OFFSET 208u
@@ -355,35 +351,25 @@ static int sd_runtime_unmount_storage(const char *tag)
         i >= 0; i--) {
       int unmount_ret;
       int unmount_errno;
-      int detach_ret = 0;
-      int detach_errno = 0;
 
       errno = 0;
       unmount_ret = umount2(storage_mounts[i].target, 0);
       unmount_errno = errno;
-      if (unmount_ret != 0 && unmount_errno == EBUSY) {
-         errno = 0;
-         detach_ret = umount2(storage_mounts[i].target, MNT_DETACH);
-         detach_errno = errno;
-      }
 
       if (unmount_ret == 0 ||
           (unmount_ret != 0 && unmount_errno == EINVAL) ||
-          (unmount_ret != 0 && unmount_errno == ENOENT) ||
-          (unmount_ret != 0 && unmount_errno == EBUSY && detach_ret == 0)) {
+          (unmount_ret != 0 && unmount_errno == ENOENT)) {
          storage_mounted_mask &= ~(1u << i);
       } else {
          ret = -1;
       }
 
       unifrog_log("unifrog sd runtime unmount tag=%s target=%s ret=%d errno=%d "
-             "detach_ret=%d detach_errno=%d mask=0x%lx\n",
+             "mask=0x%lx\n",
          tag ? tag : "",
          storage_mounts[i].target,
          unmount_ret,
          unmount_errno,
-         unmount_errno == EBUSY ? detach_ret : 0,
-         unmount_errno == EBUSY ? detach_errno : 0,
          (unsigned long)storage_mounted_mask);
    }
 

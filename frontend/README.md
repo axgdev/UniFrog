@@ -97,7 +97,7 @@ UI:
 - `smoke-test.js` exercises video, input, filesystem, backlight, battery,
   packaged-core, log-flush, bytecode packaging, and timing bindings.
 - `perf-test.js` records JS screen draw, list, read, and module-load timings.
-- Developer -> Storage test runs the native read-only SD benchmark and writes
+- Developer -> Storage test runs the native quick SD profile sweep and writes
   `/unifrog/storage-test-result.txt`.
 
 They write `/unifrog/smoke-test-result.txt` or

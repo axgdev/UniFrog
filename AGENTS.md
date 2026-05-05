@@ -15,10 +15,11 @@ Keep this repository small and direct.
 - Defaults: `TOOLCHAIN=/opt/mipsel-mti-elf`, `SDK=unifrog-hcrtos-sdk`,
   `DEPS=.deps`, `SD_MODE=safe`
 - SD diagnostics: the default `SD_MODE=safe` build can run Developer ->
-  Storage test as a guarded runtime sweep. It buffers logs, unmounts/remounts
-  storage between profiles, restores the safe boot profile, then writes the
-  report. `SD_MODE=hs1|wide50|wide|uhs12|uhs25|uhs` are fixed-profile
-  experimental boot builds.
+  Storage test as a quick guarded runtime sweep. It buffers logs, verifies a
+  safe restart first, requires clean unmounts between profiles, restores the
+  safe boot profile, then writes the report.
+  `SD_MODE=hs1|wide50|wide|uhs12|uhs25|uhs` are fixed-profile experimental
+  boot builds.
 - Local overrides belong in untracked `config.mk`.
 
 ## Scope
