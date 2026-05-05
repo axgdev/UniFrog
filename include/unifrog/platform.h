@@ -23,6 +23,8 @@ typedef void (*unifrog_platform_storage_stage_cb)(void *userdata,
    const char *operation, const char *stage);
 void unifrog_platform_set_storage_stage_callback(
    unifrog_platform_storage_stage_cb cb, void *userdata);
+void unifrog_platform_storage_diag_note(const char *operation,
+   const char *stage);
 void unifrog_platform_set_storage_log_suspended(int suspended);
 int unifrog_platform_wait_for_storage(void);
 void unifrog_platform_idle_forever(void);

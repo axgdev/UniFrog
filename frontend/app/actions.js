@@ -150,6 +150,13 @@ function openDeveloperItem(now) {
   else if (id === "perf") runAction("script:" + SCRIPT_DIR + "/perf-test.js", now);
   else if (id === "storage") runAction("developer:storage_test", now);
   else if (id === "storage_full") runAction("developer:storage_full_test", now);
+  else if (id === "storage_mode") {
+    pushNav();
+    selected = 0;
+    scroll = 0;
+    view = STORAGE_MODE;
+    showToast("Storage mode", now);
+  }
   else if (id === "exception") runAction("developer:exception", now);
   else if (id === "cpu_exception") runAction("developer:cpu_exception", now);
   else if (id === "run_core") {
@@ -163,6 +170,11 @@ function openDeveloperItem(now) {
 function runSelectedScript(now) {
   if (scriptItems.length === 0) return;
   runAction("script:" + scriptItems[selected].path, now);
+}
+
+function runSelectedStorageMode(now) {
+  if (storageModeItems.length === 0) return;
+  runAction("developer:storage_mode_test:" + storageModeItems[selected].id, now);
 }
 
 function coreIdFromFile(name) {
@@ -489,6 +501,10 @@ function handleInput(input, now) {
     if (repeated(input, BTN_UP, now, 360, 150)) move(-1, scriptItems.length);
     else if (repeated(input, BTN_DOWN, now, 360, 150)) move(1, scriptItems.length);
     if (pressed & BTN_A) runSelectedScript(now);
+  } else if (view === STORAGE_MODE) {
+    if (repeated(input, BTN_UP, now, 360, 150)) move(-1, storageModeItems.length);
+    else if (repeated(input, BTN_DOWN, now, 360, 150)) move(1, storageModeItems.length);
+    if (pressed & BTN_A) runSelectedStorageMode(now);
   } else if (view === SYSTEM_CHECK) {
     if (repeated(input, BTN_UP, now, 360, 150)) move(-1, systemCheckRows.length);
     else if (repeated(input, BTN_DOWN, now, 360, 150)) move(1, systemCheckRows.length);

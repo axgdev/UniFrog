@@ -17,8 +17,10 @@ Keep this repository small and direct.
 - SD diagnostics: the default `SD_MODE=safe` build can run Developer ->
   Storage test for a quick guarded sweep, or Storage full test for
   `/ROMS/probes/test*.md`. Full test restores safe mode and checkpoints its
-  report after each experimental read. Use the on-screen stage as the primary
-  freeze clue; power cycles can overwrite warm reboot diagnostics.
+  report after each experimental read. Storage mode test selects one profile,
+  switches once, reads all probes, then restores safe mode. Use the on-screen
+  stage as the primary freeze clue; power cycles can overwrite warm reboot
+  diagnostics.
   `SD_MODE=hs1|wide50|wide|uhs12|uhs25|uhs` are fixed-profile experimental
   boot builds.
 - Local overrides belong in untracked `config.mk`.

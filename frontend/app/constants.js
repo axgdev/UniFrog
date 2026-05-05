@@ -10,6 +10,7 @@ var SETTINGS = 8;
 var DEVELOPER = 9;
 var SCRIPT_LIST = 10;
 var SYSTEM_CHECK = 11;
+var STORAGE_MODE = 12;
 
 var BTN_UP = 1 << 0;
 var BTN_DOWN = 1 << 1;

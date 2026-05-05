@@ -103,6 +103,9 @@ UI:
 - Developer -> Storage full test reads `/ROMS/probes/test*.md` across runtime
   SD profiles and checkpoints `/unifrog/storage-full-test-result.txt` after
   each return to safe mode.
+- Developer -> Storage mode test selects one SD profile, switches once, reads
+  all probes, then restores safe mode and writes
+  `/unifrog/storage-mode-test-result.txt`.
 
 The scripts write `/unifrog/smoke-test-result.txt` or
 `/unifrog/perf-test-result.txt` and log `SMOKE ...` or `PERF ...` lines.

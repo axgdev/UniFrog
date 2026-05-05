@@ -94,8 +94,10 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 - Runtime profile switching is diagnostic-only. Storage test keeps a quick
   guarded sweep. Storage full test reads `/ROMS/probes/test*.md`, returns to
   safe mode after each experimental read, and checkpoints the report before the
-  next probe. If an unstable mode wedges inside the MMC command path, software
-  recovery may still fail.
+  next probe. Storage mode test switches to one selected profile, reads all
+  probes, then restores once; use it to separate sustained-read stability from
+  repeated suspend/resume stress. If an unstable mode wedges inside the MMC
+  command path, software recovery may still fail.
 - Experimental SD builds defer file-log flushes during game launch where
   possible and retry storage recovery around frontend, index, and ROM reads.
   This improves observability and transient recovery, but it is not a substitute

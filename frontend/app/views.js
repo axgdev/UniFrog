@@ -306,6 +306,31 @@ function drawScriptList(now) {
   JS2300.video.present();
 }
 
+function drawStorageMode(now) {
+  var i;
+  var idx;
+  var y;
+  var active;
+  JS2300.video.clear(theme.colors.background);
+  topBar("Storage Mode");
+  drawRows(storageModeItems.length, 38, 22, 19);
+  for (i = 0; i < 8; i++) {
+    idx = scroll + i;
+    if (idx >= storageModeItems.length) break;
+    y = 43 + i * 22;
+    active = idx === selected;
+    JS2300.video.text(16, y, storageModeItems[idx].label,
+      active ? theme.text.selected : theme.text.primary);
+    JS2300.video.text(102, y, storageModeItems[idx].detail,
+      active ? theme.text.selectedMuted : theme.text.muted);
+  }
+  drawToast(now);
+  footer("A run   B back   Y log   " +
+    String(storageModeItems.length ? selected + 1 : 0) + "/" +
+    String(storageModeItems.length));
+  JS2300.video.present();
+}
+
 function drawSystemCheck(now) {
   var rows = [];
   var i;
@@ -539,6 +564,7 @@ function draw(now) {
   else if (view === SETTINGS) drawSettings(now);
   else if (view === DEVELOPER) drawDeveloper(now);
   else if (view === SCRIPT_LIST) drawScriptList(now);
+  else if (view === STORAGE_MODE) drawStorageMode(now);
   else if (view === SYSTEM_CHECK) drawSystemCheck(now);
   else drawHome(now);
 }

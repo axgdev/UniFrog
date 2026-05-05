@@ -20,10 +20,20 @@ var developerItems = [
   { id: "perf", label: "Performance test", detail: "Measure JS screens" },
   { id: "storage", label: "Storage test", detail: "Measure SD reads" },
   { id: "storage_full", label: "Storage full test", detail: "Probe SD modes" },
+  { id: "storage_mode", label: "Storage mode test", detail: "Choose SD mode" },
   { id: "exception", label: "Test exception", detail: "Open crash screen" },
   { id: "cpu_exception", label: "CPU exception", detail: "Execute BREAK" },
   { id: "run_core", label: "Run core file", detail: "/unifrog/cores" },
   { id: "scripts", label: "Scripts", detail: "/unifrog/scripts" }
+];
+var storageModeItems = [
+  { id: "safe", label: "safe", detail: "1-bit 25 MHz baseline" },
+  { id: "hs1", label: "hs1", detail: "1-bit high speed" },
+  { id: "uhs12", label: "uhs12", detail: "UHS SDR12" },
+  { id: "uhs25", label: "uhs25", detail: "UHS SDR25" },
+  { id: "wide", label: "wide", detail: "4-bit high speed" },
+  { id: "uhs", label: "uhs", detail: "UHS SDR50 path" },
+  { id: "wide50", label: "wide50", detail: "4-bit 50 MHz cap" }
 ];
 var psxFolders = ["/psx/", "/ps1/", "/playstation/"];
 var coreCatalog = [
