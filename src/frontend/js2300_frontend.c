@@ -28,6 +28,46 @@ void frontend_configure_host(struct js2300_frontend *frontend,
    host->fs_index = host_fs_index;
 }
 
+static void frontend_show_runtime_error(struct js2300_frontend *frontend,
+   int ret)
+{
+   struct unifrog_surface surface;
+   unsigned buffer;
+   char code[32];
+
+   if (!frontend || frontend->fb.width == 0 || frontend->fb.height == 0)
+      return;
+
+   buffer = frontend->fb.current_buffer;
+   if (frontend->fb.buffer_count > 1)
+      buffer = (frontend->fb.current_buffer + 1u) % frontend->fb.buffer_count;
+   surface = unifrog_fb_surface_for_buffer(&frontend->fb, buffer);
+   snprintf(code, sizeof(code), "ret=%d", ret);
+
+   unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height,
+      UNIFROG_RGB565(18, 22, 30));
+   unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, 34,
+      UNIFROG_RGB565(78, 90, 112));
+   unifrog_gfx_draw_text(&surface, 18, 10, "UNIFROG FRONTEND",
+      UNIFROG_RGB565(248, 250, 252), 1);
+   unifrog_gfx_draw_text(&surface, 18, 52, "Frontend could not start",
+      UNIFROG_RGB565(248, 250, 252), 1);
+   unifrog_gfx_draw_text(&surface, 18, 76, code,
+      UNIFROG_RGB565(220, 228, 238), 1);
+   unifrog_gfx_draw_text(&surface, 18, 108, "Check /unifrog/main.js",
+      UNIFROG_RGB565(220, 228, 238), 1);
+   unifrog_gfx_draw_text(&surface, 18, 128, "and bytecode-manifest.txt",
+      UNIFROG_RGB565(220, 228, 238), 1);
+   unifrog_gfx_draw_text(&surface, 18, 164, "See /log.txt for details",
+      UNIFROG_RGB565(170, 190, 214), 1);
+   unifrog_fb_flush_buffer(&frontend->fb, buffer);
+   if (unifrog_fb_pan(&frontend->fb, buffer) == 0) {
+      frontend->fb.current_buffer = buffer;
+      if (unifrog_boot_logo_is_active())
+         unifrog_boot_logo_mark_replaced();
+   }
+}
+
 static int frontend_boot_read_profile_enabled(void)
 {
    const char *profile = UNIFROG_SD_READ_MODE;
@@ -286,6 +326,8 @@ int js2300_frontend_main(void)
          ret = run_requested_action(&frontend);
          unifrog_diag_memory_snapshot("frontend.after_action");
       } else {
+         if (ret != 0)
+            frontend_show_runtime_error(&frontend, ret);
          unifrog_log_flush();
       }
    } while (ret == 0 && frontend.relaunch);
