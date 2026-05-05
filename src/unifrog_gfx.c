@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include <unifrog/text.h>
 
@@ -640,6 +641,29 @@ static int load_ttf_file(const char *path)
    return (int)loaded;
 }
 
+static int font_path_list_has_ttf(const char *path)
+{
+   const char *start = path;
+
+   if (!path)
+      return 0;
+   for (const char *p = path;; p++) {
+      if (*p == ';' || *p == '|' || *p == '\0') {
+         size_t len = (size_t)(p - start);
+
+         if ((len > 4 &&
+              strcasecmp(start + len - 4u, ".ttf") == 0) ||
+             (len > 4 &&
+              strcasecmp(start + len - 4u, ".otf") == 0))
+            return 1;
+         if (*p == '\0')
+            break;
+         start = p + 1u;
+      }
+   }
+   return 0;
+}
+
 int unifrog_gfx_load_font5x7_file(const char *path)
 {
    FILE *file;
@@ -648,8 +672,7 @@ int unifrog_gfx_load_font5x7_file(const char *path)
 
    if (!path || !path[0])
       return -1;
-   if (unifrog_text_ends_with_ci(path, ".ttf") ||
-       unifrog_text_ends_with_ci(path, ".otf"))
+   if (font_path_list_has_ttf(path))
       return load_ttf_file(path);
    file = fopen(path, "rb");
    if (!file)

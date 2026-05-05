@@ -774,7 +774,12 @@ int run_requested_action(struct js2300_frontend *frontend)
    (void)unifrog_log_flush();
    if (strcmp(frontend->action, "run") == 0) {
       uint32_t action_start_ms = unifrog_perf_time_ms();
-      int ret = unifrog_libretro_run_path_ex(frontend->path,
+      int ret;
+
+      printf("js2300 run action close frontend fb before core\n");
+      (void)unifrog_log_flush();
+      unifrog_fb_close(&frontend->fb);
+      ret = unifrog_libretro_run_path_ex(frontend->path,
          &frontend->run_options);
 
       printf("js2300 run action core ret=%d ms=%lu path=%s\n",
@@ -782,8 +787,11 @@ int run_requested_action(struct js2300_frontend *frontend)
          frontend->path);
       unifrog_diag_memory_snapshot("action.core_return");
       (void)unifrog_log_flush();
+      printf("js2300 run action reopen frontend fb after core\n");
+      (void)unifrog_log_flush();
       frontend_fb_reopen(frontend, "libretro_return");
       unifrog_diag_memory_snapshot("action.fb_reopen");
+      (void)unifrog_log_flush();
       frontend->input_recovered = 1;
       return 0;
    }

@@ -786,10 +786,10 @@ print-config:
 deps: deps-sdk deps-mquickjs deps-fonts deps-cores
 
 deps-alpine:
-	apk add git make dtc tcc tcc-libs-static musl-dev ccache curl tar xz zip patch
+	apk add git make dtc tcc tcc-libs-static musl-dev ccache curl tar xz zip patch py3-fonttools
 
 deps-ubuntu:
-	@echo "sudo apt-get update && sudo apt-get install -y git make device-tree-compiler tcc ccache curl xz-utils zip patch"
+	@echo "sudo apt-get update && sudo apt-get install -y git make device-tree-compiler tcc ccache curl xz-utils zip patch python3-fonttools"
 
 deps-sdk:
 	git config --global --add safe.directory "$(abspath .)" 2>/dev/null || true

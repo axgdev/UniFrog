@@ -8,6 +8,10 @@ PACKAGE := $(OUT)/unifrog-frontend
 MQUICKJS_DIR ?= ../.deps/mquickjs
 FONT_SOURCE_DIR ?= ../.deps/fonts
 FONT_DIR := fonts
+FONT_STAGE_DIR := $(OUT)/fonts
+FONT_STAGE_STAMP := $(FONT_STAGE_DIR)/.stamp
+FONT_SUBSET_TEXT := $(OUT)/font-subset.txt
+CJK_FONT_NAMES := NotoSansCJKjp-Regular.otf NotoSansCJKsc-Regular.otf
 USER_DIR := user
 MQUICKJS_ATOM_ALIGN ?= 256
 MQUICKJS_TCC_PATCH ?= ../patches/mquickjs/0001-use-portable-int-overflow-checks.patch
@@ -23,6 +27,8 @@ THEME_FILES := $(shell find $(THEME_DIR) -type f 2>/dev/null)
 DEFAULT_FILES := $(shell find $(DEFAULT_DIR) -type f 2>/dev/null)
 LOCALE_FILES := $(shell find $(LOCALE_DIR) -type f 2>/dev/null)
 FONT_FILES := $(shell find $(FONT_SOURCE_DIR) -maxdepth 1 -type f 2>/dev/null)
+FONT_TEXT_FILES := $(ENTRY_FILES) $(APP_FILES) $(DEFAULT_FILES) $(LOCALE_FILES) \
+	$(filter %.js %.ini %.opt,$(THEME_FILES))
 JS_FILES := $(ENTRY_FILES) $(APP_FILES) \
 	$(filter %.js,$(THEME_FILES)) $(wildcard $(SCRIPT_DIR)/*.js)
 JS_BYTECODE := $(patsubst %.js,$(OUT)/lint/%.mqbc,$(JS_FILES))
@@ -57,7 +63,7 @@ check: $(JS_BYTECODE) $(JS_COMPAT_STAMP)
 	@test -f $(THEME_DIR)/default.ini
 	@echo "OK"
 
-package: check $(JS_PACKAGE_BYTECODE) $(BYTECODE_MANIFEST) $(THEME_FILES) $(DEFAULT_FILES) $(LOCALE_FILES)
+package: check $(JS_PACKAGE_BYTECODE) $(BYTECODE_MANIFEST) $(THEME_FILES) $(DEFAULT_FILES) $(LOCALE_FILES) $(FONT_STAGE_STAMP)
 	@rm -rf $(PACKAGE)
 	@mkdir -p $(PACKAGE)
 	@cp $(ENTRY_FILES) $(PACKAGE)/
@@ -66,9 +72,9 @@ package: check $(JS_PACKAGE_BYTECODE) $(BYTECODE_MANIFEST) $(THEME_FILES) $(DEFA
 	@cp -R $(THEME_DIR)/. $(PACKAGE)/$(THEME_DIR)/
 	@cp -R $(DEFAULT_DIR)/. $(PACKAGE)/$(DEFAULT_DIR)/
 	@cp -R $(LOCALE_DIR)/. $(PACKAGE)/$(LOCALE_DIR)/
-	@if test -d "$(FONT_SOURCE_DIR)" && test -n "$(FONT_FILES)"; then \
+	@if test -d "$(FONT_STAGE_DIR)"; then \
 		mkdir -p "$(PACKAGE)/$(FONT_DIR)"; \
-		cp "$(FONT_SOURCE_DIR)"/* "$(PACKAGE)/$(FONT_DIR)/"; \
+		cp "$(FONT_STAGE_DIR)"/* "$(PACKAGE)/$(FONT_DIR)/"; \
 	fi
 	@cp $(SCRIPT_DIR)/*.js $(PACKAGE)/$(SCRIPT_DIR)/
 	@for f in $(JS_FILES); do \
@@ -76,6 +82,34 @@ package: check $(JS_PACKAGE_BYTECODE) $(BYTECODE_MANIFEST) $(THEME_FILES) $(DEFA
 		cp "$(OUT)/bytecode/$$f.mqbc" "$(PACKAGE)/$$f.mqbc"; \
 	done
 	@cp $(BYTECODE_MANIFEST) $(PACKAGE)/bytecode-manifest.txt
+
+$(FONT_SUBSET_TEXT): $(FONT_TEXT_FILES) | $(OUT)
+	@cat $(FONT_TEXT_FILES) > $@
+
+$(FONT_STAGE_STAMP): $(FONT_FILES) $(FONT_SUBSET_TEXT) | $(OUT)
+	@rm -rf "$(FONT_STAGE_DIR)"
+	@mkdir -p "$(FONT_STAGE_DIR)"
+	@if test -d "$(FONT_SOURCE_DIR)" && test -n "$(FONT_FILES)"; then \
+		for src in "$(FONT_SOURCE_DIR)"/*; do \
+			name="$$(basename "$$src")"; \
+			case " $(CJK_FONT_NAMES) " in \
+				*" $$name "*) \
+					if command -v pyftsubset >/dev/null 2>&1; then \
+						pyftsubset "$$src" \
+							--text-file="$(FONT_SUBSET_TEXT)" \
+							--unicodes=U+0020-007E,U+00A0-00FF \
+							--layout-features='*' \
+							--no-hinting \
+							--output-file="$(FONT_STAGE_DIR)/$$name"; \
+					else \
+						echo "warning: pyftsubset missing; packaging full $$name" >&2; \
+						cp "$$src" "$(FONT_STAGE_DIR)/$$name"; \
+					fi ;; \
+				*) cp "$$src" "$(FONT_STAGE_DIR)/$$name" ;; \
+			esac; \
+		done; \
+	fi
+	@touch $@
 
 clean:
 	@rm -rf $(OUT)

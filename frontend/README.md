@@ -101,11 +101,13 @@ Icon keys such as `icon_gba`, `icon_snes`, `icon_media`, and `icon_settings`
 accept absolute paths or paths relative to `icon_root`.
 
 `make deps-fonts` fetches permissively licensed Noto fonts into `.deps/fonts`;
-`make -C frontend package` includes them as `/unifrog/fonts` when present. The
-default theme loads the Latin/Greek/Cyrillic Noto Sans file only to keep normal
-startup memory low. Users and language-specific themes can add Arabic,
-Devanagari, Bengali, Tamil, Telugu, Japanese, or CJK fallback files when they
-need those scripts.
+`make -C frontend package` includes them as `/unifrog/fonts` when present. CJK
+fonts are subsetted at package time to the glyphs used by shipped UI strings
+and labels, keeping the SD package small while preserving the full source fonts
+in `.deps/fonts`. The default theme loads the Latin/Greek/Cyrillic Noto Sans
+file only to keep normal startup memory low. Users and language-specific themes
+can add Arabic, Devanagari, Bengali, Tamil, Telugu, Japanese, or CJK fallback
+files when they need those scripts.
 
 System icons live under `/unifrog/themes/system-icons/icons`. The packaged
 library subdirectory contains optimized cropped console images from the source
