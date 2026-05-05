@@ -721,6 +721,10 @@ static void host_configure_options(
    host.options.frameskip = sanitize_frameskip(host.options.frameskip);
    host.options.display_mode = sanitize_display_mode(host.options.display_mode);
    host.options.core_id[sizeof(host.options.core_id) - 1] = '\0';
+   host.options.sd_read_profile[sizeof(host.options.sd_read_profile) - 1] =
+      '\0';
+   if (!libretro_read_profile_enabled(host.options.sd_read_profile))
+      host.options.sd_read_profile[0] = '\0';
 
    host.audio_enabled = host.options.audio_enabled;
    host.audio_gain = host.options.audio_gain;

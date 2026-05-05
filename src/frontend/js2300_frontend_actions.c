@@ -458,7 +458,7 @@ int host_action(void *opaque, const char *id)
          unifrog_platform_set_storage_log_suspended(1);
          storage_quiet = 1;
       }
-      printf("js2300 action run warm path=%s core=%s corefile=%s audio=%d gain=%u scpu=%u ge=%d backlight=%d fs=%d display=%d\n",
+      printf("js2300 action run warm path=%s core=%s corefile=%s audio=%d gain=%u scpu=%u ge=%d backlight=%d fs=%d display=%d fastsd=%s\n",
          path,
          frontend->run_options.core_id[0] ?
             frontend->run_options.core_id : "auto",
@@ -468,10 +468,13 @@ int host_action(void *opaque, const char *id)
          frontend->run_options.scpu_mhz, frontend->run_options.ge_clock,
          frontend->run_options.backlight_level,
          frontend->run_options.frameskip,
-         frontend->run_options.display_mode);
+         frontend->run_options.display_mode,
+         frontend->run_options.sd_read_profile[0] ?
+            frontend->run_options.sd_read_profile : "default");
       unifrog_diag_memory_snapshot("frontend.warm_run_start");
       if (!UNIFROG_SD_EXPERIMENTAL)
          (void)unifrog_log_flush();
+      unifrog_fb_close(&frontend->fb);
       start_ms = unifrog_perf_time_ms();
       ret = unifrog_libretro_run_path_ex(path, &frontend->run_options);
       printf("js2300 action run warm ret=%d ms=%lu path=%s\n",

@@ -24,6 +24,7 @@ NOTO_SANS_TAMIL_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted/t
 NOTO_SANS_TELUGU_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansTelugu/NotoSansTelugu-Regular.ttf
 NOTO_SANS_CJK_URL ?= https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf
 NOTO_SANS_JP_URL ?= https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf
+DROID_SANS_FALLBACK_URL ?= https://android.googlesource.com/platform/frameworks/base/+/android13-qpr1-s5-release/data/fonts/DroidSansFallback.ttf?format=TEXT
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 SD_MODE ?= safe
@@ -820,6 +821,10 @@ deps-fonts:
 		url="$$1"; out="$(FONT_DIR)/$$2"; \
 		if test -f "$$out"; then echo "  REUSE   $$out"; \
 		else echo "  FETCH   $$out"; curl -fsSL "$$url" -o "$$out"; fi; \
+	}; fetch_android_font() { \
+		url="$$1"; out="$(FONT_DIR)/$$2"; \
+		if test -f "$$out"; then echo "  REUSE   $$out"; \
+		else echo "  FETCH   $$out"; curl -fsSL "$$url" | base64 -d > "$$out"; fi; \
 	}; \
 	fetch_font "$(NOTO_SANS_URL)" NotoSans-Regular.ttf; \
 	fetch_font "$(NOTO_SANS_ARABIC_URL)" NotoSansArabic-Regular.ttf; \
@@ -828,7 +833,8 @@ deps-fonts:
 	fetch_font "$(NOTO_SANS_TAMIL_URL)" NotoSansTamil-Regular.ttf; \
 	fetch_font "$(NOTO_SANS_TELUGU_URL)" NotoSansTelugu-Regular.ttf; \
 	fetch_font "$(NOTO_SANS_CJK_URL)" NotoSansCJKsc-Regular.otf; \
-	fetch_font "$(NOTO_SANS_JP_URL)" NotoSansCJKjp-Regular.otf
+	fetch_font "$(NOTO_SANS_JP_URL)" NotoSansCJKjp-Regular.otf; \
+	fetch_android_font "$(DROID_SANS_FALLBACK_URL)" DroidSansFallback.ttf
 
 deps-status:
 	@set -e; \
