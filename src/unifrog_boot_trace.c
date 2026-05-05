@@ -72,18 +72,6 @@ static const char *boot_trace_name(uint32_t event)
       return "fastboot.stage1.jump";
    case FASTBOOT_TRACE_STAGE1_FAIL:
       return "fastboot.stage1.fail";
-   case FASTBOOT_TRACE_STAGE1_LOGO_BEGIN:
-      return "fastboot.stage1.logo_begin";
-   case FASTBOOT_TRACE_STAGE1_LOGO_GPIO_READY:
-      return "fastboot.stage1.logo_gpio_ready";
-   case FASTBOOT_TRACE_STAGE1_LOGO_PANEL_READY:
-      return "fastboot.stage1.logo_panel_ready";
-   case FASTBOOT_TRACE_STAGE1_LOGO_DRAW_DONE:
-      return "fastboot.stage1.logo_draw_done";
-   case FASTBOOT_TRACE_STAGE1_LOGO_BACKLIGHT_ON:
-      return "fastboot.stage1.logo_backlight_on";
-   case FASTBOOT_TRACE_STAGE1_LOGO_SKIPPED:
-      return "fastboot.stage1.logo_skipped";
    case FASTBOOT_TRACE_UNIFROG_MAIN_START:
       return "unifrog.main.start";
    case FASTBOOT_TRACE_UNIFROG_APP_MAIN_START:

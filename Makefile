@@ -20,7 +20,6 @@ PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 SD_MODE ?= safe
 SD_READ_MODE ?= $(if $(filter safe,$(SD_MODE)),uhs25,boot)
 HCRTOS_MEDIA ?= module
-FASTBOOT_BOOT_LOGO ?= 1
 
 -include config.mk
 
@@ -348,7 +347,6 @@ APP_OBJECTS := \
 BUILD_IDENTITY_STAMP := $(BUILD)/build-identity.stamp
 BUILD_IDENTITY_OBJECTS := \
 	$(BUILD)/main.o \
-	$(BUILD)/frontend/js2300_frontend_actions.o \
 	$(BUILD)/unifrog_libretro_host.o \
 	$(BUILD)/unifrog_platform.o
 
@@ -418,7 +416,6 @@ FASTBOOT_STUB_BIN := $(BUILD)/fastboot/stub.bin
 FASTBOOT_STAGE_OBJ := $(BUILD)/fastboot/stage1.o
 FASTBOOT_STAGE_ENTRY_OBJ := $(BUILD)/fastboot/stage_entry.o
 FASTBOOT_STUB_OBJ := $(BUILD)/fastboot/stub.o
-FASTBOOT_LOGO_INC := assets/boot/unifrog-logo-rgb565.inc
 GAMBATTE_CORE_LIB := $(CORES)/output/gambatte_libretro_sf2000.a
 GPSP_CORE_LIB := $(CORES)/output/gpsp_libretro_sf2000.a
 PICODRIVE_CORE_LIB := $(CORES)/output/picodrive_libretro_sf2000.a
@@ -543,8 +540,7 @@ CORE_MODULE_LDLIBS := \
 FASTBOOT_CFLAGS := -EL $(ARCH_CFLAGS) -Os -pipe -msoft-float -fsigned-char -W \
 	-ffunction-sections -fdata-sections -G0 \
 	-ffreestanding -fno-builtin -fno-pic -mno-abicalls \
-	-nostdinc -I$(GCC_LIBDIR)/include \
-	-DFASTBOOT_BOOT_LOGO=$(FASTBOOT_BOOT_LOGO)
+	-nostdinc -I$(GCC_LIBDIR)/include
 
 ifeq ($(EMBED_DTB),1)
 APP_OBJECTS += $(DTB_OBJ)
@@ -627,7 +623,6 @@ print-config:
 	@echo "SD_MODE=$(SD_MODE)"
 	@echo "SD_READ_MODE=$(SD_READ_MODE)"
 	@echo "HCRTOS_MEDIA=$(HCRTOS_MEDIA)"
-	@echo "FASTBOOT_BOOT_LOGO=$(FASTBOOT_BOOT_LOGO)"
 	@echo "SD_CLOCK_FREQUENCY=$(SD_CLOCK_FREQUENCY)"
 	@echo "SD_BUS_WIDTH=$(SD_BUS_WIDTH)"
 	@echo "SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED)"
@@ -944,7 +939,7 @@ $(BUILD)/%.o: src/%.S | $(BUILD)
 	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) $(CFLAGS) -D__ASSEMBLY__ -MD -MP -c $< -o $@
 
-$(FASTBOOT_STAGE_OBJ): src/fastboot/stage1.c $(FASTBOOT_LOGO_INC) | $(BUILD)
+$(FASTBOOT_STAGE_OBJ): src/fastboot/stage1.c | $(BUILD)
 	@echo "  CC      $<"
 	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) $(FASTBOOT_CFLAGS) -MD -MP -c $< -o $@

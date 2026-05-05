@@ -29,8 +29,6 @@ SECTIONS
 		__bss_end = .;
 	}
 
-	ASSERT(__bss_end <= 0x87fff700, "fastboot stage overlaps trace area")
-
 	/DISCARD/ : {
 		*(.MIPS.abiflags)
 		*(.reginfo)
