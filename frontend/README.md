@@ -100,6 +100,9 @@ UI:
 - Developer -> Storage test runs the native quick SD profile sweep, prefers
   `/ROMS/test.md` when present, shows the risky SD stage on screen, and writes
   `/unifrog/storage-test-result.txt`.
+- Developer -> Storage full test reads `/ROMS/probes/test*.md` across runtime
+  SD profiles and checkpoints `/unifrog/storage-full-test-result.txt` after
+  each return to safe mode.
 
-They write `/unifrog/smoke-test-result.txt` or
+The scripts write `/unifrog/smoke-test-result.txt` or
 `/unifrog/perf-test-result.txt` and log `SMOKE ...` or `PERF ...` lines.

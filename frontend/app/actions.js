@@ -149,6 +149,7 @@ function openDeveloperItem(now) {
   else if (id === "smoke") runAction("script:" + SCRIPT_DIR + "/smoke-test.js", now);
   else if (id === "perf") runAction("script:" + SCRIPT_DIR + "/perf-test.js", now);
   else if (id === "storage") runAction("developer:storage_test", now);
+  else if (id === "storage_full") runAction("developer:storage_full_test", now);
   else if (id === "exception") runAction("developer:exception", now);
   else if (id === "cpu_exception") runAction("developer:cpu_exception", now);
   else if (id === "run_core") {

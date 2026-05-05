@@ -19,6 +19,7 @@ var developerItems = [
   { id: "smoke", label: "Smoke test", detail: "Run packaged diagnostics" },
   { id: "perf", label: "Performance test", detail: "Measure JS screens" },
   { id: "storage", label: "Storage test", detail: "Measure SD reads" },
+  { id: "storage_full", label: "Storage full test", detail: "Probe SD modes" },
   { id: "exception", label: "Test exception", detail: "Open crash screen" },
   { id: "cpu_exception", label: "CPU exception", detail: "Execute BREAK" },
   { id: "run_core", label: "Run core file", detail: "/unifrog/cores" },

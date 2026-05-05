@@ -73,9 +73,12 @@ progress on screen, prefers `/ROMS/test.md` when present, verifies a safe
 remount first, switches profiles through the SD bus suspend/resume hooks, tries
 `hs1`, `wide50`, `uhs12`, `uhs25`, `wide`, and `uhs`, then restores the safe
 boot profile before writing `/unifrog/storage-test-result.txt` and the frontend
-report. The on-screen stage is the best freeze clue; warm reboot diagnostics may
-also keep it, but a full power cycle can overwrite that memory. Fixed-profile
-diagnostic boot builds are still available with
+report. Developer -> Storage full test uses `/ROMS/probes/test*.md`, restores
+the safe profile after each experimental read, and checkpoints
+`/unifrog/storage-full-test-result.txt` between modes. The on-screen stage is
+the best freeze clue; warm reboot diagnostics may also keep it, but a full
+power cycle can overwrite that memory. Fixed-profile diagnostic boot builds are
+still available with
 `SD_MODE=hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, or `uhs`; these modes are
 experimental. Device logs rotate to `log-prev.txt` when `log.txt` grows past
 1 MiB. The board DTS in

@@ -91,12 +91,11 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 - SD cards support 1-bit and 4-bit transfer widths here. The HCRTOS MMC driver
   reports invalid `bus-width` values, so 2-bit and 3-bit profiles are not valid
   experiments.
-- Runtime profile switching is diagnostic-only. The storage test stops file
-  logging, flushes safe-mode probe files, force-unmounts the filesystem,
-  restarts the MMC host with patched runtime caps, remounts for short read
-  probes, and restores the saved boot profile before any final file writes. It
-  does not use lazy unmount before stopping the MMC host. If an unstable mode
-  wedges inside the MMC command path, software recovery may still fail.
+- Runtime profile switching is diagnostic-only. Storage test keeps a quick
+  guarded sweep. Storage full test reads `/ROMS/probes/test*.md`, returns to
+  safe mode after each experimental read, and checkpoints the report before the
+  next probe. If an unstable mode wedges inside the MMC command path, software
+  recovery may still fail.
 - Experimental SD builds defer file-log flushes during game launch where
   possible and retry storage recovery around frontend, index, and ROM reads.
   This improves observability and transient recovery, but it is not a substitute

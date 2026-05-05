@@ -72,6 +72,8 @@
    JS2300_FRONTEND_APP_ROOT "/system-check.txt"
 #define JS2300_FRONTEND_STORAGE_TEST_REPORT \
    JS2300_FRONTEND_APP_ROOT "/storage-test-result.txt"
+#define JS2300_FRONTEND_STORAGE_FULL_TEST_REPORT \
+   JS2300_FRONTEND_APP_ROOT "/storage-full-test-result.txt"
 #define JS2300_FRONTEND_STORAGE_TEST_PROBE \
    JS2300_FRONTEND_APP_ROOT "/storage-test-probe.txt"
 #define JS2300_FRONTEND_ICON_CACHE 24u

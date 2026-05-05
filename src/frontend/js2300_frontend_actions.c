@@ -432,6 +432,12 @@ struct storage_test_result {
    int err;
 };
 
+struct storage_probe_file {
+   const char *label;
+   const char *path;
+   size_t chunk_size;
+};
+
 static void storage_test_append(char *dst, size_t dst_size, size_t *used,
    const char *fmt, ...)
 {
@@ -621,8 +627,8 @@ static int storage_test_read_file(const struct storage_test_case *test,
    return ret;
 }
 
-#define STORAGE_TEST_MAX_CASES 8u
-#define STORAGE_TEST_REPORT_BYTES 16384u
+#define STORAGE_TEST_MAX_CASES 12u
+#define STORAGE_TEST_REPORT_BYTES 49152u
 #define STORAGE_TEST_PROFILE_REPORT_BYTES 4096u
 #define STORAGE_TEST_SWITCH_ATTEMPTS 10u
 #define STORAGE_TEST_SWITCH_DELAY_MS 100u
@@ -631,6 +637,8 @@ static int storage_test_read_file(const struct storage_test_case *test,
 #define STORAGE_TEST_SWEEP_INDEX_BYTES (512u * 1024u)
 #define STORAGE_TEST_FULL_INDEX_BYTES (16u * 1024u * 1024u)
 #define STORAGE_TEST_FULL_INDEX_LARGE_BYTES (32u * 1024u * 1024u)
+
+static const char *storage_test_active_title = "Storage test";
 
 static void storage_test_progress(struct js2300_frontend *frontend,
    const char *title, const char *line1, const char *line2)
@@ -656,7 +664,7 @@ static void storage_test_platform_stage(void *userdata,
    snprintf(line, sizeof(line), "%s: %s",
       operation ? operation : "sd",
       stage ? stage : "");
-   storage_test_progress(frontend, "Storage test", line,
+   storage_test_progress(frontend, storage_test_active_title, line,
       "Screen shows the last risky stage");
 }
 
@@ -768,6 +776,49 @@ static unsigned storage_test_build_cases(struct storage_test_case *tests,
    return test_count;
 }
 
+static unsigned storage_test_build_probe_cases(struct storage_test_case *tests,
+   unsigned max_tests, unsigned *out_known_count, unsigned long *out_total_bytes)
+{
+   static const struct storage_probe_file probes[] = {
+      { "probe 1K", "/media/mmcblk0/ROMS/probes/test.md", 1024u },
+      { "probe 128K", "/media/mmcblk0/ROMS/probes/test128.md", 32u * 1024u },
+      { "probe 512K", "/media/mmcblk0/ROMS/probes/test512.md", 64u * 1024u },
+      { "probe 1M", "/media/mmcblk0/ROMS/probes/test1M.md", 128u * 1024u },
+      { "probe 2M", "/media/mmcblk0/ROMS/probes/test2M.md", 128u * 1024u },
+      { "probe 5M", "/media/mmcblk0/ROMS/probes/test5M.md", 256u * 1024u },
+      { "probe 10M", "/media/mmcblk0/ROMS/probes/test10M.md", 256u * 1024u },
+      { "probe 20M", "/media/mmcblk0/ROMS/probes/test20M.md", 256u * 1024u },
+      { "probe 50M", "/media/mmcblk0/ROMS/probes/test50M.md", 256u * 1024u },
+   };
+   unsigned test_count = 0;
+   unsigned long total_bytes = 0;
+
+   if (!tests || !max_tests)
+      return 0;
+   memset(tests, 0, sizeof(*tests) * max_tests);
+
+   for (unsigned i = 0; i < sizeof(probes) / sizeof(probes[0]); i++) {
+      struct stat st;
+
+      if (test_count >= max_tests)
+         break;
+      if (stat(probes[i].path, &st) != 0 || !S_ISREG(st.st_mode))
+         continue;
+      tests[test_count].label = probes[i].label;
+      tests[test_count].path = probes[i].path;
+      tests[test_count].chunk_size = probes[i].chunk_size;
+      tests[test_count].byte_limit = (size_t)st.st_size;
+      total_bytes += (unsigned long)st.st_size;
+      test_count++;
+   }
+
+   if (out_known_count)
+      *out_known_count = test_count;
+   if (out_total_bytes)
+      *out_total_bytes = total_bytes;
+   return test_count;
+}
+
 static void storage_test_write_probe_file(
    const struct storage_test_case *tests, unsigned test_count,
    unsigned known_count, const char *indexed_path, unsigned long indexed_size,
@@ -784,7 +835,7 @@ static void storage_test_write_probe_file(
       "known=%u\n"
       "indexed=%s\n"
       "indexed_bytes=%lu\n"
-      "note=Runtime switch stages are also written to persistent RAM and logged on next boot as fastboot diag stage=0x53445254.\n",
+      "note=Runtime switch stages are shown on screen; long tests checkpoint the report only after returning to safe storage.\n",
       UNIFROG_SD_MODE,
       runtime_supported,
       runtime_sweep,
@@ -807,6 +858,40 @@ static void storage_test_write_probe_file(
       probe, used);
 }
 
+static void storage_test_checkpoint_report(const char *report_path,
+   const char *report, size_t report_used, int update_frontend_report)
+{
+   if (!report_path || !report || report_used == 0)
+      return;
+
+   unifrog_platform_set_storage_log_suspended(0);
+   (void)unifrog_log_flush_force();
+   (void)storage_test_write_file(report_path, report, report_used);
+   if (update_frontend_report)
+      (void)storage_test_write_file(JS2300_FRONTEND_SYSTEM_CHECK_REPORT,
+         report, report_used);
+   (void)unifrog_log_flush_force();
+   unifrog_platform_set_storage_log_suspended(1);
+}
+
+static int storage_test_restore_safe(struct js2300_frontend *frontend,
+   const char *line1, const char *line2, char *detail, size_t detail_size)
+{
+   int ret;
+
+   if (detail && detail_size)
+      detail[0] = '\0';
+   storage_test_progress(frontend, storage_test_active_title, line1, line2);
+   ret = unifrog_platform_sd_restore_boot(STORAGE_TEST_SWITCH_ATTEMPTS,
+      STORAGE_TEST_SWITCH_DELAY_MS, detail, detail_size);
+   if (ret != 0) {
+      msleep(500);
+      ret = unifrog_platform_sd_restore_boot(STORAGE_TEST_SWITCH_ATTEMPTS,
+         STORAGE_TEST_SWITCH_DELAY_MS, detail, detail_size);
+   }
+   return ret;
+}
+
 static void storage_test_run_profile(struct js2300_frontend *frontend,
    const char *profile,
    const char *switch_detail, const struct storage_test_case *tests,
@@ -827,7 +912,7 @@ static void storage_test_run_profile(struct js2300_frontend *frontend,
 
       snprintf(progress_line, sizeof(progress_line), "%s  %u/%u",
          profile, i + 1u, test_count);
-      storage_test_progress(frontend, "Storage test", progress_line,
+      storage_test_progress(frontend, storage_test_active_title, progress_line,
          tests[i].label);
 
       if (storage_test_read_file(&tests[i], &result) == 0) {
@@ -896,7 +981,7 @@ static int run_storage_test(struct js2300_frontend *frontend)
    struct storage_test_case tests[STORAGE_TEST_MAX_CASES];
    char unique_paths[4][JS2300_FRONTEND_MAX_PATH];
    char indexed_path[JS2300_FRONTEND_MAX_PATH];
-   char report[STORAGE_TEST_REPORT_BYTES];
+   char *report;
    size_t report_used = 0;
    size_t old_auto_flush;
    unsigned known_count = 0;
@@ -908,7 +993,17 @@ static int run_storage_test(struct js2300_frontend *frontend)
    int runtime_supported;
    uint32_t start_ms;
 
-   storage_test_progress(frontend, "Storage test", "Preparing safe baseline",
+   storage_test_active_title = "Storage test";
+   report = malloc(STORAGE_TEST_REPORT_BYTES);
+   if (!report) {
+      storage_test_progress(frontend, storage_test_active_title,
+         "Out of memory", "Cannot allocate report buffer");
+      return -1;
+   }
+   report[0] = '\0';
+
+   storage_test_progress(frontend, storage_test_active_title,
+      "Preparing safe baseline",
       "Runtime sweep uses short reads");
    runtime_supported = unifrog_platform_sd_runtime_supported();
    runtime_sweep = runtime_supported &&
@@ -918,7 +1013,7 @@ static int run_storage_test(struct js2300_frontend *frontend)
       &indexed_size, runtime_sweep);
 
    if (test_count == 0) {
-      storage_test_append(report, sizeof(report), &report_used,
+      storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
          "show=1\n"
          "title=STORAGE TEST\n"
          "detail=No readable benchmark files\n"
@@ -928,6 +1023,7 @@ static int run_storage_test(struct js2300_frontend *frontend)
       storage_test_write_file(JS2300_FRONTEND_SYSTEM_CHECK_REPORT,
          report, report_used);
       (void)unifrog_log_flush();
+      free(report);
       return 0;
    }
 
@@ -946,7 +1042,7 @@ static int run_storage_test(struct js2300_frontend *frontend)
    unifrog_platform_set_storage_log_suspended(1);
    start_ms = unifrog_perf_time_ms();
 
-   storage_test_append(report, sizeof(report), &report_used,
+   storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
       "show=1\n"
       "title=STORAGE TEST\n");
 
@@ -956,25 +1052,26 @@ static int run_storage_test(struct js2300_frontend *frontend)
       int restore_ret;
 
       storage_test_run_profile(frontend, "boot", "safe boot", tests, test_count,
-         report, sizeof(report), &report_used, &pass_count, &fail_count);
+         report, STORAGE_TEST_REPORT_BYTES, &report_used, &pass_count,
+         &fail_count);
 
       restore_detail[0] = '\0';
-      storage_test_progress(frontend, "Storage test", "Safe restart",
+      storage_test_progress(frontend, storage_test_active_title, "Safe restart",
          "Unmount and remount safe mode");
       safe_restart_ret = unifrog_platform_sd_restore_boot(
          STORAGE_TEST_SWITCH_ATTEMPTS, STORAGE_TEST_SWITCH_DELAY_MS,
          restore_detail, sizeof(restore_detail));
       if (safe_restart_ret != 0) {
          fail_count++;
-         storage_test_append(report, sizeof(report), &report_used,
+         storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
             "item|FAIL|Safe restart|Skipping experimental profiles|%s\n",
             restore_detail);
       } else {
-         storage_test_append(report, sizeof(report), &report_used,
+         storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
             "item|OK|Safe restart|Unmount/remount path works|%s\n",
             restore_detail);
          storage_test_run_profile(frontend, "safe-restart", restore_detail,
-            tests, test_count, report, sizeof(report), &report_used,
+            tests, test_count, report, STORAGE_TEST_REPORT_BYTES, &report_used,
             &pass_count, &fail_count);
 
          for (unsigned i = 0;
@@ -986,14 +1083,16 @@ static int run_storage_test(struct js2300_frontend *frontend)
             switch_detail[0] = '\0';
             snprintf(progress_line, sizeof(progress_line), "Switch to %s",
                runtime_profiles[i]);
-            storage_test_progress(frontend, "Storage test", progress_line,
+            storage_test_progress(frontend, storage_test_active_title,
+               progress_line,
                "Storage is unmounted during switch");
             switch_ret = unifrog_platform_sd_apply_profile(runtime_profiles[i],
                STORAGE_TEST_SWITCH_ATTEMPTS, STORAGE_TEST_SWITCH_DELAY_MS,
                switch_detail, sizeof(switch_detail));
             if (switch_ret != 0) {
                fail_count++;
-               storage_test_append(report, sizeof(report), &report_used,
+               storage_test_append(report, STORAGE_TEST_REPORT_BYTES,
+                  &report_used,
                   "item|FAIL|Profile %s|switch failed|%s\n",
                   runtime_profiles[i], switch_detail);
                (void)unifrog_platform_sd_restore_boot(
@@ -1003,30 +1102,23 @@ static int run_storage_test(struct js2300_frontend *frontend)
             }
 
             storage_test_run_profile(frontend, runtime_profiles[i],
-               switch_detail, tests, test_count, report, sizeof(report),
-               &report_used, &pass_count, &fail_count);
+               switch_detail, tests, test_count, report,
+               STORAGE_TEST_REPORT_BYTES, &report_used, &pass_count,
+               &fail_count);
          }
       }
 
       restore_detail[0] = '\0';
-      storage_test_progress(frontend, "Storage test", "Restoring safe mode",
-         "Final report will be written after this");
-      restore_ret = unifrog_platform_sd_restore_boot(
-         STORAGE_TEST_SWITCH_ATTEMPTS, STORAGE_TEST_SWITCH_DELAY_MS,
+      restore_ret = storage_test_restore_safe(frontend, "Restoring safe mode",
+         "Final report will be written after this",
          restore_detail, sizeof(restore_detail));
       if (restore_ret != 0) {
-         msleep(500);
-         restore_ret = unifrog_platform_sd_restore_boot(
-            STORAGE_TEST_SWITCH_ATTEMPTS, STORAGE_TEST_SWITCH_DELAY_MS,
-            restore_detail, sizeof(restore_detail));
-      }
-      if (restore_ret != 0) {
          fail_count++;
-         storage_test_append(report, sizeof(report), &report_used,
+         storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
             "item|FAIL|Restore safe boot|storage may still be unavailable|%s\n",
             restore_detail);
       } else {
-         storage_test_append(report, sizeof(report), &report_used,
+         storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
             "item|OK|Restore safe boot|Ready for report flush|%s\n",
             restore_detail);
       }
@@ -1036,11 +1128,11 @@ static int run_storage_test(struct js2300_frontend *frontend)
       snprintf(detail, sizeof(detail), "mode %s%s", UNIFROG_SD_MODE,
          runtime_supported ? "" : " runtime switch unavailable");
       storage_test_run_profile(frontend, UNIFROG_SD_MODE, detail, tests,
-         test_count,
-         report, sizeof(report), &report_used, &pass_count, &fail_count);
+         test_count, report, STORAGE_TEST_REPORT_BYTES, &report_used,
+         &pass_count, &fail_count);
    }
 
-   storage_test_append(report, sizeof(report), &report_used,
+   storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
       "detail=%s  %u ok  %u failed  %lu ms\n",
       runtime_sweep ? "safe boot runtime sweep" : "single profile",
       pass_count, fail_count,
@@ -1051,7 +1143,7 @@ static int run_storage_test(struct js2300_frontend *frontend)
    unifrog_platform_set_storage_log_suspended(0);
    unifrog_platform_set_storage_stage_callback(NULL, NULL);
 
-   storage_test_progress(frontend, "Storage test", "Writing report",
+   storage_test_progress(frontend, storage_test_active_title, "Writing report",
       runtime_sweep ? "Safe runtime sweep complete" : "Single profile complete");
    storage_test_write_file(JS2300_FRONTEND_STORAGE_TEST_REPORT,
       report, report_used);
@@ -1062,6 +1154,261 @@ static int run_storage_test(struct js2300_frontend *frontend)
       (unsigned long)(unifrog_perf_time_ms() - start_ms),
       JS2300_FRONTEND_STORAGE_TEST_REPORT);
    (void)unifrog_log_flush();
+   free(report);
+   return 0;
+}
+
+static int run_storage_full_test(struct js2300_frontend *frontend)
+{
+   static const char *runtime_profiles[] = {
+      "hs1",
+      "uhs12",
+      "uhs25",
+      "wide",
+      "uhs",
+      "wide50",
+   };
+   struct storage_test_case tests[STORAGE_TEST_MAX_CASES];
+   char *report;
+   size_t report_used = 0;
+   size_t old_auto_flush;
+   unsigned probe_count = 0;
+   unsigned test_count = 0;
+   unsigned pass_count = 0;
+   unsigned fail_count = 0;
+   unsigned long probe_bytes = 0;
+   int runtime_sweep;
+   int runtime_supported;
+   int storage_safe = 1;
+   int abort_sweep = 0;
+   uint32_t start_ms;
+
+   storage_test_active_title = "Storage full test";
+   report = malloc(STORAGE_TEST_REPORT_BYTES);
+   if (!report) {
+      storage_test_progress(frontend, storage_test_active_title,
+         "Out of memory", "Cannot allocate report buffer");
+      return -1;
+   }
+   report[0] = '\0';
+
+   storage_test_progress(frontend, storage_test_active_title,
+      "Finding probe files", "/ROMS/probes");
+   runtime_supported = unifrog_platform_sd_runtime_supported();
+   runtime_sweep = runtime_supported &&
+      strcmp(UNIFROG_SD_MODE, "safe") == 0;
+   test_count = storage_test_build_probe_cases(tests, STORAGE_TEST_MAX_CASES,
+      &probe_count, &probe_bytes);
+
+   if (test_count == 0) {
+      storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+         "show=1\n"
+         "title=STORAGE FULL TEST\n"
+         "detail=No /ROMS/probes files found\n"
+         "item|FAIL|Probe files|Expected /ROMS/probes/test*.md|No files found\n");
+      storage_test_write_file(JS2300_FRONTEND_STORAGE_FULL_TEST_REPORT,
+         report, report_used);
+      storage_test_write_file(JS2300_FRONTEND_SYSTEM_CHECK_REPORT,
+         report, report_used);
+      (void)unifrog_log_flush();
+      free(report);
+      return 0;
+   }
+
+   printf("unifrog storage_full_test begin mode=%s runtime_supported=%d runtime_sweep=%d tests=%u probe_bytes=%lu\n",
+      UNIFROG_SD_MODE, runtime_supported, runtime_sweep, test_count,
+      probe_bytes);
+
+   storage_test_write_probe_file(tests, test_count, probe_count, "",
+      probe_bytes, runtime_supported, runtime_sweep);
+   (void)unifrog_log_flush();
+   old_auto_flush = unifrog_log_auto_flush_bytes();
+   unifrog_log_set_auto_flush_bytes(0);
+   unifrog_log_defer_begin();
+   unifrog_platform_set_storage_stage_callback(storage_test_platform_stage,
+      frontend);
+   unifrog_platform_set_storage_log_suspended(1);
+   start_ms = unifrog_perf_time_ms();
+
+   storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+      "show=1\n"
+      "title=STORAGE FULL TEST\n"
+      "item|OK|Probe files|%u files  %lu bytes|Checkpoint after each safe restore\n",
+      test_count, probe_bytes);
+
+   if (runtime_sweep) {
+      char restore_detail[192];
+      int safe_restart_ret;
+
+      storage_test_run_profile(frontend, "boot", "safe boot", tests,
+         test_count, report, STORAGE_TEST_REPORT_BYTES, &report_used,
+         &pass_count, &fail_count);
+      storage_test_checkpoint_report(JS2300_FRONTEND_STORAGE_FULL_TEST_REPORT,
+         report, report_used, 1);
+
+      safe_restart_ret = storage_test_restore_safe(frontend, "Safe restart",
+         "Unmount and remount safe mode", restore_detail,
+         sizeof(restore_detail));
+      if (safe_restart_ret != 0) {
+         fail_count++;
+         storage_safe = 0;
+         storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+            "item|FAIL|Safe restart|Skipping experimental profiles|%s\n",
+            restore_detail);
+      } else {
+         storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+            "item|OK|Safe restart|Unmount/remount path works|%s\n",
+            restore_detail);
+         storage_test_run_profile(frontend, "safe-restart", restore_detail,
+            tests, test_count, report, STORAGE_TEST_REPORT_BYTES, &report_used,
+            &pass_count, &fail_count);
+         storage_test_checkpoint_report(
+            JS2300_FRONTEND_STORAGE_FULL_TEST_REPORT, report, report_used, 1);
+
+         for (unsigned i = 0;
+              i < sizeof(runtime_profiles) / sizeof(runtime_profiles[0]) &&
+                 !abort_sweep;
+              i++) {
+            for (unsigned j = 0; j < test_count; j++) {
+               char switch_detail[192];
+               char restore_line[192];
+               char progress_line[96];
+               unsigned fail_before_read;
+               int read_failed;
+               int switch_ret;
+               int restore_ret;
+
+               switch_detail[0] = '\0';
+               snprintf(progress_line, sizeof(progress_line), "%s %s",
+                  runtime_profiles[i], tests[j].label);
+               storage_test_progress(frontend, storage_test_active_title,
+                  progress_line, "Switching from safe mode");
+               switch_ret = unifrog_platform_sd_apply_profile(
+                  runtime_profiles[i], STORAGE_TEST_SWITCH_ATTEMPTS,
+                  STORAGE_TEST_SWITCH_DELAY_MS, switch_detail,
+                  sizeof(switch_detail));
+               if (switch_ret != 0) {
+                  fail_count++;
+                  storage_test_append(report, STORAGE_TEST_REPORT_BYTES,
+                     &report_used,
+                     "item|FAIL|Switch %s|Skipping remaining %s probes|%s\n",
+                     runtime_profiles[i], runtime_profiles[i], switch_detail);
+                  restore_ret = storage_test_restore_safe(frontend,
+                     "Restoring safe mode", runtime_profiles[i],
+                     restore_line, sizeof(restore_line));
+                  if (restore_ret != 0) {
+                     storage_safe = 0;
+                     abort_sweep = 1;
+                     storage_test_append(report, STORAGE_TEST_REPORT_BYTES,
+                        &report_used,
+                        "item|FAIL|Restore after switch fail|Aborting sweep|%s\n",
+                        restore_line);
+                  } else {
+                     storage_test_append(report, STORAGE_TEST_REPORT_BYTES,
+                        &report_used,
+                        "item|OK|Restore after switch fail|Continuing sweep|%s\n",
+                        restore_line);
+                     storage_test_checkpoint_report(
+                        JS2300_FRONTEND_STORAGE_FULL_TEST_REPORT, report,
+                        report_used, 1);
+                  }
+                  break;
+               }
+
+               fail_before_read = fail_count;
+               storage_test_run_profile(frontend, runtime_profiles[i],
+                  switch_detail, &tests[j], 1u, report,
+                  STORAGE_TEST_REPORT_BYTES, &report_used, &pass_count,
+                  &fail_count);
+               read_failed = fail_count != fail_before_read;
+
+               restore_ret = storage_test_restore_safe(frontend,
+                  "Restoring safe mode", tests[j].label, restore_line,
+                  sizeof(restore_line));
+               if (restore_ret != 0) {
+                  fail_count++;
+                  storage_safe = 0;
+                  abort_sweep = 1;
+                  storage_test_append(report, STORAGE_TEST_REPORT_BYTES,
+                     &report_used,
+                     "item|FAIL|Restore after %s|Aborting sweep|%s\n",
+                     runtime_profiles[i], restore_line);
+                  break;
+               }
+
+               storage_test_append(report, STORAGE_TEST_REPORT_BYTES,
+                  &report_used,
+                  "item|OK|Restore after %s|Checkpoint safe|%s\n",
+                  runtime_profiles[i], restore_line);
+               if (read_failed) {
+                  storage_test_append(report, STORAGE_TEST_REPORT_BYTES,
+                     &report_used,
+                     "item|FAIL|Profile %s|Stopping profile after first read failure|%s\n",
+                     runtime_profiles[i], tests[j].label);
+               }
+               storage_test_checkpoint_report(
+                  JS2300_FRONTEND_STORAGE_FULL_TEST_REPORT, report,
+                  report_used, 1);
+               if (read_failed)
+                  break;
+            }
+         }
+      }
+   } else {
+      char detail[96];
+
+      snprintf(detail, sizeof(detail), "mode %s%s", UNIFROG_SD_MODE,
+         runtime_supported ? "" : " runtime switch unavailable");
+      storage_test_run_profile(frontend, UNIFROG_SD_MODE, detail, tests,
+         test_count, report, STORAGE_TEST_REPORT_BYTES, &report_used,
+         &pass_count, &fail_count);
+   }
+
+   if (runtime_sweep && !storage_safe) {
+      char restore_detail[192];
+
+      if (storage_test_restore_safe(frontend, "Final safe recovery",
+          "Trying to restore storage", restore_detail,
+          sizeof(restore_detail)) == 0) {
+         storage_safe = 1;
+         storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+            "item|OK|Final safe recovery|Ready for report flush|%s\n",
+            restore_detail);
+      } else {
+         storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+            "item|FAIL|Final safe recovery|Report may stop at last checkpoint|%s\n",
+            restore_detail);
+      }
+   }
+
+   storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+      "detail=%s  %u ok  %u failed  %lu ms\n",
+      runtime_sweep ? "full runtime sweep" : "single profile",
+      pass_count, fail_count,
+      (unsigned long)(unifrog_perf_time_ms() - start_ms));
+
+   unifrog_log_defer_end();
+   unifrog_log_set_auto_flush_bytes(old_auto_flush);
+   unifrog_platform_set_storage_stage_callback(NULL, NULL);
+
+   if (storage_safe) {
+      unifrog_platform_set_storage_log_suspended(0);
+      storage_test_progress(frontend, storage_test_active_title,
+         "Writing final report",
+         runtime_sweep ? "Full runtime sweep complete" :
+            "Single profile complete");
+      storage_test_write_file(JS2300_FRONTEND_STORAGE_FULL_TEST_REPORT,
+         report, report_used);
+      storage_test_write_file(JS2300_FRONTEND_SYSTEM_CHECK_REPORT,
+         report, report_used);
+      (void)unifrog_log_flush();
+   }
+
+   printf("unifrog storage_full_test done mode=%s runtime_sweep=%d ok=%u fail=%u safe=%d ms=%lu report=%s\n",
+      UNIFROG_SD_MODE, runtime_sweep, pass_count, fail_count, storage_safe,
+      (unsigned long)(unifrog_perf_time_ms() - start_ms),
+      JS2300_FRONTEND_STORAGE_FULL_TEST_REPORT);
+   free(report);
    return 0;
 }
 
@@ -1144,6 +1491,12 @@ int host_action(void *opaque, const char *id)
       unifrog_text_copy(frontend->action, sizeof(frontend->action),
          "storage_test");
       printf("js2300 action developer storage_test\n");
+      return 0;
+   }
+   if (strcmp(id, "developer:storage_full_test") == 0) {
+      unifrog_text_copy(frontend->action, sizeof(frontend->action),
+         "storage_full_test");
+      printf("js2300 action developer storage_full_test\n");
       return 0;
    }
    if (strncmp(id, "video:", 6) == 0) {
@@ -1358,6 +1711,12 @@ int run_requested_action(struct js2300_frontend *frontend)
       int ret = run_storage_test(frontend);
 
       frontend_fb_reopen(frontend, "storage_test_return");
+      return ret;
+   }
+   if (strcmp(frontend->action, "storage_full_test") == 0) {
+      int ret = run_storage_full_test(frontend);
+
+      frontend_fb_reopen(frontend, "storage_full_test_return");
       return ret;
    }
    return -1;
