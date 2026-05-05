@@ -16,8 +16,9 @@ Keep this repository small and direct.
   `DEPS=.deps`, `SD_MODE=safe`
 - SD diagnostics: the default `SD_MODE=safe` build can run Developer ->
   Storage test as a quick guarded runtime sweep. It buffers logs, verifies a
-  safe restart first, requires clean unmounts between profiles, restores the
-  safe boot profile, then writes the report.
+  safe remount first, uses forced diagnostic unmounts between profiles, records
+  the last risky stage in reboot diagnostics, restores the safe boot profile,
+  then writes the report.
   `SD_MODE=hs1|wide50|wide|uhs12|uhs25|uhs` are fixed-profile experimental
   boot builds.
 - Local overrides belong in untracked `config.mk`.

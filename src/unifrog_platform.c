@@ -13,6 +13,7 @@
 #include <hcuapi/pinpad.h>
 #include <kernel/delay.h>
 
+#include <cpu_func.h>
 #include <fastboot/handoff.h>
 #include <unifrog/log.h>
 #include <unifrog/perf.h>
@@ -70,6 +71,10 @@ extern void mmc_stop_host(void *host);
 extern void mmc_start_host(void *host);
 extern const char hc_mmc_host_hw_ops[];
 extern void fileuart_set_storage_suspended(int suspended);
+
+#ifndef MNT_FORCE
+#define MNT_FORCE 1u
+#endif
 
 #define SD_DEVICE_DRIVER_DATA_OFFSET 64u
 #define SD_MMC_HOST_PARENT_OFFSET 0u
@@ -129,6 +134,8 @@ struct sd_runtime_boot_state {
 };
 
 static struct sd_runtime_boot_state sd_runtime_boot;
+static unifrog_platform_storage_stage_cb storage_stage_cb;
+static void *storage_stage_userdata;
 
 static const struct sd_runtime_profile sd_runtime_profiles[] = {
    {
@@ -191,6 +198,46 @@ static uint32_t sd_read_u32(uintptr_t base, size_t offset)
 
    memcpy(&value, (const void *)(base + offset), sizeof(value));
    return value;
+}
+
+static uint32_t sd_runtime_hash(const char *text)
+{
+   uint32_t hash = 2166136261u;
+
+   if (!text)
+      return hash;
+   while (*text) {
+      hash ^= (uint8_t)*text++;
+      hash *= 16777619u;
+   }
+   return hash;
+}
+
+static void sd_runtime_stage(const char *operation, const char *stage,
+   int result)
+{
+   volatile struct fastboot_diag *diag = FASTBOOT_DIAG_ADDR;
+   char detail[FASTBOOT_HANDOFF_PATH_BYTES];
+
+   snprintf(detail, sizeof(detail), "sd:%s:%s",
+      operation ? operation : "",
+      stage ? stage : "");
+
+   diag->magic = FASTBOOT_DIAG_MAGIC;
+   diag->stage_addr = 0x53445254u;
+   diag->event = sd_runtime_hash(detail);
+   diag->result = result;
+   memset((void *)diag->path, 0, sizeof(diag->path));
+   snprintf((char *)diag->path, sizeof(diag->path), "%s", detail);
+   cache_flush((void *)diag, sizeof(*diag));
+
+   unifrog_log("unifrog sd runtime stage operation=%s stage=%s result=%d\n",
+      operation ? operation : "",
+      stage ? stage : "",
+      result);
+
+   if (storage_stage_cb)
+      storage_stage_cb(storage_stage_userdata, operation, stage);
 }
 
 static void sd_write_u32(uintptr_t base, size_t offset, uint32_t value)
@@ -351,9 +398,13 @@ static int sd_runtime_unmount_storage(const char *tag)
         i >= 0; i--) {
       int unmount_ret;
       int unmount_errno;
+      char stage[48];
 
+      snprintf(stage, sizeof(stage), "unmount %s",
+         storage_mounts[i].target);
+      sd_runtime_stage(tag, stage, 0);
       errno = 0;
-      unmount_ret = umount2(storage_mounts[i].target, 0);
+      unmount_ret = umount2(storage_mounts[i].target, MNT_FORCE);
       unmount_errno = errno;
 
       if (unmount_ret == 0 ||
@@ -365,12 +416,14 @@ static int sd_runtime_unmount_storage(const char *tag)
       }
 
       unifrog_log("unifrog sd runtime unmount tag=%s target=%s ret=%d errno=%d "
-             "mask=0x%lx\n",
+             "flags=0x%lx mask=0x%lx\n",
          tag ? tag : "",
          storage_mounts[i].target,
          unmount_ret,
          unmount_errno,
+         (unsigned long)MNT_FORCE,
          (unsigned long)storage_mounted_mask);
+      sd_runtime_stage(tag, stage, unmount_ret == 0 ? 0 : -unmount_errno);
    }
 
    return ret;
@@ -718,6 +771,7 @@ int unifrog_platform_sd_apply_profile(const char *profile,
       (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS_OFFSET),
       (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS2_OFFSET));
 
+   sd_runtime_stage(profile, "unmount begin", 0);
    unmount_ret = sd_runtime_unmount_storage(profile);
    if (unmount_ret != 0) {
       sd_runtime_format_detail(profile, host, -1,
@@ -725,17 +779,26 @@ int unifrog_platform_sd_apply_profile(const char *profile,
       unifrog_log("unifrog sd runtime switch profile=%s ret=-1 "
              "reason=unmount_failed ms=%lu\n",
          profile, (unsigned long)(unifrog_perf_time_ms() - start_ms));
+      sd_runtime_stage(profile, "unmount failed", unmount_ret);
       return -1;
    }
+   sd_runtime_stage(profile, "unmount done", 0);
 
+   sd_runtime_stage(profile, "stop host begin", 0);
    mmc_stop_host((void *)host);
+   sd_runtime_stage(profile, "stop host done", 0);
    sd_runtime_write_profile(host, runtime_profile);
+   sd_runtime_stage(profile, "start host begin", 0);
    mmc_start_host((void *)host);
+   sd_runtime_stage(profile, "start host done", 0);
    msleep(250);
 
-   if (mount_attempts)
+   if (mount_attempts) {
+      sd_runtime_stage(profile, "recover begin", 0);
       mount_ret = unifrog_platform_recover_storage(profile,
          mount_attempts, mount_delay_ms);
+      sd_runtime_stage(profile, "recover done", mount_ret);
+   }
 
    snprintf(sd_runtime_boot.active_profile,
       sizeof(sd_runtime_boot.active_profile), "%s", profile);
@@ -776,6 +839,7 @@ int unifrog_platform_sd_restore_boot(unsigned mount_attempts,
    unifrog_log("unifrog sd runtime restore begin host=0x%08lx active=%s\n",
       (unsigned long)host, sd_runtime_boot.active_profile);
 
+   sd_runtime_stage("restore", "unmount begin", 0);
    unmount_ret = sd_runtime_unmount_storage("restore");
    if (unmount_ret != 0) {
       sd_runtime_format_detail("restore", host, -1,
@@ -783,17 +847,30 @@ int unifrog_platform_sd_restore_boot(unsigned mount_attempts,
       unifrog_log("unifrog sd runtime restore ret=-1 reason=unmount_failed "
              "ms=%lu\n",
          (unsigned long)(unifrog_perf_time_ms() - start_ms));
+      sd_runtime_stage("restore", "unmount failed", unmount_ret);
       return -1;
    }
+   sd_runtime_stage("restore", "unmount done", 0);
 
-   mmc_stop_host((void *)host);
-   sd_runtime_write_boot(host);
-   mmc_start_host((void *)host);
-   msleep(250);
+   if (strcmp(sd_runtime_boot.active_profile, "boot") != 0) {
+      sd_runtime_stage("restore", "stop host begin", 0);
+      mmc_stop_host((void *)host);
+      sd_runtime_stage("restore", "stop host done", 0);
+      sd_runtime_write_boot(host);
+      sd_runtime_stage("restore", "start host begin", 0);
+      mmc_start_host((void *)host);
+      sd_runtime_stage("restore", "start host done", 0);
+      msleep(250);
+   } else {
+      sd_runtime_stage("restore", "host already boot", 0);
+   }
 
-   if (mount_attempts)
+   if (mount_attempts) {
+      sd_runtime_stage("restore", "recover begin", 0);
       mount_ret = unifrog_platform_recover_storage("restore",
          mount_attempts, mount_delay_ms);
+      sd_runtime_stage("restore", "recover done", mount_ret);
+   }
 
    snprintf(sd_runtime_boot.active_profile,
       sizeof(sd_runtime_boot.active_profile), "boot");
@@ -809,6 +886,13 @@ int unifrog_platform_sd_restore_boot(unsigned mount_attempts,
       mount_ret);
 
    return mount_ret == 0 ? 0 : -1;
+}
+
+void unifrog_platform_set_storage_stage_callback(
+   unifrog_platform_storage_stage_cb cb, void *userdata)
+{
+   storage_stage_cb = cb;
+   storage_stage_userdata = userdata;
 }
 
 void unifrog_platform_set_storage_log_suspended(int suspended)
