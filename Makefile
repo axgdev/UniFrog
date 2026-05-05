@@ -61,7 +61,6 @@ DTS_PRE := $(BUILD)/$(DTS_NAME).dtb.dts.tmp
 DTB := $(BUILD)/$(DTS_NAME).dtb
 DTB_ASM := $(BUILD)/$(DTS_NAME)_dtb.S
 DTB_OBJ := $(BUILD)/$(DTS_NAME)_dtb.o
-DTS_MODE_STAMP := $(BUILD)/sd-mode.stamp
 DTC ?= dtc
 EMBED_DTB ?= 1
 CCACHE ?=
@@ -206,8 +205,9 @@ DTCFLAGS := \
 	-Wno-pci_bridge \
 	-Wno-pci_device_bus_num
 
-# Defines mirror the original HCRTOS app build environment.
-DEFINES := \
+# Defines mirror the original HCRTOS app build environment. Build identity is
+# split out so only objects that print it rebuild when the git state changes.
+CONFIG_DEFINES := \
 	-D_FORTIFY_SOURCE=0 \
 	-D__HCRTOS__ \
 	-D__DEBUG__ \
@@ -220,13 +220,17 @@ DEFINES := \
 	-DUNIFROG_HCRTOS_MEDIA_FIRMWARE=$(if $(filter firmware,$(HCRTOS_MEDIA)),1,0) \
 	-DUNIFROG_SD_MODE=\"$(SD_MODE)\" \
 	-DUNIFROG_SD_READ_MODE=\"$(SD_READ_MODE)\" \
-	-DUNIFROG_SD_EXPERIMENTAL=$(SD_EXPERIMENTAL) \
+	-DUNIFROG_SD_EXPERIMENTAL=$(SD_EXPERIMENTAL)
+
+IDENTITY_DEFINES := \
 	-DUNIFROG_GIT_COMMIT=\"$(UNIFROG_GIT_COMMIT)\" \
 	-DUNIFROG_GIT_DIRTY=$(UNIFROG_GIT_DIRTY) \
 	-DUNIFROG_SDK_GIT_COMMIT=\"$(UNIFROG_SDK_GIT_COMMIT)\" \
 	-DUNIFROG_CORES_GIT_COMMIT=\"$(UNIFROG_CORES_GIT_COMMIT)\" \
 	-DUNIFROG_JS2300_GIT_COMMIT=\"$(UNIFROG_JS2300_GIT_COMMIT)\" \
 	-DUNIFROG_FRONTEND_GIT_COMMIT=\"$(UNIFROG_FRONTEND_GIT_COMMIT)\"
+
+DEFINES := $(CONFIG_DEFINES) $(IDENTITY_DEFINES)
 
 CFLAGS := -EL $(ARCH_CFLAGS) $(OPT_SIZE) -pipe -msoft-float -fsigned-char -W \
 	-ffunction-sections -fdata-sections -G0 \
@@ -246,6 +250,12 @@ CFLAGS_VIDEO = $(CFLAGS_FAST)
 ifeq ($(MIPS_ARCH),mips32)
 CFLAGS += -DSF2000_HAVE_MIPS_WAIT=1
 endif
+
+CFLAGS_NO_IDENTITY = $(filter-out $(IDENTITY_DEFINES),$(CFLAGS))
+CFLAGS_NOOPT_NO_IDENTITY = $(filter-out $(OPT_FLAGS),$(CFLAGS_NO_IDENTITY))
+CFLAGS_FAST_NO_IDENTITY = $(CFLAGS_NOOPT_NO_IDENTITY) $(OPT_FAST)
+CFLAGS_AUDIO_NO_IDENTITY = $(CFLAGS_NOOPT_NO_IDENTITY) $(OPT_AUDIO)
+CFLAGS_VIDEO_NO_IDENTITY = $(CFLAGS_FAST_NO_IDENTITY)
 
 LIBDIRS := \
 	-L$(SDK)/lib/core \
@@ -344,16 +354,11 @@ APP_OBJECTS := \
 	$(BUILD)/main.o \
 	$(FRONTEND_HOST_OBJECTS)
 
-BUILD_IDENTITY_STAMP := $(BUILD)/build-identity.stamp
 BUILD_IDENTITY_OBJECTS := \
 	$(BUILD)/main.o \
+	$(BUILD)/frontend/js2300_frontend_actions.o \
 	$(BUILD)/unifrog_libretro_host.o \
 	$(BUILD)/unifrog_platform.o
-
-# These objects print build identity in device logs. Rebuild them only when the
-# embedded identity changes, and let dependent core modules relink from the
-# updated libunifrog archive.
-$(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 
 UNIFROG_OBJECTS := \
 	$(BUILD)/unifrog_abi.o \
@@ -429,8 +434,7 @@ PCE_FAST_CORE_LIB := $(CORES)/output/pce_fast_libretro_sf2000.a
 QPSX_CORE_LIB := $(CORES)/output/pcsx4all_libretro_sf2000.a
 PMP_VIDEO_CORE_LIB := $(CORES)/output/pmp_libretro_sf2000.a
 FIRMWARE_LIBRETRO_CORE_LIBS ?=
-CORE_REV_STAMP := $(BUILD)/core-sources.rev
-CORE_BUILD_DEPS := $(CORES)/Makefile $(CORES)/manifest.mk $(CORE_REV_STAMP)
+CORE_BUILD_DEPS = $(CORES)/Makefile $(CORES)/manifest.mk $(CORE_REV_STAMP)
 CORE_MAKE_ARGS := \
 	TOOLCHAIN=$(TOOLCHAIN) \
 	CROSS_COMPILE=$(CROSS_COMPILE) \
@@ -443,19 +447,19 @@ CORE_SMOKE_MAKE_FLAGS := --no-print-directory
 ifeq ($(V),)
 CORE_SMOKE_MAKE_FLAGS += --silent
 endif
-LIBRETRO_COMMON_BUILD_DEPS := $(CORE_BUILD_DEPS)
-CHD_SUPPORT_BUILD_DEPS := $(CORE_BUILD_DEPS)
-GAMBATTE_BUILD_DEPS := $(CORE_BUILD_DEPS)
-GPSP_BUILD_DEPS := $(CORE_BUILD_DEPS)
-PICODRIVE_BUILD_DEPS := $(CORE_BUILD_DEPS)
-SNES9X2005_BUILD_DEPS := $(CORE_BUILD_DEPS)
-SNES9X2002_BUILD_DEPS := $(CORE_BUILD_DEPS)
-QUICKNES_BUILD_DEPS := $(CORE_BUILD_DEPS)
-FCEUMM_BUILD_DEPS := $(CORE_BUILD_DEPS)
-GEARBOY_BUILD_DEPS := $(CORE_BUILD_DEPS)
-PCE_FAST_BUILD_DEPS := $(CORE_BUILD_DEPS)
-QPSX_BUILD_DEPS := $(CORE_BUILD_DEPS)
-PMP_VIDEO_BUILD_DEPS := $(CORE_BUILD_DEPS)
+LIBRETRO_COMMON_BUILD_DEPS = $(CORE_BUILD_DEPS)
+CHD_SUPPORT_BUILD_DEPS = $(CORE_BUILD_DEPS)
+GAMBATTE_BUILD_DEPS = $(CORE_BUILD_DEPS)
+GPSP_BUILD_DEPS = $(CORE_BUILD_DEPS)
+PICODRIVE_BUILD_DEPS = $(CORE_BUILD_DEPS)
+SNES9X2005_BUILD_DEPS = $(CORE_BUILD_DEPS)
+SNES9X2002_BUILD_DEPS = $(CORE_BUILD_DEPS)
+QUICKNES_BUILD_DEPS = $(CORE_BUILD_DEPS)
+FCEUMM_BUILD_DEPS = $(CORE_BUILD_DEPS)
+GEARBOY_BUILD_DEPS = $(CORE_BUILD_DEPS)
+PCE_FAST_BUILD_DEPS = $(CORE_BUILD_DEPS)
+QPSX_BUILD_DEPS = $(CORE_BUILD_DEPS)
+PMP_VIDEO_BUILD_DEPS = $(CORE_BUILD_DEPS)
 PACKAGE_LIBRETRO_CORE_LIBS := \
 	$(GAMBATTE_CORE_LIB) \
 	$(GPSP_CORE_LIB) \
@@ -526,6 +530,7 @@ LIBRETRO_CORE_MODULE_OUTS := \
 NATIVE_MODULE_OUTS := $(if $(filter module,$(HCRTOS_MEDIA)),$(HCRTOS_MEDIA_MODULE_OUT))
 UNIFROG_CORE_MODULE_BASE ?= 0x83000000
 CORE_MODULE_CFLAGS := $(CFLAGS) -mno-abicalls -fno-pic
+CORE_MODULE_CFLAGS_NO_IDENTITY := $(filter-out $(IDENTITY_DEFINES),$(CORE_MODULE_CFLAGS))
 CORE_MODULE_LDFLAGS := -EL $(OPT_SIZE) --static $(LIBDIRS) \
 	-T linker/hc15xx/peripherals.ld \
 	-T linker/core-module.ld \
@@ -542,9 +547,118 @@ FASTBOOT_CFLAGS := -EL $(ARCH_CFLAGS) -Os -pipe -msoft-float -fsigned-char -W \
 	-ffreestanding -fno-builtin -fno-pic -mno-abicalls \
 	-nostdinc -I$(GCC_LIBDIR)/include
 
+CORE_MODULE_IDS := gambatte gpsp picodrive snes9x2005 snes9x2002 quicknes \
+	fceumm gearboy pce_fast qpsx pmp_video
+CORE_MODULE_ENTRY_OBJECTS := $(addprefix $(BUILD)/core_modules/,$(addsuffix _entry.o,$(CORE_MODULE_IDS)))
+CORE_MODULE_SUPPORT_OBJECT := $(BUILD)/core_modules/support.o
+
+DTS_INPUTS := $(DTS) $(shell test ! -d dts/include || find dts/include -type f | sort)
+SDK_PATCHES := $(shell test ! -d patches/open-source || find patches/open-source -type f -name '*.patch' | sort)
+FRONTEND_INPUTS := $(shell test ! -d "$(FRONTEND)" || find "$(FRONTEND)" -type f ! -path "$(FRONTEND)/output/*" | sort)
+JS2300_INPUTS := $(shell test ! -d "$(JS2300)" || find "$(JS2300)" -type f ! -path "$(JS2300)/build/*" ! -path "$(JS2300)/output/*" | sort)
+MQUICKJS_INPUTS := $(shell test ! -d "$(MQUICKJS_DIR)" || find "$(MQUICKJS_DIR)" -maxdepth 1 -type f \( -name '*.c' -o -name '*.h' -o -name Makefile \) | sort)
+
+BUILD_CONFIG_TOKEN := $(shell printf '%s\n' \
+	'CC=$(CC)' 'CXX=$(CXX)' 'LD=$(LD)' 'AR=$(AR)' 'OBJCOPY=$(OBJCOPY)' \
+	'HOSTCC=$(HOSTCC)' 'HOSTCFLAGS=$(HOSTCFLAGS)' \
+	'ARCH_CFLAGS=$(ARCH_CFLAGS)' 'OPT_SIZE=$(OPT_SIZE)' \
+	'OPT_FAST=$(OPT_FAST)' 'OPT_AUDIO=$(OPT_AUDIO)' \
+	'CONFIG_DEFINES=$(CONFIG_DEFINES)' 'PROJECT_INCLUDES=$(PROJECT_INCLUDES)' \
+	'SDK_INCLUDES=$(SDK_INCLUDES)' 'CFLAGS=$(CFLAGS_NO_IDENTITY)' \
+	'CFLAGS_FAST=$(CFLAGS_FAST_NO_IDENTITY)' \
+	'CFLAGS_AUDIO=$(CFLAGS_AUDIO_NO_IDENTITY)' \
+	'CFLAGS_VIDEO=$(CFLAGS_VIDEO_NO_IDENTITY)' \
+	'LDFLAGS=$(LDFLAGS)' 'LDLIBS=$(LDLIBS)' 'WHOLE_LIBS=$(WHOLE_LIBS)' \
+	'CORE_MODULE_CFLAGS=$(CORE_MODULE_CFLAGS_NO_IDENTITY)' \
+	'CORE_MODULE_LDFLAGS=$(CORE_MODULE_LDFLAGS)' \
+	'CORE_MODULE_LDLIBS=$(CORE_MODULE_LDLIBS)' \
+	'DTS_CPPFLAGS=$(DTS_CPPFLAGS)' 'DTCFLAGS=$(DTCFLAGS)' \
+	'EMBED_DTB=$(EMBED_DTB)' | cksum | awk '{print $$1}')
+BUILD_IDENTITY_TOKEN := $(shell printf '%s\n' \
+	'UNIFROG_GIT_COMMIT=$(UNIFROG_GIT_COMMIT)' \
+	'UNIFROG_GIT_DIRTY=$(UNIFROG_GIT_DIRTY)' \
+	'UNIFROG_SDK_GIT_COMMIT=$(UNIFROG_SDK_GIT_COMMIT)' \
+	'UNIFROG_CORES_GIT_COMMIT=$(UNIFROG_CORES_GIT_COMMIT)' \
+	'UNIFROG_JS2300_GIT_COMMIT=$(UNIFROG_JS2300_GIT_COMMIT)' \
+	'UNIFROG_FRONTEND_GIT_COMMIT=$(UNIFROG_FRONTEND_GIT_COMMIT)' \
+	'HCRTOS_MEDIA=$(HCRTOS_MEDIA)' | cksum | awk '{print $$1}')
+FASTBOOT_CONFIG_TOKEN := $(shell printf '%s\n' \
+	'CC=$(CC)' 'LD=$(LD)' 'OBJCOPY=$(OBJCOPY)' \
+	'FASTBOOT_CFLAGS=$(FASTBOOT_CFLAGS)' | cksum | awk '{print $$1}')
+DTS_MODE_TOKEN := $(shell printf '%s\n' \
+	'SD_MODE=$(SD_MODE)' 'SD_CLOCK_FREQUENCY=$(SD_CLOCK_FREQUENCY)' \
+	'SD_BUS_WIDTH=$(SD_BUS_WIDTH)' 'SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED)' \
+	'SD_CAP_UHS=$(SD_CAP_UHS)' 'SD_UHS_SDR12=$(SD_UHS_SDR12)' \
+	'SD_UHS_SDR25=$(SD_UHS_SDR25)' 'SD_UHS_SDR50=$(SD_UHS_SDR50)' \
+	'SD_NO_1V8=$(SD_NO_1V8)' 'SD_EXPERIMENTAL=$(SD_EXPERIMENTAL)' | cksum | awk '{print $$1}')
+CORE_CONFIG_TOKEN := $(shell { \
+	printf '%s\n' 'TOOLCHAIN=$(TOOLCHAIN)' 'CROSS_COMPILE=$(CROSS_COMPILE)' \
+		'SDK=$(abspath $(SDK))' 'CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))' \
+		'CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT))' 'CCACHE=$(CCACHE)' \
+		'JOBS=$(JOBS)'; \
+	for dir in "$(CORE_SOURCE_ROOT)"/*; do \
+		test -d "$$dir/.git" || continue; \
+		name=$$(basename "$$dir"); \
+		rev=$$(git -C "$$dir" rev-parse --short=12 HEAD 2>/dev/null || echo unknown); \
+		dirty=$$(git -C "$$dir" status --porcelain --untracked-files=no 2>/dev/null | cksum | awk '{print $$1}'); \
+		printf '%s:%s:%s\n' "$$name" "$$rev" "$$dirty"; \
+	done; \
+} | cksum | awk '{print $$1}')
+SDK_CONFIG_TOKEN := $(shell { \
+	printf '%s\n' 'TOOLCHAIN=$(TOOLCHAIN)' 'CROSS_COMPILE=$(CROSS_COMPILE)' \
+		'CCACHE=$(CCACHE)' 'JOBS=$(JOBS)' 'SD_MODE=$(SD_MODE)' \
+		'SDK=$(abspath $(SDK))'; \
+	git -C "$(SDK)" rev-parse --short=12 HEAD 2>/dev/null || echo unknown; \
+	git -C "$(SDK)" status --porcelain --untracked-files=no 2>/dev/null | cksum | awk '{print $$1}'; \
+	for f in $(SDK_PATCHES) $(DTS_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
+} | cksum | awk '{print $$1}')
+JS2300_CONFIG_TOKEN := $(shell { \
+	printf '%s\n' 'TOOLCHAIN=$(TOOLCHAIN)' 'CROSS_COMPILE=$(CROSS_COMPILE)' \
+		'MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR))' 'HOSTCC=$(HOSTCC)'; \
+	for f in $(JS2300_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
+	for f in $(MQUICKJS_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
+} | cksum | awk '{print $$1}')
+FRONTEND_CONFIG_TOKEN := $(shell { \
+	printf '%s\n' 'OUT=$(abspath $(OUT))/frontend' \
+		'MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR))' 'HOSTCC=$(HOSTCC)' \
+		'identity=$(BUILD_IDENTITY_TOKEN)'; \
+	for f in $(FRONTEND_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
+	for f in $(MQUICKJS_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
+} | cksum | awk '{print $$1}')
+
+BUILD_CONFIG_STAMP := $(BUILD)/build-config.$(BUILD_CONFIG_TOKEN).stamp
+BUILD_IDENTITY_STAMP := $(BUILD)/build-identity.$(BUILD_IDENTITY_TOKEN).stamp
+FASTBOOT_CONFIG_STAMP := $(BUILD)/fastboot-config.$(FASTBOOT_CONFIG_TOKEN).stamp
+DTS_MODE_STAMP := $(BUILD)/sd-mode.$(DTS_MODE_TOKEN).stamp
+CORE_REV_STAMP := $(BUILD)/core-config.$(CORE_CONFIG_TOKEN).stamp
+SDK_BUILD_STAMP := $(BUILD)/sdk-build.$(SDK_CONFIG_TOKEN).stamp
+JS2300_CONFIG_STAMP := $(BUILD)/js2300-config.$(JS2300_CONFIG_TOKEN).stamp
+FRONTEND_CONFIG_STAMP := $(BUILD)/frontend-config.$(FRONTEND_CONFIG_TOKEN).stamp
+FRONTEND_PACKAGE_STAMP := $(FRONTEND_PACKAGE)/.package.$(FRONTEND_CONFIG_TOKEN).stamp
+CONFIG_STAMPS := $(BUILD_CONFIG_STAMP) $(BUILD_IDENTITY_STAMP) \
+	$(FASTBOOT_CONFIG_STAMP) $(DTS_MODE_STAMP) $(CORE_REV_STAMP) \
+	$(JS2300_CONFIG_STAMP) $(FRONTEND_CONFIG_STAMP)
+
 ifeq ($(EMBED_DTB),1)
 APP_OBJECTS += $(DTB_OBJ)
 endif
+
+DEVICE_OBJECTS := $(APP_OBJECTS) $(UNIFROG_OBJECTS) \
+	$(CORE_MODULE_ENTRY_OBJECTS) $(CORE_MODULE_SUPPORT_OBJECT) \
+	$(HCRTOS_MEDIA_MODULE_OBJECTS)
+FASTBOOT_OBJECTS := $(FASTBOOT_STAGE_OBJ) $(FASTBOOT_STAGE_ENTRY_OBJ) \
+	$(FASTBOOT_STUB_OBJ)
+
+$(CONFIG_STAMPS): | $(BUILD)
+	$(Q)touch $@
+
+$(DEVICE_OBJECTS): $(BUILD_CONFIG_STAMP)
+$(FASTBOOT_OBJECTS): $(FASTBOOT_CONFIG_STAMP)
+
+# These objects print build identity in device logs. Rebuild them only when the
+# embedded identity changes, and let dependent core modules relink from the
+# updated libunifrog archive.
+$(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 
 .DELETE_ON_ERROR:
 COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild
@@ -552,7 +666,7 @@ SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support dep
 PACKAGE_TARGETS := frontend-package core-package module-package sd-zip install refresh-sd refresh-sd-clean
 VERIFY_TARGETS := asdcheck fastboot-check layout-check js2300-check frontend-check core-smoke-check
 ADVANCED_TARGETS := sdk dtb lib fastboot size ci-deps ci-toolchain ci-commit-check ci-sd-zip print-config
-.PHONY: $(COMMON_TARGETS) $(SETUP_TARGETS) $(PACKAGE_TARGETS) $(VERIFY_TARGETS) $(ADVANCED_TARGETS) FORCE
+.PHONY: $(COMMON_TARGETS) $(SETUP_TARGETS) $(PACKAGE_TARGETS) $(VERIFY_TARGETS) $(ADVANCED_TARGETS)
 
 all: $(ASD) $(OUT)/unifrog.bin core-package module-package
 setup: deps
@@ -796,11 +910,14 @@ quick-check:
 core-smoke-check:
 	$(Q)$(MAKE) $(CORE_SMOKE_MAKE_FLAGS) -C $(CORES) smoke-check $(CORE_MAKE_ARGS)
 
-sdk:
+sdk: $(SDK_BUILD_STAMP)
+
+$(SDK_BUILD_STAMP): $(DTS_INPUTS) $(SDK_PATCHES) | $(BUILD)
 	$(Q)$(MAKE) -C $(SDK) check TOOLCHAIN=$(TOOLCHAIN) \
 		CROSS_COMPILE=$(CROSS_COMPILE) CCACHE=$(CCACHE) JOBS=$(JOBS) \
 		SD_MODE=$(SD_MODE) BOARD_DTS=$(abspath $(DTS)) \
 		DTS_INCLUDE=$(abspath dts/include)
+	$(Q)touch $@
 
 js2300-check:
 	$(Q)$(MAKE) -C $(JS2300) check TOOLCHAIN=$(TOOLCHAIN) \
@@ -811,7 +928,10 @@ frontend-check:
 	$(Q)$(MAKE) -C $(FRONTEND) check MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR)) \
 		HOSTCC=$(HOSTCC)
 
-frontend-package:
+frontend-package: $(FRONTEND_PACKAGE_STAMP)
+
+$(FRONTEND_PACKAGE_STAMP): $(FRONTEND_INPUTS) $(MQUICKJS_INPUTS) \
+	$(FRONTEND_CONFIG_STAMP) $(BUILD_IDENTITY_STAMP) | $(OUT)
 	$(Q)$(MAKE) -C $(FRONTEND) package OUT=$(abspath $(OUT))/frontend \
 		MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR)) HOSTCC=$(HOSTCC)
 	$(Q)mkdir -p $(FRONTEND_PACKAGE)
@@ -832,23 +952,25 @@ frontend-package:
 		printf '%s\n' 'hcrtos_media=$(HCRTOS_MEDIA)'; \
 		printf '%s\n' "generated_utc=$$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
 	} > $(FRONTEND_MANIFEST)
+	$(Q)rm -f $(FRONTEND_PACKAGE)/.package.*.stamp
+	$(Q)touch $@
 
-core-package: $(JS2300_CORE_BIN) $(LIBRETRO_CORE_BINS)
-	@echo "  COREBIN $(CORE_PACKAGE)"
+core-package: $(FRONTEND_PACKAGE_STAMP) $(JS2300_CORE_BIN) $(LIBRETRO_CORE_BINS)
 
-module-package: $(HCRTOS_MEDIA_MODULE_BINS)
-	@echo "  MODULE  $(if $(HCRTOS_MEDIA_MODULE_BINS),$(MODULE_PACKAGE),disabled)"
-	$(Q)if test -z "$(HCRTOS_MEDIA_MODULE_BINS)"; then rm -rf $(MODULE_PACKAGE); fi
+module-package: $(FRONTEND_PACKAGE_STAMP) $(HCRTOS_MEDIA_MODULE_BINS)
+ifeq ($(HCRTOS_MEDIA_MODULE_BINS),)
+	$(Q)rm -rf $(MODULE_PACKAGE)
+endif
 
-$(CORE_PACKAGE): frontend-package
+$(CORE_PACKAGE):
 	$(Q)mkdir -p $@
 
-$(MODULE_PACKAGE): frontend-package
+$(MODULE_PACKAGE):
 	$(Q)mkdir -p $@
 
 $(JS2300_CORE_BIN): $(LIBJS2300) | $(CORE_PACKAGE)
 	@echo "  COREBIN $@"
-	$(Q)cp $(LIBJS2300) $(JS2300_CORE_BIN)
+	$(Q)if test -f $@ && cmp -s $(LIBJS2300) $@; then touch $@; else cp $(LIBJS2300) $@; fi
 
 $(BUILD)/core_modules/gambatte_entry.o: CORE_MODULE_DEFINES := -DUNIFROG_MODULE_CORE_ID=\"gambatte\" -DUNIFROG_MODULE_EXTENSIONS=\"gb\|gbc\"
 $(BUILD)/core_modules/gpsp_entry.o: CORE_MODULE_DEFINES := -DUNIFROG_MODULE_CORE_ID=\"gpsp\" -DUNIFROG_MODULE_EXTENSIONS=\"gba\" -DUNIFROG_MODULE_SYMBOL_PREFIX=gpsp
@@ -885,7 +1007,9 @@ $(HCRTOS_MEDIA_MODULE_ARCHIVE): $(HCRTOS_MEDIA_MODULE_OBJECTS) | $(OUT)
 	$(Q)mkdir -p $(dir $@)
 	$(Q)$(AR) rcs $@ $^
 
-$(HCRTOS_MEDIA_MODULE_OUT): $(HCRTOS_MEDIA_MODULE_ARCHIVE) linker/core-module.ld linker/hc15xx/peripherals.ld | $(OUT) sdk
+$(HCRTOS_MEDIA_MODULE_OUT): $(HCRTOS_MEDIA_MODULE_ARCHIVE) \
+	linker/core-module.ld linker/hc15xx/peripherals.ld \
+	$(SDK_BUILD_STAMP) $(BUILD_CONFIG_STAMP) | $(OUT)
 	@echo "  LD      $@"
 	$(Q)$(LD) $(CORE_MODULE_LDFLAGS) -o $@ -Map $@.map -u unifrog_core_module_entry --start-group $(HCRTOS_MEDIA_MODULE_ARCHIVE) $(HCRTOS_MEDIA_MODULE_LDLIBS) --whole-archive $(HCRTOS_MEDIA_WHOLE_LIBS) --no-whole-archive --end-group
 
@@ -904,7 +1028,7 @@ $(ZSTD_DECODER_OBJ): $(ZSTD_DECODER_SRC) | $(BUILD)
 	$(Q)$(CC) $(ZSTD_CFLAGS) -MD -MP -c $< -o $@
 
 define CORE_MODULE_RULES
-$(BUILD)/core_modules/$(1).out: $(BUILD)/core_modules/$(1)_entry.o $(BUILD)/core_modules/support.o $$($(2)_CORE_LIB) $$($(2)_CORE_SUPPORT_LIBS) $(LIBRETRO_COMMON_LIB) $(LIBUNIFROG) linker/core-module.ld linker/hc15xx/peripherals.ld | $(OUT)
+$(BUILD)/core_modules/$(1).out: $(BUILD)/core_modules/$(1)_entry.o $(BUILD)/core_modules/support.o $$($(2)_CORE_LIB) $$($(2)_CORE_SUPPORT_LIBS) $(LIBRETRO_COMMON_LIB) $(LIBUNIFROG) linker/core-module.ld linker/hc15xx/peripherals.ld $(SDK_BUILD_STAMP) $(BUILD_CONFIG_STAMP) | $(OUT)
 	@echo "  LD      $$@"
 	$(Q)$(LD) $(CORE_MODULE_LDFLAGS) -o $$@ -Map $$@.map -u unifrog_core_module_entry --start-group $$(filter %.o %.a,$$^) $(CORE_MODULE_LDLIBS) --end-group
 
@@ -953,7 +1077,8 @@ $(FASTBOOT_STAGE_ENTRY_OBJ): src/fastboot/stage_entry.S | $(BUILD)
 	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) $(FASTBOOT_CFLAGS) -D__ASSEMBLY__ -MD -MP -c $< -o $@
 
-$(FASTBOOT_STAGE_OUT): $(FASTBOOT_STAGE_ENTRY_OBJ) $(FASTBOOT_STAGE_OBJ) linker/fastboot/stage.ld | $(OUT)
+$(FASTBOOT_STAGE_OUT): $(FASTBOOT_STAGE_ENTRY_OBJ) $(FASTBOOT_STAGE_OBJ) \
+	linker/fastboot/stage.ld $(FASTBOOT_CONFIG_STAMP) | $(OUT)
 	@echo "  LD      $@"
 	$(Q)$(LD) -EL --static -n --gc-sections -T linker/fastboot/stage.ld -Map $@.map -o $@ $(filter %.o,$^)
 
@@ -967,7 +1092,8 @@ $(FASTBOOT_STUB_OBJ): src/fastboot/stub.S $(FASTBOOT_STAGE_BIN) | $(BUILD)
 	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) $(FASTBOOT_CFLAGS) -D__ASSEMBLY__ -MD -MP -c $< -o $@
 
-$(FASTBOOT_STUB_OUT): $(FASTBOOT_STUB_OBJ) linker/fastboot/stub.ld | $(OUT)
+$(FASTBOOT_STUB_OUT): $(FASTBOOT_STUB_OBJ) linker/fastboot/stub.ld \
+	$(FASTBOOT_CONFIG_STAMP) | $(OUT)
 	@echo "  LD      $@"
 	$(Q)$(LD) -EL --static -n --gc-sections -T linker/fastboot/stub.ld -Map $@.map -o $@ $(filter %.o,$^)
 
@@ -975,26 +1101,11 @@ $(FASTBOOT_STUB_BIN): $(FASTBOOT_STUB_OUT)
 	@echo "  OBJCOPY $@"
 	$(Q)$(OBJCOPY) -O binary $< $@
 
-$(DTS_MODE_STAMP): FORCE | $(BUILD)
-	$(Q)value=$$(printf '%s\n' \
-		"SD_MODE=$(SD_MODE)" \
-		"SD_CLOCK_FREQUENCY=$(SD_CLOCK_FREQUENCY)" \
-		"SD_BUS_WIDTH=$(SD_BUS_WIDTH)" \
-		"SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED)" \
-		"SD_CAP_UHS=$(SD_CAP_UHS)" \
-		"SD_UHS_SDR12=$(SD_UHS_SDR12)" \
-		"SD_UHS_SDR25=$(SD_UHS_SDR25)" \
-		"SD_UHS_SDR50=$(SD_UHS_SDR50)" \
-		"SD_NO_1V8=$(SD_NO_1V8)" \
-		"SD_EXPERIMENTAL=$(SD_EXPERIMENTAL)"); \
-	old=$$(cat $@ 2>/dev/null || true); \
-	if test "$$value" != "$$old"; then printf '%s\n' "$$value" > $@; fi
-
-$(DTS_PRE): $(DTS) $(DTS_MODE_STAMP) | $(BUILD)
+$(DTS_PRE): $(DTS_INPUTS) $(DTS_MODE_STAMP) $(BUILD_CONFIG_STAMP) | $(BUILD)
 	@echo "  CPP     $<"
 	$(Q)$(CC) $(DTS_CPPFLAGS) -Wp,-MD,$@.d -E -o $@ $<
 
-$(DTB): $(DTS_PRE)
+$(DTB): $(DTS_PRE) $(BUILD_CONFIG_STAMP)
 	@echo "  DTC     $@"
 	$(Q)$(DTC) -O dtb -o $@ -b 0 $(DTCFLAGS) -d $@.d $<
 
@@ -1017,92 +1128,92 @@ $(DTB_OBJ): $(DTB_ASM)
 	@echo "  CC      $<"
 	$(Q)$(CC) $(CFLAGS) -MD -MP -c $< -o $@
 
-$(LIBUNIFROG): $(UNIFROG_OBJECTS) | $(OUT)
+$(LIBUNIFROG): $(UNIFROG_OBJECTS) $(BUILD_CONFIG_STAMP) | $(OUT)
 	@echo "  AR      $@"
-	$(Q)$(AR) rcs $@ $^
+	$(Q)$(AR) rcs $@ $(filter %.o,$^)
 
-$(OUT)/$(TARGET).out: $(APP_OBJECTS) $(LIBUNIFROG) $(LIBJS2300) $(LIBRETRO_COMMON_LIB) $(FIRMWARE_LIBRETRO_CORE_LIBS) | $(OUT) sdk
+$(OUT)/$(TARGET).out: $(APP_OBJECTS) $(LIBUNIFROG) $(LIBJS2300) \
+	$(LIBRETRO_COMMON_LIB) $(FIRMWARE_LIBRETRO_CORE_LIBS) \
+	$(SDK_BUILD_STAMP) $(BUILD_CONFIG_STAMP) | $(OUT)
 	@echo "  LD      $@"
-	$(Q)$(LD) $(LDFLAGS) -o $@ -Map $@.map --start-group $^ $(LDLIBS) --whole-archive $(WHOLE_LIBS) --no-whole-archive --end-group
+	$(Q)$(LD) $(LDFLAGS) -o $@ -Map $@.map --start-group $(filter %.o %.a,$^) $(LDLIBS) --whole-archive $(WHOLE_LIBS) --no-whole-archive --end-group
 
-$(LIBJS2300): FORCE
+$(LIBJS2300): $(JS2300_INPUTS) $(MQUICKJS_INPUTS) $(JS2300_CONFIG_STAMP)
 	@echo "  JS2300  runtime"
 	$(Q)$(MAKE) -C $(JS2300) TOOLCHAIN=$(TOOLCHAIN) \
 		CROSS_COMPILE=$(CROSS_COMPILE) MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR))
-
-$(CORE_REV_STAMP): FORCE | $(BUILD)
-	$(Q)value=$$(for dir in $(CORE_SOURCE_ROOT)/*; do \
-		test -d "$$dir/.git" || continue; \
-		name=$$(basename "$$dir"); \
-		rev=$$(git -C "$$dir" rev-parse --short=12 HEAD 2>/dev/null || echo unknown); \
-		dirty=$$(git -C "$$dir" status --porcelain --untracked-files=no 2>/dev/null | cksum | awk '{print $$1}'); \
-		printf '%s:%s:%s ' "$$name" "$$rev" "$$dirty"; \
-	done); \
-	old=$$(cat $@ 2>/dev/null || true); \
-	if test "$$value" != "$$old"; then printf '%s\n' "$$value" > $@; fi
-
-$(BUILD_IDENTITY_STAMP): FORCE | $(BUILD)
-	$(Q)value="$(UNIFROG_GIT_COMMIT) $(UNIFROG_GIT_DIRTY) $(UNIFROG_SDK_GIT_COMMIT) $(UNIFROG_CORES_GIT_COMMIT) $(UNIFROG_JS2300_GIT_COMMIT) $(UNIFROG_FRONTEND_GIT_COMMIT) $(SD_MODE) $(SD_READ_MODE) $(SD_EXPERIMENTAL) $(HCRTOS_MEDIA)"; \
-	old=$$(cat $@ 2>/dev/null || true); \
-	if test "$$value" != "$$old"; then printf '%s\n' "$$value" > $@; fi
+	$(Q)test -s $@ && touch $@
 
 $(GAMBATTE_CORE_LIB): $(GAMBATTE_BUILD_DEPS)
 	@echo "  CORE    gambatte"
 	$(Q)$(MAKE) -C $(CORES) gambatte $(CORE_MAKE_ARGS)
+	$(Q)test -s $@ && touch $@
 
 $(GPSP_CORE_LIB): $(GPSP_BUILD_DEPS)
 	@echo "  CORE    gpsp"
 	$(Q)$(MAKE) -C $(CORES) gpsp $(CORE_MAKE_ARGS)
+	$(Q)test -s $@ && touch $@
 
 $(PICODRIVE_CORE_LIB): $(PICODRIVE_BUILD_DEPS) $(CHD_SUPPORT_CORE_LIB)
 	@echo "  CORE    picodrive"
 	$(Q)$(MAKE) -C $(CORES) picodrive $(CORE_MAKE_ARGS)
+	$(Q)test -s $@ && touch $@
 
 $(SNES9X2005_CORE_LIB): $(SNES9X2005_BUILD_DEPS)
 	@echo "  CORE    snes9x2005"
 	$(Q)$(MAKE) -C $(CORES) snes9x2005 $(CORE_MAKE_ARGS)
+	$(Q)test -s $@ && touch $@
 
 $(SNES9X2002_CORE_LIB): $(SNES9X2002_BUILD_DEPS)
 	@echo "  CORE    snes9x2002"
 	$(Q)$(MAKE) -C $(CORES) snes9x2002 $(CORE_MAKE_ARGS)
+	$(Q)test -s $@ && touch $@
 
 $(QUICKNES_CORE_LIB): $(QUICKNES_BUILD_DEPS)
 	@echo "  CORE    quicknes"
 	$(Q)$(MAKE) -C $(CORES) quicknes $(CORE_MAKE_ARGS)
+	$(Q)test -s $@ && touch $@
 
 $(FCEUMM_CORE_LIB): $(FCEUMM_BUILD_DEPS)
 	@echo "  CORE    fceumm"
 	$(Q)$(MAKE) -C $(CORES) fceumm $(CORE_MAKE_ARGS)
+	$(Q)test -s $@ && touch $@
 
 $(GEARBOY_CORE_LIB): $(GEARBOY_BUILD_DEPS)
 	@echo "  CORE    gearboy"
 	$(Q)$(MAKE) -C $(CORES) gearboy $(CORE_MAKE_ARGS)
+	$(Q)test -s $@ && touch $@
 
 $(PCE_FAST_CORE_LIB): $(PCE_FAST_BUILD_DEPS) $(CHD_SUPPORT_CORE_LIB)
 	@echo "  CORE    pce-fast"
 	$(Q)$(MAKE) -C $(CORES) pce-fast $(CORE_MAKE_ARGS)
+	$(Q)test -s $@ && touch $@
 
 $(QPSX_CORE_LIB): $(QPSX_BUILD_DEPS)
 	@echo "  CORE    qpsx"
 	$(Q)$(MAKE) -C $(CORES) qpsx $(CORE_MAKE_ARGS)
+	$(Q)test -s $@ && touch $@
 
 $(PMP_VIDEO_CORE_LIB): $(PMP_VIDEO_BUILD_DEPS)
 	@echo "  CORE    pmp-video"
 	$(Q)$(MAKE) -C $(CORES) pmp-video $(CORE_MAKE_ARGS)
+	$(Q)test -s $@ && touch $@
 
 $(LIBRETRO_COMMON_LIB): $(LIBRETRO_COMMON_BUILD_DEPS)
 	@echo "  CORELIB libretro-common"
 	$(Q)$(MAKE) -C $(CORES) libretro-common $(CORE_MAKE_ARGS)
+	$(Q)test -s $@ && touch $@
 
 $(CHD_SUPPORT_CORE_LIB): $(CHD_SUPPORT_BUILD_DEPS)
 	@echo "  CORELIB libchdr-support"
 	$(Q)$(MAKE) -C $(CORES) chd-support $(CORE_MAKE_ARGS)
+	$(Q)test -s $@ && touch $@
 
 $(OUT)/$(TARGET).bin: $(OUT)/$(TARGET).out
 	@echo "  OBJCOPY $@"
 	$(Q)$(OBJCOPY) -O binary $< $@
 
-$(ASDPACK): tools/asdpack.c | $(BUILD)
+$(ASDPACK): tools/asdpack.c $(BUILD_CONFIG_STAMP) | $(BUILD)
 	@echo "  HOSTCC  $<"
 	$(Q)$(HOSTCC) $(HOSTCFLAGS) $< -o $@
 
@@ -1110,11 +1221,9 @@ $(ASD): $(OUT)/$(TARGET).bin $(ASDPACK)
 	@echo "  PACK    $@"
 	$(Q)$(ASDPACK) $< $@
 
-$(OUT)/unifrog.bin: $(OUT)/$(TARGET).bin FORCE | $(OUT)
+$(OUT)/unifrog.bin: $(OUT)/$(TARGET).bin | $(OUT)
 	@echo "  COPY    $@"
-	$(Q)cp $< $@
-
-FORCE:
+	$(Q)if test -f $@ && cmp -s $< $@; then touch $@; else cp $< $@; fi
 
 $(FASTBOOT_ASD): $(FASTBOOT_STUB_BIN) $(ASDPACK)
 	@echo "  PACK    $@"
@@ -1279,5 +1388,5 @@ clean:
 distclean: clean
 	$(Q)find . -type f \( -name '*~' -o -name '*.tmp' -o -name '.DS_Store' \) -exec rm -f {} +
 
-DEPFILES := $(wildcard $(BUILD)/*.d $(BUILD)/*/*.d)
+DEPFILES := $(shell test ! -d $(BUILD) || find $(BUILD) -type f -name '*.d')
 -include $(DEPFILES)

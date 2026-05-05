@@ -642,7 +642,7 @@ $(BUILD)/libretro-common/%.o: $(LIBRETRO_COMMON_DIR)/%.c | $(BUILD)
 	@mkdir -p $(dir $@)
 	$(CC) $(COMMON_CFLAGS) -MD -MP -c $< -o $@
 
-$(LIBRETRO_COMMON): doctor $(LIBRETRO_COMMON_OBJECTS) | $(OUT)
+$(LIBRETRO_COMMON): $(LIBRETRO_COMMON_OBJECTS) | $(OUT) doctor
 	@echo "  AR      $@"
 	$(AR) rcs $@ $(LIBRETRO_COMMON_OBJECTS)
 
@@ -688,7 +688,7 @@ $(BUILD)/chd-support/sf2000_%.o: support/%.c | $(BUILD)
 	@mkdir -p $(dir $@)
 	$(CC) $(CHD_SUPPORT_CFLAGS) -MD -MP -c $< -o $@
 
-$(CHD_SUPPORT_LIB): doctor $(CHD_SUPPORT_OBJECTS) | $(OUT)
+$(CHD_SUPPORT_LIB): $(CHD_SUPPORT_OBJECTS) | $(OUT) doctor
 	@echo "  AR      $@"
 	$(AR) rcs $@ $(CHD_SUPPORT_OBJECTS)
 
