@@ -32,7 +32,8 @@ static void frontend_video_state_reset(struct js2300_frontend *frontend)
    frontend->video_present_log_count = 0;
 }
 
-int frontend_fb_open(struct js2300_frontend *frontend)
+static int frontend_fb_open_tagged(struct js2300_frontend *frontend,
+   const char *tag, int redraw_logo)
 {
    int preserve_logo;
    unsigned flags;
@@ -60,8 +61,12 @@ int frontend_fb_open(struct js2300_frontend *frontend)
       (void)unifrog_boot_logo_present(&frontend->fb, "frontend-preserve");
       printf("unifrog boot_logo preserved current=%u buffers=%u redrawn=1\n",
          frontend->fb.current_buffer, frontend->fb.buffer_count);
-   } else {
+   } else if (redraw_logo) {
       (void)unifrog_boot_logo_present(&frontend->fb, "frontend");
+   } else {
+      printf("unifrog js fb ready blank tag=%s current=%u buffers=%u\n",
+         tag ? tag : "none", frontend->fb.current_buffer,
+         frontend->fb.buffer_count);
    }
    printf("unifrog js fb ready %ux%u stride=%u buffers=%u\n",
       frontend->fb.width, frontend->fb.height, frontend->fb.stride_pixels,
@@ -69,10 +74,17 @@ int frontend_fb_open(struct js2300_frontend *frontend)
    return 0;
 }
 
+int frontend_fb_open(struct js2300_frontend *frontend)
+{
+   return frontend_fb_open_tagged(frontend, "frontend", 1);
+}
+
 void frontend_fb_reopen(struct js2300_frontend *frontend, const char *tag)
 {
+   int redraw_logo = tag && strstr(tag, "return") ? 0 : 1;
+
    unifrog_fb_close(&frontend->fb);
-   if (frontend_fb_open(frontend) == 0) {
+   if (frontend_fb_open_tagged(frontend, tag, redraw_logo) == 0) {
       printf("unifrog js fb reopen tag=%s ret=0\n", tag ? tag : "none");
    } else {
       printf("unifrog js fb reopen tag=%s ret=-1\n", tag ? tag : "none");

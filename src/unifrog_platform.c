@@ -828,6 +828,30 @@ int unifrog_platform_recover_storage(const char *tag, unsigned attempts,
    return -1;
 }
 
+static int sd_runtime_restore_boot_after_failed_switch(const char *profile,
+   uintptr_t host, unsigned mount_attempts, unsigned mount_delay_ms)
+{
+   int restore_ret;
+   int mount_ret = 0;
+
+   sd_runtime_stage("restore", "failed switch restore begin", 0);
+   restore_ret = sd_runtime_reconfigure_host("restore", host, NULL);
+   if (mount_attempts) {
+      sd_runtime_stage("restore", "failed switch recover begin", restore_ret);
+      mount_ret = unifrog_platform_recover_storage("restore",
+         mount_attempts, mount_delay_ms);
+      sd_runtime_stage("restore", "failed switch recover done", mount_ret);
+   }
+   if (restore_ret == 0)
+      snprintf(sd_runtime_boot.active_profile,
+         sizeof(sd_runtime_boot.active_profile), "boot");
+   unifrog_log("unifrog sd runtime switch fallback profile=%s "
+          "restore_ret=%d mount_ret=%d active=%s\n",
+      profile ? profile : "", restore_ret, mount_ret,
+      sd_runtime_boot.active_profile);
+   return (restore_ret == 0 && mount_ret == 0) ? 0 : -1;
+}
+
 int unifrog_platform_sd_runtime_supported(void)
 {
    return sd_runtime_find_host() ? 1 : 0;
@@ -887,18 +911,19 @@ int unifrog_platform_sd_apply_profile(const char *profile,
 
    switch_ret = sd_runtime_reconfigure_host(profile, host, runtime_profile);
    if (switch_ret != 0) {
+      int restore_ret;
+
       sd_runtime_format_detail(profile, host, -1,
          unifrog_perf_time_ms() - start_ms, detail, detail_size);
       unifrog_log("unifrog sd runtime switch profile=%s ret=-1 "
              "reason=reconfigure_failed switch_ret=%d ms=%lu\n",
          profile, switch_ret,
          (unsigned long)(unifrog_perf_time_ms() - start_ms));
-      if (mount_attempts) {
-         sd_runtime_stage(profile, "recover begin", switch_ret);
-         mount_ret = unifrog_platform_recover_storage(profile,
-            mount_attempts, mount_delay_ms);
-         sd_runtime_stage(profile, "recover done", mount_ret);
-      }
+      restore_ret = sd_runtime_restore_boot_after_failed_switch(profile, host,
+         mount_attempts, mount_delay_ms);
+      unifrog_log("unifrog sd runtime switch profile=%s ret=-1 "
+             "reason=reconfigure_failed restore_ret=%d\n",
+         profile, restore_ret);
       return -1;
    }
 
@@ -923,7 +948,17 @@ int unifrog_platform_sd_apply_profile(const char *profile,
       (unsigned long)sd_read_u32(host, SD_MMC_HOST_ACTUAL_CLOCK_OFFSET),
       mount_ret);
 
-   return mount_ret == 0 ? 0 : -1;
+   if (mount_ret != 0) {
+      int restore_ret = sd_runtime_restore_boot_after_failed_switch(profile,
+         host, mount_attempts, mount_delay_ms);
+
+      unifrog_log("unifrog sd runtime switch profile=%s ret=-1 "
+             "reason=recover_failed restore_ret=%d\n",
+         profile, restore_ret);
+      return -1;
+   }
+
+   return 0;
 }
 
 int unifrog_platform_sd_restore_boot(unsigned mount_attempts,

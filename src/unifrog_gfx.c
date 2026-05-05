@@ -652,9 +652,9 @@ static int font_path_list_has_ttf(const char *path)
          size_t len = (size_t)(p - start);
 
          if ((len > 4 &&
-              strcasecmp(start + len - 4u, ".ttf") == 0) ||
+              strncasecmp(start + len - 4u, ".ttf", 4) == 0) ||
              (len > 4 &&
-              strcasecmp(start + len - 4u, ".otf") == 0))
+              strncasecmp(start + len - 4u, ".otf", 4) == 0))
             return 1;
          if (*p == '\0')
             break;

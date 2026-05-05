@@ -582,6 +582,9 @@ static int libretro_begin_read_profile(const char *profile, const char *tag)
 
    detail[0] = '\0';
    restore_detail[0] = '\0';
+   printf("unifrog libretro read_profile request profile=%s boot=%s tag=%s\n",
+      profile, UNIFROG_SD_MODE, tag ? tag : "");
+   (void)unifrog_log_flush();
    libretro_storage_quiet_begin(tag);
    printf("unifrog libretro read_profile begin profile=%s boot=%s tag=%s\n",
       profile, UNIFROG_SD_MODE, tag ? tag : "");
