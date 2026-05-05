@@ -657,7 +657,7 @@ static void storage_test_platform_stage(void *userdata,
       operation ? operation : "sd",
       stage ? stage : "");
    storage_test_progress(frontend, "Storage test", line,
-      "Last stage is kept in reboot diagnostics");
+      "Screen shows the last risky stage");
 }
 
 static unsigned storage_test_build_cases(struct storage_test_case *tests,
@@ -960,7 +960,7 @@ static int run_storage_test(struct js2300_frontend *frontend)
 
       restore_detail[0] = '\0';
       storage_test_progress(frontend, "Storage test", "Safe restart",
-         "Unmount, restart host, remount");
+         "Unmount and remount safe mode");
       safe_restart_ret = unifrog_platform_sd_restore_boot(
          STORAGE_TEST_SWITCH_ATTEMPTS, STORAGE_TEST_SWITCH_DELAY_MS,
          restore_detail, sizeof(restore_detail));

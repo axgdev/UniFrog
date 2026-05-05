@@ -80,9 +80,11 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 - The default build uses the reliable 1-bit SD profile. Developer -> Storage
   test can run a quick guarded runtime sweep from that safe boot: it buffers
   logs, shows progress on screen, prefers `/ROMS/test.md` when present,
-  verifies a safe remount first, records host caps/timing/mount status and the
-  last risky stage in reboot diagnostics, restores the safe boot profile, then
-  writes the report.
+  verifies a safe remount first, switches profiles through the SD bus
+  suspend/resume hooks, records host caps/timing/mount status, restores the
+  safe boot profile, then writes the report. The screen shows the most reliable
+  freeze stage; warm reboot diagnostics are secondary because full power cycles
+  can overwrite them before UniFrog starts.
 - `SD_MODE=hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, and `uhs` remain
   fixed-profile diagnostic boot builds. `logunifrog0009.txt` showed wide and
   UHS were unstable on the tested device.

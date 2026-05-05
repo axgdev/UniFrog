@@ -70,10 +70,12 @@ change, run `make clean && make verify`.
 SD builds default to the reliable 1-bit profile. In that safe build, Developer
 -> Storage test runs a quick guarded runtime sweep: it buffers logs, shows
 progress on screen, prefers `/ROMS/test.md` when present, verifies a safe
-remount first, records the last risky stage in reboot diagnostics, tries `hs1`,
-`wide50`, `uhs12`, `uhs25`, `wide`, and `uhs`, then restores the safe boot
-profile before writing `/unifrog/storage-test-result.txt` and the frontend
-report. Fixed-profile diagnostic boot builds are still available with
+remount first, switches profiles through the SD bus suspend/resume hooks, tries
+`hs1`, `wide50`, `uhs12`, `uhs25`, `wide`, and `uhs`, then restores the safe
+boot profile before writing `/unifrog/storage-test-result.txt` and the frontend
+report. The on-screen stage is the best freeze clue; warm reboot diagnostics may
+also keep it, but a full power cycle can overwrite that memory. Fixed-profile
+diagnostic boot builds are still available with
 `SD_MODE=hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, or `uhs`; these modes are
 experimental. Device logs rotate to `log-prev.txt` when `log.txt` grows past
 1 MiB. The board DTS in
