@@ -81,6 +81,7 @@ struct js2300_runtime {
    struct js2300_bytecode_entry bytecode_entries[JS2300_MAX_BYTECODE_ENTRIES];
    unsigned bytecode_entry_count;
    int bytecode_manifest_loaded;
+   int api_attached;
    uint32_t input_now;
    uint32_t input_prev;
    uint32_t native_call_count;
@@ -153,6 +154,8 @@ static void js2300_note_native_call(struct js2300_runtime *runtime)
 
 static char *build_script_path(const struct js2300_config *config,
                                const char *script_path);
+static int js_attach_api(JSContext *ctx);
+static int js2300_ensure_api(struct js2300_runtime *runtime);
 
 static char *build_entry_path(const struct js2300_config *config)
 {
@@ -509,6 +512,24 @@ static void log_bytecode_skip(struct js2300_runtime *runtime,
    host_log(runtime, line);
 }
 
+static void log_exception_message(struct js2300_runtime *runtime,
+                                  const char *prefix)
+{
+   JSCStringBuf buf;
+   JSValue exc;
+   const char *message;
+   char line[224];
+
+   if (!runtime || !runtime->ctx)
+      return;
+
+   exc = JS_GetException(runtime->ctx);
+   message = JS_ToCString(runtime->ctx, exc, &buf);
+   snprintf(line, sizeof(line), "%s %s", prefix ? prefix : "js2300 exception",
+            message ? message : "unknown");
+   host_log(runtime, line);
+}
+
 static JSValue eval_script_source(struct js2300_runtime *runtime,
                                   const char *path,
                                   char *source,
@@ -527,6 +548,11 @@ static JSValue eval_script_source(struct js2300_runtime *runtime,
          host_log(runtime, msg);
          return JS_ThrowInternalError(runtime->ctx, "script read failed");
       }
+   }
+
+   if (js2300_ensure_api(runtime) != 0) {
+      free(source);
+      return JS_ThrowInternalError(runtime->ctx, "api attach failed");
    }
 
    ret = JS_Eval(runtime->ctx, source, source_len, path, 0);
@@ -556,6 +582,11 @@ static JSValue eval_script_bytecode(struct js2300_runtime *runtime,
       *fallback_source = NULL;
    if (fallback_source_len)
       *fallback_source_len = 0;
+
+   if (runtime->api_attached) {
+      log_bytecode_skip(runtime, path, "api_attached");
+      return JS_UNINITIALIZED;
+   }
 
    entry = find_bytecode_entry(runtime, path);
    if (!entry) {
@@ -626,15 +657,21 @@ static JSValue eval_script_bytecode(struct js2300_runtime *runtime,
 
    ret = JS_LoadBytecode(runtime->ctx, (const uint8_t *)bytecode);
    if (JS_IsException(ret)) {
+      log_exception_message(runtime, "js2300 bytecode load_exception");
       free(bytecode);
       free(bytecode_path);
-      return ret;
+      return JS_UNINITIALIZED;
    }
 
    if (remember_bytecode_buffer(runtime, bytecode) != 0) {
       free(bytecode);
       free(bytecode_path);
       return JS_ThrowInternalError(runtime->ctx, "bytecode cache exhausted");
+   }
+
+   if (js2300_ensure_api(runtime) != 0) {
+      free(bytecode_path);
+      return JS_ThrowInternalError(runtime->ctx, "api attach failed");
    }
 
    ret = JS_Run(runtime->ctx, ret);
@@ -811,6 +848,20 @@ fail:
    return -1;
 }
 
+static int js2300_ensure_api(struct js2300_runtime *runtime)
+{
+   if (!runtime || !runtime->ctx)
+      return -1;
+   if (runtime->api_attached)
+      return 0;
+   if (js_attach_api(runtime->ctx) != 0) {
+      host_log(runtime, "js2300 attach api failed");
+      return -1;
+   }
+   runtime->api_attached = 1;
+   return 0;
+}
+
 int js2300_runtime_create(const struct js2300_config *config,
                           const struct js2300_host *host,
                           struct js2300_runtime **out_runtime)
@@ -858,13 +909,6 @@ int js2300_runtime_run(struct js2300_runtime *runtime)
    }
 
    active_runtime = runtime;
-   if (js_attach_api(runtime->ctx) != 0) {
-      host_log(runtime, "js2300 attach api failed");
-      js2300_close_context(runtime);
-      free(path);
-      return -1;
-   }
-
    host_log(runtime, "js2300 eval start");
    ret = eval_script_file(runtime, path, "entry");
    if (JS_IsException(ret)) {
