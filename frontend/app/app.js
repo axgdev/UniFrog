@@ -27,6 +27,7 @@ var systemItemLists = [];
 var currentItems = [];
 var currentSystem = "";
 var currentListTitle = "";
+var navStack = [];
 var running = true;
 var dirty = true;
 var prevInput = 0;
@@ -51,7 +52,6 @@ var launchFrameskipIndex = 1;
 var launchDisplayIndex = 0;
 var launchCoreIndex = 0;
 var launchCoreOptions = [];
-var launchBackView = HOME;
 var scriptItems = [];
 var systemCheckRows = [];
 var systemCheckTitle = "System Check";
@@ -62,6 +62,75 @@ var frontendReadyLogged = false;
 var motionStartMs = 0;
 var motionUntilMs = 0;
 var nextMarqueeMs = 0;
+var NAV_STACK_MAX = 16;
+
+function makeNavState() {
+  return {
+    view: view,
+    selected: selected,
+    scroll: scroll,
+    path: path,
+    filter: filter,
+    title: title,
+    entries: entries,
+    currentItems: currentItems,
+    currentSystem: currentSystem,
+    currentListTitle: currentListTitle,
+    pendingVideoPath: pendingVideoPath,
+    pendingGamePath: pendingGamePath,
+    pendingDeveloperCore: pendingDeveloperCore,
+    pendingDeveloperCorePath: pendingDeveloperCorePath,
+    scriptItems: scriptItems,
+    systemCheckRows: systemCheckRows,
+    systemCheckTitle: systemCheckTitle,
+    systemCheckDetail: systemCheckDetail
+  };
+}
+
+function restoreNavState(state) {
+  view = state.view;
+  selected = state.selected;
+  scroll = state.scroll;
+  path = state.path;
+  filter = state.filter;
+  title = state.title;
+  entries = state.entries ? state.entries : [];
+  currentItems = state.currentItems ? state.currentItems : [];
+  currentSystem = state.currentSystem ? state.currentSystem : "";
+  currentListTitle = state.currentListTitle ? state.currentListTitle : "";
+  pendingVideoPath = state.pendingVideoPath ? state.pendingVideoPath : "";
+  pendingGamePath = state.pendingGamePath ? state.pendingGamePath : "";
+  pendingDeveloperCore = state.pendingDeveloperCore ? state.pendingDeveloperCore : "";
+  pendingDeveloperCorePath = state.pendingDeveloperCorePath ?
+    state.pendingDeveloperCorePath : "";
+  scriptItems = state.scriptItems ? state.scriptItems : [];
+  systemCheckRows = state.systemCheckRows ? state.systemCheckRows : [];
+  systemCheckTitle = state.systemCheckTitle ? state.systemCheckTitle : "System Check";
+  systemCheckDetail = state.systemCheckDetail ? state.systemCheckDetail : "";
+  startMotion(JS2300.now());
+}
+
+function clearNav() {
+  navStack.length = 0;
+}
+
+function pushNav() {
+  var i;
+  if (navStack.length >= NAV_STACK_MAX) {
+    for (i = 1; i < navStack.length; i++)
+      navStack[i - 1] = navStack[i];
+    navStack.length = NAV_STACK_MAX - 1;
+  }
+  navStack[navStack.length] = makeNavState();
+}
+
+function goHome(now) {
+  clearNav();
+  view = HOME;
+  selected = 0;
+  scroll = 0;
+  showToast("Home", now);
+}
 
 function startMotion(now) {
   motionStartMs = now;
@@ -576,6 +645,7 @@ function refreshBrowser() {
 }
 
 function openBrowser(newTitle, newPath, newFilter) {
+  pushNav();
   title = newTitle;
   path = newPath;
   filter = newFilter;
@@ -684,6 +754,7 @@ function loadSystemCheckReport(now) {
   if (!text) return;
   show = parseSystemCheckReport(text);
   if (show) {
+    clearNav();
     selected = 0;
     scroll = 0;
     view = SYSTEM_CHECK;
@@ -844,7 +915,10 @@ function nativeIndexGames(now) {
   JS2300.log("frontend native index games=" + String(result.games) +
     " media=" + String(result.media) + " files=" + String(result.files) +
     " dirs=" + String(result.dirs) + " ms=" + String(result.ms));
+  clearNav();
   view = HOME;
+  selected = 0;
+  scroll = 0;
   return 1;
 }
 
@@ -859,7 +933,10 @@ function indexGames(now) {
   parseIndex(scan.gameText, 0);
   parseIndex(scan.mediaText, 1);
   showToast(String(scan.games) + " games indexed", now);
+  clearNav();
   view = HOME;
+  selected = 0;
+  scroll = 0;
 }
 
 function homeDetail(item) {
@@ -882,20 +959,6 @@ function countForSystem(name) {
     if (systems[i] === name) return systemCounts[i];
   }
   return 0;
-}
-
-function openSystemByName(name, now) {
-  var i;
-
-  for (i = 0; i < systems.length; i++) {
-    if (systems[i] === name) {
-      selected = i;
-      scroll = 0;
-      openSystemList(now);
-      return;
-    }
-  }
-  showToast("Index library first", now);
 }
 
 function iconFile(name) {
@@ -1465,20 +1528,39 @@ function repeated(mask, button, now, delay, interval) {
 }
 
 function openSystems(now) {
+  pushNav();
   selected = 0;
   scroll = 0;
   view = SYSTEMS;
   showToast(String(indexItems.length) + " games", now);
 }
 
-function openSystemList(now) {
-  currentSystem = systems[selected];
+function openSystemIndex(index, now) {
+  if (index < 0 || index >= systems.length) return;
+  pushNav();
+  currentSystem = systems[index];
   currentListTitle = currentSystem;
-  currentItems = systemItemLists[selected] ? systemItemLists[selected] : [];
+  currentItems = systemItemLists[index] ? systemItemLists[index] : [];
   selected = 0;
   scroll = 0;
   view = INDEX_LIST;
   showToast(String(currentItems.length) + " games", now);
+}
+
+function openSystemList(now) {
+  openSystemIndex(selected, now);
+}
+
+function openSystemByName(name, now) {
+  var i;
+
+  for (i = 0; i < systems.length; i++) {
+    if (systems[i] === name) {
+      openSystemIndex(i, now);
+      return;
+    }
+  }
+  showToast("Index library first", now);
 }
 
 function openMediaIndex(now) {
@@ -1486,6 +1568,7 @@ function openMediaIndex(now) {
     openBrowser("Media", "/media/mmcblk0", "media");
     return;
   }
+  pushNav();
   currentSystem = "Media";
   currentListTitle = "Media";
   currentItems = mediaItems;
@@ -1498,6 +1581,7 @@ function openMediaIndex(now) {
 function refreshScripts(now) {
   var list = JS2300.fs.list(SCRIPT_DIR);
   var i;
+  pushNav();
   scriptItems = [];
   for (i = 0; i < list.length; i++) {
     if (!list[i].dir && isScript(list[i].name)) {
@@ -1573,8 +1657,8 @@ function applyLaunchDefaults(full, preferredCore) {
 }
 
 function openGame(full, preferredCore, now) {
+  pushNav();
   pendingGamePath = full;
-  launchBackView = view;
   applyLaunchDefaults(full, preferredCore);
   view = LAUNCH;
   showToast("Launch options", now);
@@ -1585,6 +1669,7 @@ function openIndexedItem(now) {
   if (currentItems.length === 0) return;
   item = currentItems[selected];
   if (item.core === "video") {
+    pushNav();
     pendingVideoPath = item.path;
     selected = 0;
     view = VIDEO_MODE;
@@ -1604,11 +1689,13 @@ function openHomeItem(now) {
   else if (id === "index") indexGames(now);
   else if (id === "media") openMediaIndex(now);
   else if (id === "settings") {
+    pushNav();
     selected = 0;
     scroll = 0;
     view = SETTINGS;
     showToast("Settings", now);
   } else if (id === "developer") {
+    pushNav();
     selected = 0;
     scroll = 0;
     view = DEVELOPER;
@@ -1655,6 +1742,7 @@ function openEntry(now) {
   entry = entries[selected];
   full = joinPath(path, entry.name);
   if (entry.dir) {
+    pushNav();
     path = full;
     refreshBrowser();
   } else if (filter === "core" && isCoreFile(entry.name)) {
@@ -1665,6 +1753,7 @@ function openEntry(now) {
   } else if (filter === "core_path") {
     runDeveloperCoreWithPath(full, now);
   } else if (isVideo(entry.name)) {
+    pushNav();
     pendingVideoPath = full;
     selected = 0;
     view = VIDEO_MODE;
@@ -1679,48 +1768,16 @@ function openEntry(now) {
 }
 
 function back(now) {
-  var i;
+  var state;
   if (view === HOME) {
     showToast("Home", now);
-  } else if (view === LAUNCH) {
-    view = launchBackView;
+  } else if (navStack.length > 0) {
+    state = navStack[navStack.length - 1];
+    navStack.length = navStack.length - 1;
+    restoreNavState(state);
     showToast("Back", now);
-  } else if (view === VIDEO_MODE) {
-    if (currentListTitle === "Media") view = INDEX_LIST;
-    else view = BROWSER;
-    showToast("Back", now);
-  } else if (view === INDEX_LIST) {
-    if (currentListTitle === "Media") view = HOME;
-    else view = SYSTEMS;
-    showToast("Back", now);
-  } else if (view === SCRIPT_LIST) {
-    view = DEVELOPER;
-    selected = 0;
-    for (i = 0; i < developerItems.length; i++) {
-      if (developerItems[i].id === "scripts")
-        selected = i;
-    }
-    scroll = 0;
-    showToast("Developer", now);
-  } else if (view === SYSTEM_CHECK) {
-    view = HOME;
-    selected = 0;
-    scroll = 0;
-    showToast("Home", now);
-  } else if (view === SYSTEMS || view === SETTINGS || view === INPUT ||
-      view === ABOUT || view === DEVELOPER) {
-    view = HOME;
-    selected = 0;
-    scroll = 0;
-    showToast("Home", now);
-  } else if (view === BROWSER && path !== "/media/mmcblk0" && path !== "/media/mmcblk0/firmware") {
-    path = parentPath(path);
-    refreshBrowser();
   } else {
-    view = HOME;
-    selected = 0;
-    scroll = 0;
-    showToast("Home", now);
+    goHome(now);
   }
 }
 
@@ -1802,14 +1859,17 @@ function activateSetting(now) {
   } else if (id === "system_check") {
     runAction("developer:system_check", now);
   } else if (id === "input") {
+    pushNav();
     view = INPUT;
     showToast("Input monitor", now);
   } else if (id === "developer") {
+    pushNav();
     selected = 0;
     scroll = 0;
     view = DEVELOPER;
     showToast("Developer", now);
   } else if (id === "about") {
+    pushNav();
     view = ABOUT;
     showToast("About", now);
   } else {

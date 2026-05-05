@@ -1,8 +1,8 @@
 # Clock-Speed Resilience
 
-UniFrog can change the HC1512 SCPU clock at runtime before launching a core and
-from the in-game quick menu. Code that touches hardware must therefore not
-assume the boot-time `CONFIG_CPU_CLOCK_HZ` still matches the real CPU clock.
+UniFrog can change the HC1512 SCPU clock at runtime before launching a core.
+Code that touches hardware must therefore not assume the boot-time
+`CONFIG_CPU_CLOCK_HZ` still matches the real CPU clock.
 
 ## Failure Pattern
 
@@ -88,5 +88,5 @@ The UI exposes the guarded range that has been useful on hardware:
 - digital PLL profiles: 702, 756, 810, 864, and 918 MHz
 
 The current ceiling remains 918 MHz. Values above that are intentionally not
-accepted by the generic launch options or quick menu because earlier probing
-showed aggressive overclocking can freeze the device.
+accepted by the JavaScript launch options because earlier probing showed
+aggressive overclocking can freeze the device.

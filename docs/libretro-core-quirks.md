@@ -74,10 +74,10 @@ Diagnostic pattern:
 - If physical controls stop working after returning from a core, check that the
   core cleanup and JS relaunch paths call `unifrog_input_clear()`.
 
-## Save RAM and cheat files
+## Save RAM
 
-Save states are frontend-owned snapshots. In-game saves are libretro memory
-blocks and should use `retro_get_memory_data()` plus `retro_get_memory_size()`.
+In-game saves are libretro memory blocks and should use
+`retro_get_memory_data()` plus `retro_get_memory_size()`.
 
 UniFrog auto-loads and auto-saves `RETRO_MEMORY_SAVE_RAM` and
 `RETRO_MEMORY_RTC` under `/media/mmcblk0/unifrog/saves`. These files are the
@@ -86,18 +86,8 @@ loads them right after `retro_load_game()`, periodically hashes the exposed
 memory while the core runs, writes changed save memory in the background, and
 writes again on clean core exit.
 
-Do not add pause-menu entries named like in-game saves. They are easy to
-confuse with save states and they imply the user must manually export SRAM.
-
-Cheat loading uses standard `retro_cheat_reset()` and `retro_cheat_set()`.
-The pause menu looks for a sidecar `.cht` beside the ROM first, then for:
-
-```text
-/media/mmcblk0/unifrog/cheats/<core>-<rom-basename>.cht
-```
-
-Each non-empty, non-comment line is passed as one enabled cheat code. Lines may
-also use `name=code`; the text after `=` is used.
+Do not add native pause-menu entries for save states or cheats. Those are UI
+features and should be exposed through JavaScript bindings when needed.
 
 ## Compressed ROM loading
 
@@ -172,7 +162,7 @@ inside `retro_load_game()` identify the last completed load stage before the
 core starts running frames.
 
 QPSX's own startup menu is also multicore-oriented. UniFrog disables automatic
-entry into that menu and relies on the UniFrog launch/quick menus instead.
+entry into that menu and relies on the UniFrog JavaScript launch flow instead.
 Holding START during the first few qpsx frames still opens qpsx's internal menu
 as a recovery path. If qpsx stalls after `step=run_loop`, the host run watchdog
 should produce a bounded `UNIFROG CORE HANG` screen with the last frame marker.
