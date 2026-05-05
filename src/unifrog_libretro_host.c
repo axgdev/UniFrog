@@ -47,6 +47,9 @@
 #ifndef UNIFROG_SD_MODE
 #define UNIFROG_SD_MODE "unknown"
 #endif
+#ifndef UNIFROG_SD_READ_MODE
+#define UNIFROG_SD_READ_MODE "boot"
+#endif
 #ifndef UNIFROG_SD_EXPERIMENTAL
 #define UNIFROG_SD_EXPERIMENTAL 0
 #endif
@@ -468,6 +471,7 @@ static int experimental_sd_log_defer_begin(const char *tag)
    if (!UNIFROG_SD_EXPERIMENTAL)
       return 0;
    unifrog_log_defer_begin();
+   unifrog_platform_set_storage_log_suspended(1);
    printf("unifrog log defer begin tag=%s reason=experimental_sd mode=%s pending=%u capacity=%u\n",
       tag ? tag : "", UNIFROG_SD_MODE,
       (unsigned)unifrog_log_pending(), (unsigned)unifrog_log_capacity());
@@ -481,8 +485,8 @@ static void experimental_sd_log_defer_end(int active, const char *tag, int ret)
    printf("unifrog log defer end tag=%s reason=experimental_sd mode=%s ret=%d pending=%u deferred=%d\n",
       tag ? tag : "", UNIFROG_SD_MODE, ret,
       (unsigned)unifrog_log_pending(), unifrog_log_flush_deferred());
+   unifrog_platform_set_storage_log_suspended(0);
    unifrog_log_defer_end();
-   (void)unifrog_log_flush();
 }
 
 static int16_t audio_mix_buffer[2048 * 2];
@@ -535,6 +539,96 @@ static int libretro_recover_storage(const char *tag)
    if (!UNIFROG_SD_EXPERIMENTAL)
       return -1;
    return unifrog_platform_recover_storage(tag, 4, 100);
+}
+
+static int libretro_log_flush_force_if_safe(void)
+{
+   if (UNIFROG_SD_EXPERIMENTAL)
+      return 0;
+   return unifrog_log_flush_force();
+}
+
+static void libretro_storage_quiet_begin(const char *tag)
+{
+   unifrog_log_defer_begin();
+   unifrog_platform_set_storage_log_suspended(1);
+   printf("unifrog storage quiet begin tag=%s pending=%u capacity=%u\n",
+      tag ? tag : "", (unsigned)unifrog_log_pending(),
+      (unsigned)unifrog_log_capacity());
+}
+
+static void libretro_storage_quiet_end(const char *tag, int flush)
+{
+   printf("unifrog storage quiet end tag=%s pending=%u deferred=%d flush=%d\n",
+      tag ? tag : "", (unsigned)unifrog_log_pending(),
+      unifrog_log_flush_deferred(), flush ? 1 : 0);
+   unifrog_platform_set_storage_log_suspended(0);
+   unifrog_log_defer_end();
+   if (flush)
+      (void)unifrog_log_flush();
+}
+
+static int libretro_read_profile_enabled(void)
+{
+   const char *profile = UNIFROG_SD_READ_MODE;
+
+   if (!profile || !profile[0])
+      return 0;
+   if (strcmp(profile, "boot") == 0 || strcmp(profile, "safe") == 0 ||
+       strcmp(profile, "off") == 0 || strcmp(profile, "none") == 0)
+      return 0;
+   if (strcmp(profile, UNIFROG_SD_MODE) == 0)
+      return 0;
+   return 1;
+}
+
+static int libretro_begin_read_profile(const char *tag)
+{
+   char detail[160];
+   char restore_detail[160];
+   int ret;
+   int restore_ret;
+
+   if (!libretro_read_profile_enabled())
+      return 0;
+   if (!unifrog_platform_sd_runtime_supported()) {
+      printf("unifrog libretro read_profile skip profile=%s tag=%s reason=no_runtime\n",
+         UNIFROG_SD_READ_MODE, tag ? tag : "");
+      return 0;
+   }
+
+   detail[0] = '\0';
+   restore_detail[0] = '\0';
+   libretro_storage_quiet_begin(tag);
+   printf("unifrog libretro read_profile begin profile=%s boot=%s tag=%s\n",
+      UNIFROG_SD_READ_MODE, UNIFROG_SD_MODE, tag ? tag : "");
+   ret = unifrog_platform_sd_apply_profile(UNIFROG_SD_READ_MODE, 4, 100,
+      detail, sizeof(detail));
+   printf("unifrog libretro read_profile switch ret=%d profile=%s detail=%s\n",
+      ret, UNIFROG_SD_READ_MODE, detail);
+   if (ret == 0)
+      return 1;
+
+   restore_ret = unifrog_platform_sd_restore_boot(4, 100, restore_detail,
+      sizeof(restore_detail));
+   printf("unifrog libretro read_profile fallback restore_ret=%d detail=%s\n",
+      restore_ret, restore_detail);
+   libretro_storage_quiet_end(tag, 1);
+   return 0;
+}
+
+static void libretro_end_read_profile(int active, const char *tag, int ok)
+{
+   char detail[160];
+   int ret;
+
+   if (!active)
+      return;
+   detail[0] = '\0';
+   ret = unifrog_platform_sd_restore_boot(4, 100, detail, sizeof(detail));
+   printf("unifrog libretro read_profile restore ret=%d ok=%d profile=%s tag=%s detail=%s\n",
+      ret, ok ? 1 : 0, UNIFROG_SD_READ_MODE, tag ? tag : "", detail);
+   libretro_storage_quiet_end(tag, 1);
 }
 
 void unifrog_libretro_run_options_init(
@@ -922,7 +1016,7 @@ static int quick_save_memory_file(const struct libretro_core_api *core,
    if (ok)
       (void)quick_note_memory_hash(core, id);
    if (manual)
-      (void)unifrog_log_flush_force();
+      (void)libretro_log_flush_force_if_safe();
    return ok ? 0 : -1;
 }
 
@@ -962,7 +1056,7 @@ static int quick_load_memory_file(const struct libretro_core_api *core,
    if (ok)
       (void)quick_note_memory_hash(core, id);
    if (manual)
-      (void)unifrog_log_flush_force();
+      (void)libretro_log_flush_force_if_safe();
    return ok ? 0 : -1;
 }
 
@@ -1033,7 +1127,7 @@ static int quick_save_state_file(void)
          size == 0 ? "STATE UNSUPPORTED" : "STATE TOO LARGE");
       printf("unifrog quick save_state unsupported core=%s size=%u slot=%u\n",
          core->id, (unsigned)size, slot);
-      (void)unifrog_log_flush_force();
+      (void)libretro_log_flush_force_if_safe();
       return -1;
    }
 
@@ -1043,7 +1137,7 @@ static int quick_save_state_file(void)
          "STATE OUT OF MEMORY");
       printf("unifrog quick save_state oom core=%s size=%u slot=%u\n",
          core->id, (unsigned)size, slot);
-      (void)unifrog_log_flush_force();
+      (void)libretro_log_flush_force_if_safe();
       return -1;
    }
 
@@ -1077,7 +1171,7 @@ out:
    if (file)
       fclose(file);
    free(data);
-   (void)unifrog_log_flush_force();
+   (void)libretro_log_flush_force_if_safe();
    return ret;
 }
 
@@ -1107,7 +1201,7 @@ static int quick_load_state_file(void)
          size == 0 ? "STATE UNSUPPORTED" : "STATE TOO LARGE");
       printf("unifrog quick load_state unsupported core=%s size=%u slot=%u\n",
          core->id, (unsigned)size, slot);
-      (void)unifrog_log_flush_force();
+      (void)libretro_log_flush_force_if_safe();
       return -1;
    }
 
@@ -1117,7 +1211,7 @@ static int quick_load_state_file(void)
          "STATE OUT OF MEMORY");
       printf("unifrog quick load_state oom core=%s size=%u slot=%u\n",
          core->id, (unsigned)size, slot);
-      (void)unifrog_log_flush_force();
+      (void)libretro_log_flush_force_if_safe();
       return -1;
    }
 
@@ -1157,7 +1251,7 @@ out:
    if (file)
       fclose(file);
    free(data);
-   (void)unifrog_log_flush_force();
+   (void)libretro_log_flush_force_if_safe();
    return ret;
 }
 
@@ -2070,7 +2164,7 @@ static int quick_js_cycle_scpu(int delta)
    printf("unifrog quick_js scpu current=%u target=%u ret=%d now=%u restore_valid=%d budget=%u\n",
       current, next, host.scpu_apply_ret, unifrog_scpu_current_mhz(),
       host.scpu_restore_valid, host.frame_budget_count);
-   (void)unifrog_log_flush_force();
+   (void)libretro_log_flush_force_if_safe();
    return host.scpu_apply_ret == 0 ? (int)next : -1;
 }
 
@@ -2339,7 +2433,7 @@ static int quick_js_run(const struct libretro_core_api *core,
    start_us = host_time_us();
    printf("unifrog quick_js start entry=%s\n", LIBRETRO_QUICK_JS_ENTRY);
    unifrog_diag_memory_snapshot("quick_js.start");
-   (void)unifrog_log_flush_force();
+   (void)libretro_log_flush_force_if_safe();
    ret = js2300_runtime_create(&config, &js_host, &runtime);
    unifrog_diag_memory_snapshot("quick_js.created");
    if (ret == 0)
@@ -2352,7 +2446,7 @@ static int quick_js_run(const struct libretro_core_api *core,
    printf("unifrog quick_js done ret=%d action=%d ms=%u\n",
       ret, host.quick_js_action,
       host_elapsed_ms(start_us, host_time_us()));
-   (void)unifrog_log_flush_force();
+   (void)libretro_log_flush_force_if_safe();
 
    host.quick_js_frame_open = 0;
    host.presenter.cleared_buffer_mask = 0;
@@ -5190,6 +5284,10 @@ static int run_core(const struct libretro_core_api *core, const char *path,
    int ret = -1;
    int game_loaded = 0;
    int core_initialized = 0;
+   int run_loop_log_defer = 0;
+   int content_prepare_failed = 0;
+   int read_profile_retry_safe = 0;
+   int read_profile_active = 0;
 
    if (!libretro_core_available(core) || !path || !path[0])
       return -1;
@@ -5266,6 +5364,16 @@ static int run_core(const struct libretro_core_api *core, const char *path,
    probe_rom_seek_path(path);
    unifrog_diag_memory_snapshot("libretro.before_content_prepare");
    content_start_us = host_time_us();
+retry_content_prepare:
+   if (!read_profile_retry_safe && !info.need_fullpath &&
+       !path_is_wrapped_compressed(path)) {
+      read_profile_active = libretro_begin_read_profile("content_prepare");
+   } else if (!read_profile_retry_safe && libretro_read_profile_enabled()) {
+      printf("unifrog libretro read_profile skip profile=%s reason=%s path=%s\n",
+         UNIFROG_SD_READ_MODE,
+         info.need_fullpath ? "core_needs_fullpath" : "compressed_wrapper",
+         path);
+   }
    if (info.need_fullpath) {
       content_kind = "fullpath";
       if (path_is_zip(path)) {
@@ -5273,12 +5381,14 @@ static int run_core(const struct libretro_core_api *core, const char *path,
 
          if (!file) {
             printf("unifrog libretro zip open failed path=%s\n", path);
-            goto out_finish;
+            content_prepare_failed = 1;
+            goto out_content_prepare;
          }
          if (zip_extract_rom_to_cache(file, path, &info, prepared_path,
              sizeof(prepared_path)) != 0) {
             fclose(file);
-            goto out_finish;
+            content_prepare_failed = 1;
+            goto out_content_prepare;
          }
          fclose(file);
          game_path = prepared_path;
@@ -5286,8 +5396,10 @@ static int run_core(const struct libretro_core_api *core, const char *path,
          content_cache = 1;
       } else if (path_is_wrapped_compressed(path)) {
          if (extract_wrapped_compressed_to_cache(path, &info, prepared_path,
-             sizeof(prepared_path)) != 0)
-            goto out_finish;
+             sizeof(prepared_path)) != 0) {
+            content_prepare_failed = 1;
+            goto out_content_prepare;
+         }
          game_path = prepared_path;
          content_kind = "compressed_cache";
          content_cache = 1;
@@ -5307,8 +5419,10 @@ static int run_core(const struct libretro_core_api *core, const char *path,
             printf("unifrog libretro compressed memory fallback path=%s\n",
                path);
             if (extract_wrapped_compressed_to_cache(path, &info,
-                prepared_path, sizeof(prepared_path)) != 0)
-               goto out_finish;
+                prepared_path, sizeof(prepared_path)) != 0) {
+               content_prepare_failed = 1;
+               goto out_content_prepare;
+            }
             read_path = prepared_path;
             content_kind = "compressed_cache_read";
             content_cache = 1;
@@ -5317,18 +5431,24 @@ static int run_core(const struct libretro_core_api *core, const char *path,
          content_kind = path_is_zip(read_path) ? "zip_memory" : "raw_memory";
          if (path_is_zip(read_path)) {
             if (zip_load_rom_data_stream_path(read_path, &info, &rom_data,
-                &rom_size, NULL, 0) != 0)
-               goto out_finish;
+                &rom_size, NULL, 0) != 0) {
+               content_prepare_failed = 1;
+               goto out_content_prepare;
+            }
          } else {
             if (read_path_memory_with_fallback(read_path, &rom_data,
-                &rom_size, "READING") != 0)
-               goto out_finish;
+                &rom_size, "READING") != 0) {
+               content_prepare_failed = 1;
+               goto out_content_prepare;
+            }
          }
       }
       if (!rom_data) {
          if (read_path_memory_with_fallback(read_path, &rom_data,
-             &rom_size, "READ CACHE") != 0)
-            goto out_finish;
+             &rom_size, "READ CACHE") != 0) {
+            content_prepare_failed = 1;
+            goto out_content_prepare;
+         }
       }
       game.data = rom_data;
       game.size = rom_size;
@@ -5337,6 +5457,30 @@ static int run_core(const struct libretro_core_api *core, const char *path,
          (unsigned long)((uintptr_t)rom_data & 31u));
       (void)unifrog_log_flush();
    }
+out_content_prepare:
+   if (content_prepare_failed && read_profile_active &&
+       !read_profile_retry_safe) {
+      libretro_end_read_profile(read_profile_active, "content_prepare", 0);
+      read_profile_active = 0;
+      read_profile_retry_safe = 1;
+      content_prepare_failed = 0;
+      rom_free_aligned(rom_data);
+      rom_data = NULL;
+      rom_size = 0;
+      prepared_path[0] = '\0';
+      game_path = path;
+      game.path = path;
+      content_kind = "none";
+      content_cache = 0;
+      printf("unifrog libretro read_profile retry_safe profile=%s path=%s\n",
+         UNIFROG_SD_READ_MODE, path);
+      goto retry_content_prepare;
+   }
+   libretro_end_read_profile(read_profile_active, "content_prepare",
+      !content_prepare_failed);
+   read_profile_active = 0;
+   if (content_prepare_failed)
+      goto out_finish;
    host.content_alloc_appmem = 0;
    content_done_us = host_time_us();
    printf("unifrog load_time core=%s stage=content_prepare ms=%u kind=%s cache=%d bytes=%u path=%s source=%s\n",
@@ -5497,6 +5641,7 @@ static int run_core(const struct libretro_core_api *core, const char *path,
    (void)unifrog_log_flush();
    host_pace_begin();
    unifrog_log_defer_begin();
+   run_loop_log_defer = 1;
 
    for (;;) {
       uint32_t run_start = unifrog_perf_count();
@@ -5511,11 +5656,11 @@ static int run_core(const struct libretro_core_api *core, const char *path,
       if (exit_combo_down()) {
          printf("unifrog libretro quick_js core=%s frame=%u\n",
             core->id, host.run_frames);
-         (void)unifrog_log_flush_force();
+         (void)libretro_log_flush_force_if_safe();
          if (quick_js_run(core, path)) {
             printf("unifrog libretro return_to_js core=%s frame=%u\n",
                core->id, host.run_frames);
-            (void)unifrog_log_flush_force();
+            (void)libretro_log_flush_force_if_safe();
             break;
          }
          host_pace_begin();
@@ -5567,7 +5712,8 @@ out_deinit:
    unifrog_diag_memory_snapshot("libretro.out_deinit");
    libretro_watchdog_stop();
    host_report_perf(core->id, 1);
-   unifrog_log_defer_end();
+   if (run_loop_log_defer)
+      unifrog_log_defer_end();
    if (host.audio_open)
       unifrog_audio_close(&host.audio);
    if (host.presenter_open)
@@ -5796,14 +5942,10 @@ int unifrog_libretro_run_path_ex(const char *path,
       (void)unifrog_log_flush();
       return -1;
    }
-   if (UNIFROG_SD_EXPERIMENTAL &&
-       unifrog_platform_recover_storage("libretro_dispatch", 4, 100) != 0) {
-      printf("unifrog libretro dispatch storage_unavailable path=%s mode=%s\n",
-         path, UNIFROG_SD_MODE);
-      return -1;
-   }
-
    log_defer = experimental_sd_log_defer_begin("libretro_dispatch");
+   if (UNIFROG_SD_EXPERIMENTAL)
+      printf("unifrog libretro dispatch storage_precheck=skipped mode=%s path=%s\n",
+         UNIFROG_SD_MODE, path);
    core_id = options && options->core_id[0] ?
       libretro_canonical_core_id(options->core_id) :
       libretro_default_core_id_for_path(path);

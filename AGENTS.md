@@ -13,7 +13,7 @@ Keep this repository small and direct.
 - Dependency pins: `make deps-status` and `make upgrade-deps`; use
   `MODE=head|tag` only to override repository policy.
 - Defaults: `TOOLCHAIN=/opt/mipsel-mti-elf`, `SDK=unifrog-hcrtos-sdk`,
-  `DEPS=.deps`, `SD_MODE=safe`
+  `DEPS=.deps`, `SD_MODE=safe`, `SD_READ_MODE=uhs25`
 - SD diagnostics: the default `SD_MODE=safe` build can run Developer ->
   Storage test for a quick guarded sweep, or Storage full test for
   `/ROMS/probes/test*.md`. Full test restores safe mode and checkpoints its
@@ -21,6 +21,8 @@ Keep this repository small and direct.
   switches once, reads all probes, then restores safe mode. Use the on-screen
   stage as the primary freeze clue; power cycles can overwrite warm reboot
   diagnostics.
+  Runtime ROM reads use `SD_READ_MODE=uhs25` by default, then restore the boot
+  profile before core init. Use `SD_READ_MODE=boot` to disable that window.
   `SD_MODE=hs1|wide50|wide|uhs12|uhs25|uhs` are fixed-profile experimental
   boot builds.
 - Local overrides belong in untracked `config.mk`.

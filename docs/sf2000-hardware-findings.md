@@ -77,37 +77,41 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 ### Storage
 
 - The SD/MMC path is sensitive to signal integrity. A flat SD extender cable caused frequent CRC errors and automount churn.
-- The default build uses the reliable 1-bit SD profile. Developer -> Storage
-  test can run a quick guarded runtime sweep from that safe boot: it buffers
-  logs, shows progress on screen, prefers `/ROMS/test.md` when present,
-  verifies a safe remount first, switches profiles through the SD bus
-  suspend/resume hooks, records host caps/timing/mount status, restores the
-  safe boot profile, then writes the report. The screen shows the most reliable
-  freeze stage; warm reboot diagnostics are secondary because full power cycles
-  can overwrite them before UniFrog starts.
+- The default build boots with the reliable 1-bit SD profile and uses a guarded
+  `uhs25` window for read-to-memory ROM loads. Developer -> Storage test can
+  run a quick guarded runtime sweep from that safe boot: it buffers logs, shows
+  progress on screen, prefers `/ROMS/test.md` when present, verifies a safe
+  remount first, switches profiles through the SD bus suspend/resume hooks,
+  records host caps/timing/mount status, restores the safe boot profile, then
+  writes the report. The screen shows the most reliable freeze stage; warm
+  reboot diagnostics are secondary because full power cycles can overwrite them
+  before UniFrog starts.
 - `SD_MODE=hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, and `uhs` remain
   fixed-profile diagnostic boot builds. `logunifrog0009.txt` showed wide and
   UHS were unstable on the tested device.
 - SD cards support 1-bit and 4-bit transfer widths here. The HCRTOS MMC driver
   reports invalid `bus-width` values, so 2-bit and 3-bit profiles are not valid
   experiments.
-- Runtime profile switching is diagnostic-only. Storage test keeps a quick
-  guarded sweep. Storage full test reads `/ROMS/probes/test*.md`, returns to
-  safe mode after each experimental read, and checkpoints the report before the
-  next probe. Storage mode test switches to one selected profile, reads all
-  probes, then restores once; use it to separate sustained-read stability from
-  repeated suspend/resume stress. If an unstable mode wedges inside the MMC
-  command path, software recovery may still fail.
-- Experimental SD builds defer file-log flushes during game launch where
-  possible and retry storage recovery around frontend, index, and ROM reads.
-  This improves observability and transient recovery, but it is not a substitute
-  for a stable bus.
+- Runtime profile switching is used for diagnostics and for the default
+  ROM-load read window: `SD_READ_MODE=uhs25` switches only for read-to-memory
+  content prep, restores the safe boot profile before core init, and retries
+  the read in safe mode if the fast window fails. Storage full test reads
+  `/ROMS/probes/test*.md`, returns to safe mode after each experimental read,
+  and checkpoints the report before the next probe. Storage mode test switches
+  to one selected profile, reads all probes, then restores once; use it to
+  separate sustained-read stability from repeated suspend/resume stress. If an
+  unstable mode wedges inside the MMC command path, software recovery may still
+  fail.
+- Experimental SD builds defer file-log flushes during game launch and libretro
+  quick-menu activity where possible. This reduces storage contention, but it is
+  not a substitute for a stable bus.
 - Trust the `unifrog storage config` line when comparing SD modes. It reports
   the DTB profile actually seen by the kernel (`bus-width`, high-speed, UHS,
   and 1.8 V flags).
-- `logunifrog0010.txt` confirmed `SD_MODE=uhs`, but GBA ZIP preparation was
-  still about 5.7 s and did not beat the best reliable 1-bit runs. The run
-  still showed boot-time automount churn, but no mid-session unmount lines.
+- `logunifrog0022-*` fixed-profile boots still failed before libretro dispatch
+  when launching a ROM. The runtime single-mode tests were better isolated:
+  `uhs25` passed every probe and reached about 14 MiB/s on the 50 MiB read,
+  while `wide50`, `uhs12`, and `uhs` still showed read failures.
 - UniFrog keeps `/log.txt` bounded: when it grows past 1 MiB at boot, it moves
   the previous file to `/log-prev.txt` before appending the new run.
 - The SDK file UART appends lazily after mount and syncs only after larger

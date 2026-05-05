@@ -67,8 +67,10 @@ Dependency status and upgrades follow the policy declared beside each pin; use
 verification before handing off changes. If linker scripts or link libraries
 change, run `make clean && make verify`.
 
-SD builds default to the reliable 1-bit profile. In that safe build, Developer
--> Storage test runs a quick guarded runtime sweep: it buffers logs, shows
+SD builds boot with the reliable 1-bit profile. ROM loads use a guarded
+`SD_READ_MODE=uhs25` read window by default, then restore the boot profile
+before core init; use `SD_READ_MODE=boot` to disable it. In the safe build,
+Developer -> Storage test runs a quick guarded runtime sweep: it buffers logs, shows
 progress on screen, prefers `/ROMS/test.md` when present, verifies a safe
 remount first, switches profiles through the SD bus suspend/resume hooks, tries
 `hs1`, `wide50`, `uhs12`, `uhs25`, `wide`, and `uhs`, then restores the safe

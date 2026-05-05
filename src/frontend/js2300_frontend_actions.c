@@ -1628,10 +1628,19 @@ int host_action(void *opaque, const char *id)
    run_path = parse_run_action(frontend, id);
    if (run_path) {
       char path[JS2300_FRONTEND_MAX_PATH];
+      size_t old_auto_flush = 0;
       uint32_t start_ms;
+      int storage_quiet = 0;
       int ret;
 
       unifrog_text_copy(path, sizeof(path), run_path);
+      if (UNIFROG_SD_EXPERIMENTAL) {
+         old_auto_flush = unifrog_log_auto_flush_bytes();
+         unifrog_log_set_auto_flush_bytes(0);
+         unifrog_log_defer_begin();
+         unifrog_platform_set_storage_log_suspended(1);
+         storage_quiet = 1;
+      }
       printf("js2300 action run warm path=%s core=%s corefile=%s audio=%d gain=%u scpu=%u ge=%d backlight=%d fs=%d display=%d\n",
          path,
          frontend->run_options.core_id[0] ?
@@ -1651,6 +1660,11 @@ int host_action(void *opaque, const char *id)
       printf("js2300 action run warm ret=%d ms=%lu path=%s\n",
          ret, (unsigned long)(unifrog_perf_time_ms() - start_ms), path);
       unifrog_diag_memory_snapshot("frontend.warm_run_return");
+      if (storage_quiet) {
+         unifrog_platform_set_storage_log_suspended(0);
+         unifrog_log_defer_end();
+         unifrog_log_set_auto_flush_bytes(old_auto_flush);
+      }
       frontend_fb_reopen(frontend, "warm_libretro_return");
       unifrog_input_clear();
       frontend->input_recovered = 1;

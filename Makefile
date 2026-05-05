@@ -18,6 +18,7 @@ MQUICKJS_REF ?= ee50431eac9b14b99f722b537ec4cac0c8dd75ab
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 SD_MODE ?= safe
+SD_READ_MODE ?= $(if $(filter safe,$(SD_MODE)),uhs25,boot)
 
 -include config.mk
 
@@ -81,9 +82,13 @@ OPT_FAST ?= -O2
 OPT_AUDIO ?= -Os
 OPT_FLAGS := -O0 -O1 -O2 -O3 -Os -Og -Ofast
 SD_MODES := safe hs1 wide50 wide uhs12 uhs25 uhs
+SD_READ_MODES := boot off none safe hs1 wide50 wide uhs12 uhs25 uhs
 
 ifneq ($(filter $(SD_MODE),$(SD_MODES)),$(SD_MODE))
 $(error SD_MODE must be one of: $(SD_MODES))
+endif
+ifneq ($(filter $(SD_READ_MODE),$(SD_READ_MODES)),$(SD_READ_MODE))
+$(error SD_READ_MODE must be one of: $(SD_READ_MODES))
 endif
 
 SD_CLOCK_FREQUENCY := 198000000
@@ -204,6 +209,7 @@ DEFINES := \
 	-DSF2000 \
 	-DSUPPORT_FFPLAYER \
 	-DUNIFROG_SD_MODE=\"$(SD_MODE)\" \
+	-DUNIFROG_SD_READ_MODE=\"$(SD_READ_MODE)\" \
 	-DUNIFROG_SD_EXPERIMENTAL=$(SD_EXPERIMENTAL) \
 	-DUNIFROG_GIT_COMMIT=\"$(UNIFROG_GIT_COMMIT)\" \
 	-DUNIFROG_GIT_DIRTY=$(UNIFROG_GIT_DIRTY) \
@@ -547,6 +553,7 @@ help:
 	@echo "  make V=1           Show full compiler/linker commands"
 	@echo "  make SD_MODE=safe  Use the default reliable 1-bit SD profile"
 	@echo "                     Developer -> Storage test quick-sweeps SD profiles"
+	@echo "  make SD_READ_MODE=boot  Disable the runtime fast-read ROM window"
 	@echo "  make SD_MODE=hs1   Diagnostic 1-bit high-speed SD build"
 	@echo "  make SD_MODE=wide50 Diagnostic 4-bit high-speed, lower-clock SD build"
 	@echo "  make SD_MODE=wide  Diagnostic 4-bit high-speed SD build"
@@ -568,6 +575,7 @@ print-config:
 	@echo "HOSTCC=$(HOSTCC)"
 	@echo "DTC=$(DTC)"
 	@echo "SD_MODE=$(SD_MODE)"
+	@echo "SD_READ_MODE=$(SD_READ_MODE)"
 	@echo "SD_CLOCK_FREQUENCY=$(SD_CLOCK_FREQUENCY)"
 	@echo "SD_BUS_WIDTH=$(SD_BUS_WIDTH)"
 	@echo "SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED)"
@@ -957,7 +965,7 @@ $(CORE_REV_STAMP): FORCE | $(BUILD)
 	if test "$$value" != "$$old"; then printf '%s\n' "$$value" > $@; fi
 
 $(BUILD_IDENTITY_STAMP): FORCE | $(BUILD)
-	$(Q)value="$(UNIFROG_GIT_COMMIT) $(UNIFROG_GIT_DIRTY) $(UNIFROG_SDK_GIT_COMMIT) $(UNIFROG_CORES_GIT_COMMIT) $(UNIFROG_JS2300_GIT_COMMIT) $(UNIFROG_FRONTEND_GIT_COMMIT) $(SD_MODE) $(SD_EXPERIMENTAL)"; \
+	$(Q)value="$(UNIFROG_GIT_COMMIT) $(UNIFROG_GIT_DIRTY) $(UNIFROG_SDK_GIT_COMMIT) $(UNIFROG_CORES_GIT_COMMIT) $(UNIFROG_JS2300_GIT_COMMIT) $(UNIFROG_FRONTEND_GIT_COMMIT) $(SD_MODE) $(SD_READ_MODE) $(SD_EXPERIMENTAL)"; \
 	old=$$(cat $@ 2>/dev/null || true); \
 	if test "$$value" != "$$old"; then printf '%s\n' "$$value" > $@; fi
 
