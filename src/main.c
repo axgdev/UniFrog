@@ -50,6 +50,28 @@ static void *frontend_thread(void *arg);
 static int start_frontend_thread(void);
 static int frontend_started;
 
+static char *fast_ui_boot_excludes[] = {
+   "apll_dai",
+   "audsink",
+   "auddec",
+   "avsync",
+   "cjc8988_dai",
+   "cjc8990_dai",
+   "cs4344_dai",
+   "hc16xx_link",
+   "i2s_dai",
+   "i2si_platform",
+   "i2so_platform",
+   "llav_vdec",
+   "pwm_dac_dai",
+   "spin_platform",
+   "spo_dai",
+   "spo_platform",
+   "viddec",
+   "vidsink",
+   "wm8960_for_i2si_dai",
+};
+
 static void *frontend_thread(void *arg)
 {
    int storage_ready;
@@ -147,10 +169,20 @@ __initcall(sf2000_start)
 static void app_main(void *pvParameters)
 {
    int module_ret;
+   uint32_t module_start_ms;
+   uint32_t module_done_ms;
 
    (void)pvParameters;
 
-   module_ret = module_init("all");
+   module_start_ms = unifrog_perf_time_ms();
+   module_ret = module_init2("all",
+      (int)(sizeof(fast_ui_boot_excludes) / sizeof(fast_ui_boot_excludes[0])),
+      fast_ui_boot_excludes);
+   module_done_ms = unifrog_perf_time_ms();
+   printf("unifrog fast_ui_boot module_init ret=%d ms=%lu excludes=%lu\n",
+      module_ret, (unsigned long)(module_done_ms - module_start_ms),
+      (unsigned long)(sizeof(fast_ui_boot_excludes) /
+         sizeof(fast_ui_boot_excludes[0])));
    if (module_ret != 0)
       printf("module_init all failed ret=%d, starting frontend fallback\n", module_ret);
    start_frontend_thread();

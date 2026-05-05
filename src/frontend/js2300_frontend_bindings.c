@@ -1,15 +1,74 @@
 #include "js2300_frontend_internal.h"
 
+#define BOOT_LOGO_WIDTH 256u
+#define BOOT_LOGO_HEIGHT 100u
+#define BOOT_LOGO_BACKLIGHT 70u
+
+#include "../../assets/boot/unifrog-logo-rgb565.inc"
+
+static void frontend_present_boot_logo(struct js2300_frontend *frontend)
+{
+   struct unifrog_surface surface;
+   unsigned x0;
+   unsigned y0;
+   unsigned x;
+   unsigned y;
+   unsigned pos = 0;
+   unsigned i;
+   uint16_t *dst;
+   int ret;
+
+   if (!frontend || !frontend->fb.pixels ||
+       frontend->fb.width < BOOT_LOGO_WIDTH ||
+       frontend->fb.height < BOOT_LOGO_HEIGHT)
+      return;
+
+   frontend->draw_buffer = frontend->fb.current_buffer;
+   surface = unifrog_fb_surface_for_buffer(&frontend->fb, frontend->draw_buffer);
+   unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height, 0);
+   x0 = (surface.width - BOOT_LOGO_WIDTH) / 2u;
+   y0 = (surface.height - BOOT_LOGO_HEIGHT) / 2u;
+   for (i = 0; i + 1 < UNIFROG_BOOT_LOGO_RLE_WORDS; i += 2u) {
+      uint16_t color = unifrog_boot_logo_rle[i];
+      unsigned count = unifrog_boot_logo_rle[i + 1u];
+      while (count-- && pos < BOOT_LOGO_WIDTH * BOOT_LOGO_HEIGHT) {
+         x = pos % BOOT_LOGO_WIDTH;
+         y = pos / BOOT_LOGO_WIDTH;
+         dst = surface.pixels + (y0 + y) * surface.stride + x0;
+         dst[x] = color;
+         pos++;
+      }
+   }
+
+   unifrog_fb_flush_buffer(&frontend->fb, frontend->draw_buffer);
+   (void)unifrog_fb_pan(&frontend->fb, frontend->draw_buffer);
+   frontend->frame_open = 0;
+   (void)unifrog_av_set_mode(0);
+   ret = unifrog_backlight_set(BOOT_LOGO_BACKLIGHT);
+   printf("unifrog boot_logo shown %ux%u backlight=%u ret=%d\n",
+      BOOT_LOGO_WIDTH, BOOT_LOGO_HEIGHT, BOOT_LOGO_BACKLIGHT, ret);
+}
+
 int frontend_fb_open(struct js2300_frontend *frontend)
 {
+   unsigned i;
+
    if (unifrog_fb_open(&frontend->fb, UNIFROG_FB_OPEN_DEFAULT) != 0) {
       printf("unifrog js fb open failed\n");
       return -1;
    }
    if (unifrog_fb_set_buffer_count(&frontend->fb, 2) != 0)
       (void)unifrog_fb_set_buffer_count(&frontend->fb, 1);
+   for (i = 0; i < frontend->fb.buffer_count; i++) {
+      struct unifrog_surface surface =
+         unifrog_fb_surface_for_buffer(&frontend->fb, i);
+      unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height, 0);
+      unifrog_fb_flush_buffer(&frontend->fb, i);
+   }
+   (void)unifrog_fb_pan(&frontend->fb, frontend->fb.current_buffer);
    frontend->draw_buffer = frontend->fb.current_buffer;
    frontend->frame_open = 0;
+   frontend_present_boot_logo(frontend);
    printf("unifrog js fb ready %ux%u stride=%u buffers=%u\n",
       frontend->fb.width, frontend->fb.height, frontend->fb.stride_pixels,
       frontend->fb.buffer_count);

@@ -12,6 +12,7 @@
 #include <hcuapi/gpio.h>
 #include <hcuapi/pinpad.h>
 #include <hcuapi/snd.h>
+#include <kernel/module.h>
 
 #include <unifrog/log.h>
 
@@ -88,6 +89,42 @@ static void set_stock_audio_output_gate(int enabled)
       gpio_set_output(PINPAD_R07, enabled ? false : true);
       set_reg_gate(GPIO_R_DIR, GPIO_R_OUTPUT, GPIO_R07_MASK, enabled);
    }
+}
+
+static int ensure_audio_drivers(void)
+{
+   static int initialized;
+   static int result;
+   static char *modules[] = {
+      "apll_dai",
+      "avsync",
+      "cjc8990_dai",
+      "cjc8988_dai",
+      "cs4344_dai",
+      "pwm_dac_dai",
+      "i2s_dai",
+      "i2si_platform",
+      "i2so_platform",
+      "spo_dai",
+      "spo_platform",
+      "spin_platform",
+      "hc16xx_link",
+      "auddec",
+      "audsink",
+   };
+
+   if (initialized)
+      return result;
+
+   initialized = 1;
+   for (size_t i = 0; i < sizeof(modules) / sizeof(modules[0]); i++) {
+      int ret = module_init(modules[i]);
+
+      printf("unifrog audio lazy_module name=%s ret=%d\n", modules[i], ret);
+      if (ret != 0 && result == 0)
+         result = ret;
+   }
+   return result;
 }
 
 static int open_audsink(struct unifrog_audio *audio,
@@ -199,6 +236,8 @@ int unifrog_audio_open_backend(struct unifrog_audio *audio,
       periods = UNIFROG_AUDIO_DEFAULT_PERIODS;
    if (period_bytes & 31u)
       period_bytes = (period_bytes + 31u) & ~31u;
+
+   (void)ensure_audio_drivers();
 
    if (backend == UNIFROG_AUDIO_BACKEND_AUDSINK)
       return open_audsink(audio, rate, channels, period_bytes, periods);

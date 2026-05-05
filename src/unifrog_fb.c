@@ -62,7 +62,6 @@ int unifrog_fb_open(struct unifrog_fb *fb, unsigned flags)
        get_var(fd, &var) != 0)
       goto fail;
 
-   ioctl(fd, FBIOBLANK, FB_BLANK_UNBLANK);
    ioctl(fd, HCFBIOSET_MMAP_CACHE,
       (flags & UNIFROG_FB_OPEN_CACHED) ? HCFB_MMAP_CACHE : HCFB_MMAP_NO_CACHE);
 
@@ -89,6 +88,10 @@ int unifrog_fb_open(struct unifrog_fb *fb, unsigned flags)
    if (fb->buffer_count == 0 || fb->buffer_count > fb->max_buffers)
       fb->buffer_count = 1;
    fb->current_buffer = 0;
+   memset(fb->pixels, 0, fb->visible_bytes);
+   unifrog_perf_cache_flush(fb->pixels, fb->visible_bytes);
+   (void)unifrog_fb_pan(fb, 0);
+   ioctl(fd, FBIOBLANK, FB_BLANK_UNBLANK);
    return 0;
 
 fail:

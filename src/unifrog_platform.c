@@ -27,7 +27,7 @@
 extern unsigned long PINMUXL;
 extern unsigned long PINMUXR;
 
-#define STORAGE_STABLE_SAMPLES 2
+#define STORAGE_STABLE_SAMPLES 1
 #define STORAGE_MAX_POLLS 100
 #define STORAGE_POLL_MS 100
 #define SD_RUNTIME_QUIESCE_MS 100u
@@ -598,7 +598,7 @@ static void apply_clock_defaults(void)
 static void init_board_gpios(void)
 {
    gpio_configure(PINPAD_R05, GPIO_DIR_OUTPUT);
-   gpio_set_output(PINPAD_R05, false);
+   gpio_set_output(PINPAD_R05, true);
 
    gpio_configure(PINPAD_L00, GPIO_DIR_OUTPUT);
    gpio_set_output(PINPAD_L00, false);
