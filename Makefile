@@ -363,6 +363,7 @@ UNIFROG_OBJECTS := \
 	$(BUILD)/unifrog_backlight.o \
 	$(BUILD)/unifrog_battery.o \
 	$(BUILD)/unifrog_boot.o \
+	$(BUILD)/unifrog_boot_logo.o \
 	$(BUILD)/unifrog_boot_trace.o \
 	$(BUILD)/unifrog_core_module_loader.o \
 	$(BUILD)/unifrog_diag.o \

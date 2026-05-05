@@ -25,12 +25,30 @@ static int get_var(int fd, struct fb_var_screeninfo *var)
    return ioctl(fd, FBIOGET_VSCREENINFO, var);
 }
 
-static int put_rgb565_var(int fd, struct fb_var_screeninfo *var)
+static int put_rgb565_var(int fd, struct fb_var_screeninfo *var, unsigned flags)
 {
-   var->xoffset = 0;
-   var->yoffset = 0;
-   var->xres_virtual = var->xres;
-   var->yres_virtual = var->yres;
+   unsigned xoffset = var->xoffset;
+   unsigned yoffset = var->yoffset;
+
+   if (flags & UNIFROG_FB_OPEN_PRESERVE) {
+      if (var->xres_virtual < var->xres)
+         var->xres_virtual = var->xres;
+      if (var->yres_virtual < var->yres)
+         var->yres_virtual = var->yres;
+      if (xoffset + var->xres <= var->xres_virtual)
+         var->xoffset = xoffset;
+      else
+         var->xoffset = 0;
+      if (yoffset + var->yres <= var->yres_virtual)
+         var->yoffset = yoffset;
+      else
+         var->yoffset = 0;
+   } else {
+      var->xoffset = 0;
+      var->yoffset = 0;
+      var->xres_virtual = var->xres;
+      var->yres_virtual = var->yres;
+   }
    var->bits_per_pixel = 16;
    var->red.length = 5;
    var->green.length = 6;
@@ -57,7 +75,7 @@ int unifrog_fb_open(struct unifrog_fb *fb, unsigned flags)
    memset(&fix, 0, sizeof(fix));
    if (ioctl(fd, FBIOGET_FSCREENINFO, &fix) != 0 ||
        get_var(fd, &var) != 0 ||
-       put_rgb565_var(fd, &var) != 0 ||
+       put_rgb565_var(fd, &var, flags) != 0 ||
        ioctl(fd, FBIOGET_FSCREENINFO, &fix) != 0 ||
        get_var(fd, &var) != 0)
       goto fail;
@@ -87,11 +105,15 @@ int unifrog_fb_open(struct unifrog_fb *fb, unsigned flags)
    fb->buffer_count = var.yres ? var.yres_virtual / var.yres : 1;
    if (fb->buffer_count == 0 || fb->buffer_count > fb->max_buffers)
       fb->buffer_count = 1;
-   fb->current_buffer = 0;
-   memset(fb->pixels, 0, fb->visible_bytes);
-   unifrog_perf_cache_flush(fb->pixels, fb->visible_bytes);
-   (void)unifrog_fb_pan(fb, 0);
-   ioctl(fd, FBIOBLANK, FB_BLANK_UNBLANK);
+   fb->current_buffer = var.yres ? var.yoffset / var.yres : 0;
+   if (fb->current_buffer >= fb->buffer_count)
+      fb->current_buffer = 0;
+   if (!(flags & UNIFROG_FB_OPEN_PRESERVE)) {
+      memset(fb->pixels, 0, fb->visible_bytes);
+      unifrog_perf_cache_flush(fb->pixels, fb->visible_bytes);
+      (void)unifrog_fb_pan(fb, 0);
+      ioctl(fd, FBIOBLANK, FB_BLANK_UNBLANK);
+   }
    return 0;
 
 fail:
@@ -107,7 +129,7 @@ void unifrog_fb_close(struct unifrog_fb *fb)
       return;
    if (fb->pixels)
       munmap(fb->pixels, fb->smem_len);
-   if (fb->fd > 0)
+   if (fb->fd >= 0)
       close(fb->fd);
    clear_fb(fb);
 }

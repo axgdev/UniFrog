@@ -12,6 +12,7 @@
 #include <pthread.h>
 
 #include <frontend/js2300_frontend.h>
+#include <unifrog/boot_logo.h>
 #include <unifrog/boot_trace.h>
 #include <unifrog/diag.h>
 #include <unifrog/log.h>
@@ -212,6 +213,8 @@ static void app_main(void *pvParameters)
          sizeof(fast_ui_boot_excludes[0])));
    if (module_ret != 0)
       printf("module_init all failed ret=%d, starting frontend fallback\n", module_ret);
+   else
+      (void)unifrog_boot_logo_present_early();
    start_frontend_thread();
 
    setenv("TZ", CONFIG_APP_TIMEZONE, 1);

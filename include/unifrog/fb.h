@@ -14,6 +14,7 @@ extern "C" {
 enum unifrog_fb_open_flags {
    UNIFROG_FB_OPEN_DEFAULT = 0,
    UNIFROG_FB_OPEN_CACHED = 1u << 0,
+   UNIFROG_FB_OPEN_PRESERVE = 1u << 1,
 };
 
 struct unifrog_fb {

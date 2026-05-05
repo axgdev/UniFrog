@@ -24,6 +24,7 @@
 #include <unifrog/backlight.h>
 #include <unifrog/battery.h>
 #include <unifrog/boot.h>
+#include <unifrog/boot_logo.h>
 #include <unifrog/boot_trace.h>
 #include <unifrog/diag.h>
 #include <unifrog/fb.h>

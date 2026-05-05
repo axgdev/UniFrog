@@ -15,6 +15,7 @@
 
 #include <cpu_func.h>
 #include <fastboot/handoff.h>
+#include <unifrog/boot_logo.h>
 #include <unifrog/boot_trace.h>
 #include <unifrog/log.h>
 #include <unifrog/perf.h>
@@ -598,8 +599,10 @@ static void apply_clock_defaults(void)
 
 static void init_board_gpios(void)
 {
-   gpio_configure(PINPAD_R05, GPIO_DIR_OUTPUT);
-   gpio_set_output(PINPAD_R05, true);
+   if (!unifrog_boot_logo_is_active()) {
+      gpio_configure(PINPAD_R05, GPIO_DIR_OUTPUT);
+      gpio_set_output(PINPAD_R05, true);
+   }
 
    gpio_configure(PINPAD_L00, GPIO_DIR_OUTPUT);
    gpio_set_output(PINPAD_L00, false);
