@@ -49,6 +49,18 @@ host-only sources, warning policy, and static libretro symbol renames.
 
 Do not commit the fetched upstream source trees.
 
+## License Notes
+
+Core source trees are third-party code and do not inherit UniFrog's MIT
+license. Before enabling a new core in the package, add its upstream license
+and source location to `../THIRD_PARTY.md`.
+
+The release package includes binary core modules, so license obligations follow
+the enabled module set. Several configured cores are GPL-family or
+non-commercial licensed. Keep the source path reproducible through
+`cores/manifest.mk` pins plus `cores/patches/<name>/`, and avoid copying
+upstream source into this repository.
+
 ## ABI Contract
 
 Generic cores should stay close to stock libretro. Specialized cores may include

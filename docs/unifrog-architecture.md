@@ -22,6 +22,9 @@ output/libunifrog.a               Runtime archive used by modules
 output/sdcard/bios/bisrv.asd      Fastboot image installed as stock firmware
 output/sdcard/firmware/unifrog.bin  Raw firmware loaded by fastboot
 output/sdcard/unifrog/            SD-card frontend, modules, and cores
+output/sdcard/unifrog/LICENSE.txt UniFrog license notice
+output/sdcard/unifrog/THIRD_PARTY.md
+                                  Third-party attribution and source notes
 ```
 
 ## JavaScript Boundary
@@ -48,6 +51,10 @@ Packaged JavaScript ships as source plus manifest-verified MQuickJS bytecode.
 Generic emulator modules are libretro cores. UniFrog-specific modules, such as
 `/unifrog/modules/hcrtos-media.bin`, use the same loader and the versioned ABI
 table in `include/unifrog/abi.h` for device services.
+
+Module binaries retain the licenses of their upstream sources. The active
+inventory lives in `../THIRD_PARTY.md`; `cores/manifest.mk` and
+`cores/patches/` are the reproducible source contract for libretro modules.
 
 ABI rules:
 

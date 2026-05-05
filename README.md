@@ -84,6 +84,10 @@ of the boot image and packages it as `/unifrog/modules/hcrtos-media.bin`; video
 actions load that native module from SD. Use `HCRTOS_MEDIA=firmware` only when
 you need the old fully linked boot image for diagnostics.
 
+The SD-card package also installs `LICENSE.txt` and `THIRD_PARTY.md` under
+`/unifrog`. Keep `THIRD_PARTY.md` current whenever adding, removing, or
+replacing fetched or vendored third-party code.
+
 SD builds boot with the reliable 1-bit profile. Frontend startup reads and ROM
 loads use a guarded `SD_READ_MODE=uhs25` read window by default, then restore
 the boot profile before normal UI writes or core init; use `SD_READ_MODE=boot`
@@ -120,12 +124,16 @@ linker/                HCRTOS/SF2000 linker scripts
 output/sdcard/unifrog/modules/
                        Runtime-loaded native modules
 src/                   Native runtime implementation
+src/third_party/       Small vendored source libraries with local notices
+THIRD_PARTY.md         Third-party source, binary, and attribution inventory
 tools/asdpack.c        Host tool used to pack and verify ASD images
 unifrog-hcrtos-sdk/    SDK submodule
 ```
 
-Generated files live in `build/`, `output/`, `cores/output/`, `.deps/`, and
-subproject output directories. They are not source.
+Fetched third-party source checkouts live in untracked `.deps/` after
+`make deps`. Generated files live in `build/`, `output/`, `cores/output/`,
+`frontend/output/`, `js2300/output/`, and packaging directories. They are not
+source.
 
 ## Component Docs
 
