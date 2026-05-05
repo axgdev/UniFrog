@@ -70,8 +70,8 @@ static void panic_reset_system(uint32_t buttons)
    unifrog_log("unifrog panic reset buttons=0x%08lx\n",
       (unsigned long)buttons);
    (void)unifrog_log_flush_force();
+   hw_watchdog_reset(1000);
    reset();
-   hw_watchdog_reset(10000);
    for (;;)
       ;
 }

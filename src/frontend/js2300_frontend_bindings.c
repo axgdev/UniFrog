@@ -363,6 +363,10 @@ int host_video_font(void *opaque, const char *path)
    int ret;
    (void)opaque;
 
+   if (path && strstr(path, ".otf")) {
+      printf("js2300 font load path=%s ret=-1 reason=otf_disabled\n", path);
+      return -1;
+   }
    ret = unifrog_gfx_load_font5x7_file(path);
    printf("js2300 font load path=%s ret=%d\n", path ? path : "?", ret);
    return ret;

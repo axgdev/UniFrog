@@ -438,17 +438,19 @@ function changeSetting(delta, now) {
       languageOptions[(optionIndex(languageOptions, config.language, 0) +
       languageOptions.length + delta) % languageOptions.length].value;
   } else if (id === "font") {
-    config.font =
+    var nextFont =
       fontOptions[(optionIndex(fontOptions, config.font, 0) +
       fontOptions.length + delta) % fontOptions.length].value;
-    if (JS2300.video.font)
-      JS2300.video.font(config.font + ";size=" + String(config.fontSize));
+    if (!JS2300.video.font ||
+        JS2300.video.font(nextFont + ";size=" + String(config.fontSize)) >= 0)
+      config.font = nextFont;
   } else if (id === "font_size") {
-    config.fontSize =
+    var nextFontSize =
       fontSizeOptions[(optionIndex(fontSizeOptions, config.fontSize, 2) +
       fontSizeOptions.length + delta) % fontSizeOptions.length].value;
-    if (JS2300.video.font)
-      JS2300.video.font(config.font + ";size=" + String(config.fontSize));
+    if (!JS2300.video.font ||
+        JS2300.video.font(config.font + ";size=" + String(nextFontSize)) >= 0)
+      config.fontSize = nextFontSize;
   } else if (id === "fast_sd") {
     config.fastSd =
       fastSdOptions[(optionIndex(fastSdOptions, config.fastSd, 0) +

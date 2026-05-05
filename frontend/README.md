@@ -82,7 +82,7 @@ Marathi, Telugu, Turkish, Tamil, Vietnamese, and Korean.
 
 Themes use `font=/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf` by
 default. The native renderer reads UTF-8 text and renders glyphs on demand from
-TTF/OTF files through a small cache. A theme may provide a semicolon-separated
+TTF files through a small cache. A theme may provide a semicolon-separated
 fallback list, for example:
 
 ```text
@@ -101,16 +101,14 @@ Icon keys such as `icon_gba`, `icon_snes`, `icon_media`, and `icon_settings`
 accept absolute paths or paths relative to `icon_root`.
 
 `make deps-fonts` fetches permissively licensed Noto fonts into `.deps/fonts`;
-`make -C frontend package` includes them as `/unifrog/fonts` when present. The
-Japanese and Simplified Chinese Noto CJK files are subsetted at package time to
-the glyphs used by shipped UI strings and labels, keeping the SD package small
-while preserving the full source fonts in `.deps/fonts`. The package also ships
-Android's Apache-2.0 `DroidSansFallback.ttf` as a smaller full CJK option for
-ROM filenames that use glyphs outside the UI subsets. The default theme loads
-the Latin/Greek/Cyrillic Noto Sans file only to keep normal startup memory low.
-Users and language-specific themes can add Arabic, Devanagari, Bengali, Tamil,
-Telugu, Japanese UI, CJK UI, or CJK full fallback files when they need those
-scripts.
+`make -C frontend package` includes `.ttf` files as `/unifrog/fonts` when
+present. OTF fonts are deliberately not packaged because they are too large for
+this target. The package ships Android's Apache-2.0 `DroidSansFallback.ttf` as
+the full CJK option for ROM filenames that need Japanese, Chinese, or Korean
+glyphs. The default theme loads the Latin/Greek/Cyrillic Noto Sans file only to
+keep normal startup memory low. Users and language-specific themes can add
+Arabic, Devanagari, Bengali, Tamil, Telugu, or CJK full fallback files when
+they need those scripts.
 
 System icons live under `/unifrog/themes/system-icons/icons`. The packaged
 library subdirectory contains optimized cropped console images from the source

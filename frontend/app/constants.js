@@ -100,8 +100,6 @@ var fontOptions = [
   { label: "Bengali", value: "/media/mmcblk0/unifrog/fonts/NotoSansBengali-Regular.ttf" },
   { label: "Tamil", value: "/media/mmcblk0/unifrog/fonts/NotoSansTamil-Regular.ttf" },
   { label: "Telugu", value: "/media/mmcblk0/unifrog/fonts/NotoSansTelugu-Regular.ttf" },
-  { label: "Japanese UI", value: "/media/mmcblk0/unifrog/fonts/NotoSansCJKjp-Regular.otf" },
-  { label: "CJK UI", value: "/media/mmcblk0/unifrog/fonts/NotoSansCJKsc-Regular.otf" },
   { label: "CJK full", value: "/media/mmcblk0/unifrog/fonts/DroidSansFallback.ttf" }
 ];
 var fontSizeOptions = [
