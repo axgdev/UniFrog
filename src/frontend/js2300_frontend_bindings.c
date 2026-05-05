@@ -46,7 +46,6 @@ int frontend_fb_open(struct js2300_frontend *frontend)
    frontend->video_present_count = 0;
    frontend->video_present_log_count = 0;
    if (preserve_logo) {
-      unifrog_boot_logo_release_early();
       printf("unifrog boot_logo preserved current=%u buffers=%u\n",
          frontend->fb.current_buffer, frontend->fb.buffer_count);
    } else {

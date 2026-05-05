@@ -175,6 +175,7 @@ uint32_t unifrog_boot_logo_shown_ms(void)
 void unifrog_boot_logo_mark_replaced(void)
 {
    boot_logo_active = 0;
+   unifrog_boot_logo_release_early();
 }
 
 void unifrog_boot_logo_release_early(void)
@@ -183,4 +184,5 @@ void unifrog_boot_logo_release_early(void)
       return;
    unifrog_fb_close(&early_logo_fb);
    early_logo_fb_open = 0;
+   printf("unifrog boot_logo early fb released\n");
 }

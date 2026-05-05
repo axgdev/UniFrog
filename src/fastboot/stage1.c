@@ -13,6 +13,52 @@
 
 #define FA_READ 0x01u
 
+#ifndef FASTBOOT_BOOT_LOGO
+#define FASTBOOT_BOOT_LOGO 1
+#endif
+
+#define FASTBOOT_DELAY_LOOPS_PER_MS 60000u
+#define FASTBOOT_LCD_WIDTH 320u
+#define FASTBOOT_LCD_HEIGHT 240u
+#define FASTBOOT_LOGO_WIDTH 256u
+#define FASTBOOT_LOGO_HEIGHT 100u
+#define FASTBOOT_LOGO_X ((FASTBOOT_LCD_WIDTH - FASTBOOT_LOGO_WIDTH) / 2u)
+#define FASTBOOT_LOGO_Y ((FASTBOOT_LCD_HEIGHT - FASTBOOT_LOGO_HEIGHT) / 2u)
+#define FASTBOOT_LOGO_BG 0x0861u
+
+#define PINMUXL_BASE 0xb88004a0u
+#define PINMUXT_BASE 0xb8800500u
+#define GPIOL_OUTPUT_REG 0xb8800054u
+#define GPIOL_DIR_REG 0xb8800058u
+#define GPIOT_OUTPUT_REG 0xb8800354u
+#define GPIOT_DIR_REG 0xb8800358u
+
+#define LCD_L_RESET (1u << 1)
+#define LCD_L_D0_D4 (0x1fu << 2)
+#define LCD_L_WR (1u << 7)
+#define LCD_L_CS (1u << 10)
+#define LCD_T_RD (1u << 0)
+#define LCD_T_RS (1u << 1)
+#define LCD_T_D11_D15 (0x1fu << 2)
+#define LCD_T_D5_D10 (0x3fu << 9)
+#define LCD_L_OUTPUTS (LCD_L_RESET | LCD_L_D0_D4 | LCD_L_WR | LCD_L_CS)
+#define LCD_T_OUTPUTS (LCD_T_RD | LCD_T_RS | LCD_T_D11_D15 | LCD_T_D5_D10)
+
+#define ST7789_SLPOUT 0x11u
+#define ST7789_NORON 0x13u
+#define ST7789_INVON 0x21u
+#define ST7789_DISPON 0x29u
+#define ST7789_CASET 0x2au
+#define ST7789_RASET 0x2bu
+#define ST7789_RAMWR 0x2cu
+#define ST7789_TEON 0x35u
+#define ST7789_MADCTL 0x36u
+#define ST7789_COLMOD 0x3au
+
+#if FASTBOOT_BOOT_LOGO
+#include "../../assets/boot/unifrog-logo-rgb565.inc"
+#endif
+
 typedef unsigned int UINT;
 typedef unsigned char BYTE;
 typedef unsigned short WORD;
@@ -94,6 +140,7 @@ static rom_cache_flush_fn const rom_cache_flush = (rom_cache_flush_fn)0x810032f4
 
 static FATFS fatfs;
 static FIL file;
+static int fastboot_logo_visible;
 
 extern uint8_t __bss_start;
 extern uint8_t __bss_end;
@@ -113,15 +160,51 @@ static uint32_t read_reg32(uint32_t addr)
 	return *(volatile uint32_t *)(uintptr_t)addr;
 }
 
+static void write_reg32(uint32_t addr, uint32_t value)
+{
+	*(volatile uint32_t *)(uintptr_t)addr = value;
+}
+
 static void set_reg32_bits(uint32_t addr, uint32_t mask)
 {
 	*(volatile uint32_t *)(uintptr_t)addr = read_reg32(addr) | mask;
+}
+
+static void clear_reg32_bits(uint32_t addr, uint32_t mask)
+{
+	*(volatile uint32_t *)(uintptr_t)addr = read_reg32(addr) & ~mask;
+}
+
+static uint32_t boot_ticks(void)
+{
+	uint32_t count;
+
+	__asm__ volatile("mfc0 %0, $9" : "=r"(count));
+	return count;
+}
+
+static void delay_ms(unsigned int ms)
+{
+	while (ms-- != 0) {
+		volatile unsigned int i;
+
+		for (i = 0; i < FASTBOOT_DELAY_LOOPS_PER_MS; i++)
+			__asm__ volatile("nop");
+	}
 }
 
 static void fastboot_backlight_off(void)
 {
 	/* Latch high before GPIO mux: R05 is an active-low backlight gate. */
 	set_reg32_bits(FASTBOOT_GPIOR_OUTPUT_REG, FASTBOOT_BACKLIGHT_R05_MASK);
+	set_reg32_bits(FASTBOOT_GPIOR_DIR_REG, FASTBOOT_BACKLIGHT_R05_MASK);
+	write_reg8(FASTBOOT_PINMUX_R05_ADDR, 0);
+}
+
+static void fastboot_backlight_on_gpio(void)
+{
+	/* Latch low before GPIO mux: R05 is an active-low backlight gate. */
+	clear_reg32_bits(FASTBOOT_GPIOR_OUTPUT_REG, FASTBOOT_BACKLIGHT_R05_MASK);
 	set_reg32_bits(FASTBOOT_GPIOR_DIR_REG, FASTBOOT_BACKLIGHT_R05_MASK);
 	write_reg8(FASTBOOT_PINMUX_R05_ADDR, 0);
 }
@@ -205,6 +288,220 @@ static void boot_trace_note(unsigned int event, unsigned int arg0,
 	trace->entries[index].r05_state = (uint32_t)fastboot_backlight_state();
 	rom_cache_flush((void *)trace, sizeof(*trace));
 }
+
+#if FASTBOOT_BOOT_LOGO
+static const uint8_t fastboot_st7789_init_sf2000[] = {
+	1, ST7789_SLPOUT, 99,
+	2, ST7789_MADCTL, 0x70, 0,
+	2, ST7789_TEON, 0x00, 0,
+	2, ST7789_COLMOD, 0x55, 0,
+	4, 0xb1, 0x40, 0x04, 0x14, 0,
+	6, 0xb2, 0x0c, 0x0c, 0x00, 0x33, 0x33, 0,
+	2, 0xb7, 0x71, 0,
+	2, 0xbb, 0x3b, 0,
+	2, 0xc0, 0x2c, 0,
+	2, 0xc2, 0x01, 0,
+	2, 0xc3, 0x13, 0,
+	2, 0xc4, 0x20, 0,
+	2, 0xc6, 0x0f, 0,
+	3, 0xd0, 0xa4, 0xa1, 0,
+	2, 0xd6, 0xa1, 0,
+	15, 0xe0, 0xd0, 0x06, 0x06, 0x0e, 0x0d, 0x06, 0x2f,
+		0x3a, 0x47, 0x08, 0x15, 0x14, 0x2c, 0x33, 0,
+	15, 0xe1, 0xd0, 0x06, 0x06, 0x0e, 0x0d, 0x06, 0x2f,
+		0x3b, 0x47, 0x08, 0x15, 0x14, 0x2c, 0x33, 0,
+	1, ST7789_INVON, 0,
+	0
+};
+
+static void fastboot_lcd_set_l(uint32_t mask, int high)
+{
+	if (high)
+		set_reg32_bits(GPIOL_OUTPUT_REG, mask);
+	else
+		clear_reg32_bits(GPIOL_OUTPUT_REG, mask);
+}
+
+static void fastboot_lcd_set_t(uint32_t mask, int high)
+{
+	if (high)
+		set_reg32_bits(GPIOT_OUTPUT_REG, mask);
+	else
+		clear_reg32_bits(GPIOT_OUTPUT_REG, mask);
+}
+
+static void fastboot_lcd_pinmux_gpio(void)
+{
+	static const uint8_t lpins[] = { 1, 2, 3, 4, 5, 6, 7, 10 };
+	static const uint8_t tpins[] = {
+		0, 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14
+	};
+	unsigned int i;
+
+	for (i = 0; i < sizeof(lpins); i++)
+		write_reg8(PINMUXL_BASE + lpins[i], 0);
+	for (i = 0; i < sizeof(tpins); i++)
+		write_reg8(PINMUXT_BASE + tpins[i], 0);
+}
+
+static void fastboot_lcd_gpio_ready(void)
+{
+	fastboot_lcd_pinmux_gpio();
+	set_reg32_bits(GPIOL_DIR_REG, LCD_L_OUTPUTS);
+	set_reg32_bits(GPIOT_DIR_REG, LCD_T_OUTPUTS);
+	set_reg32_bits(GPIOL_OUTPUT_REG, LCD_L_CS | LCD_L_WR | LCD_L_RESET);
+	set_reg32_bits(GPIOT_OUTPUT_REG, LCD_T_RS | LCD_T_RD);
+}
+
+static void fastboot_lcd_write_bus(uint16_t value)
+{
+	uint32_t lout = read_reg32(GPIOL_OUTPUT_REG);
+	uint32_t tout = read_reg32(GPIOT_OUTPUT_REG);
+
+	lout = (lout & ~LCD_L_D0_D4) | ((uint32_t)(value & 0x001fu) << 2);
+	tout = (tout & ~(LCD_T_D11_D15 | LCD_T_D5_D10)) |
+		((uint32_t)(value & 0x07e0u) << 4) |
+		((uint32_t)(value >> 9) & LCD_T_D11_D15);
+	write_reg32(GPIOL_OUTPUT_REG, lout);
+	write_reg32(GPIOT_OUTPUT_REG, tout);
+}
+
+static void fastboot_lcd_write16(uint16_t value, int is_data)
+{
+	fastboot_lcd_set_t(LCD_T_RS, is_data);
+	fastboot_lcd_set_l(LCD_L_CS, 0);
+	fastboot_lcd_write_bus(value);
+	fastboot_lcd_set_l(LCD_L_WR, 0);
+	fastboot_lcd_set_l(LCD_L_WR, 1);
+	fastboot_lcd_set_l(LCD_L_CS, 1);
+	fastboot_lcd_set_t(LCD_T_RS, 1);
+}
+
+static void fastboot_lcd_command(uint8_t command)
+{
+	fastboot_lcd_write16(command, 0);
+}
+
+static void fastboot_lcd_data(uint16_t data)
+{
+	fastboot_lcd_write16(data, 1);
+}
+
+static void fastboot_lcd_reset(void)
+{
+	fastboot_lcd_set_t(LCD_T_RS, 1);
+	fastboot_lcd_set_l(LCD_L_WR, 1);
+	fastboot_lcd_set_l(LCD_L_RESET, 1);
+	delay_ms(10);
+	fastboot_lcd_set_l(LCD_L_RESET, 0);
+	delay_ms(20);
+	fastboot_lcd_set_l(LCD_L_RESET, 1);
+	delay_ms(120);
+}
+
+static void fastboot_lcd_apply_init(void)
+{
+	const uint8_t *p = fastboot_st7789_init_sf2000;
+
+	clear_reg32_bits(0xb8800078u, 1u << 15);
+	for (;;) {
+		unsigned int count = *p++;
+		unsigned int i;
+		unsigned int ms;
+
+		if (!count)
+			break;
+		fastboot_lcd_command(*p++);
+		for (i = 1; i < count; i++)
+			fastboot_lcd_data(*p++);
+		ms = *p++;
+		if (ms)
+			delay_ms(ms);
+	}
+}
+
+static void fastboot_lcd_window(unsigned int x0, unsigned int y0,
+		unsigned int x1, unsigned int y1)
+{
+	fastboot_lcd_command(ST7789_CASET);
+	fastboot_lcd_data((uint16_t)(x0 >> 8));
+	fastboot_lcd_data((uint16_t)(x0 & 0xffu));
+	fastboot_lcd_data((uint16_t)(x1 >> 8));
+	fastboot_lcd_data((uint16_t)(x1 & 0xffu));
+	fastboot_lcd_command(ST7789_RASET);
+	fastboot_lcd_data((uint16_t)(y0 >> 8));
+	fastboot_lcd_data((uint16_t)(y0 & 0xffu));
+	fastboot_lcd_data((uint16_t)(y1 >> 8));
+	fastboot_lcd_data((uint16_t)(y1 & 0xffu));
+	fastboot_lcd_command(ST7789_RAMWR);
+}
+
+static void fastboot_lcd_fill(uint16_t color, unsigned int pixels)
+{
+	while (pixels-- != 0)
+		fastboot_lcd_data(color);
+}
+
+static void fastboot_lcd_draw_logo_rle(void)
+{
+	unsigned int logo_pixels = FASTBOOT_LOGO_WIDTH * FASTBOOT_LOGO_HEIGHT;
+	unsigned int pos = 0;
+	unsigned int i;
+
+	for (i = 0; i + 1 < UNIFROG_BOOT_LOGO_RLE_WORDS && pos < logo_pixels;
+			i += 2u) {
+		uint16_t color = unifrog_boot_logo_rle[i];
+		unsigned int count = unifrog_boot_logo_rle[i + 1u];
+
+		while (count-- != 0 && pos++ < logo_pixels)
+			fastboot_lcd_data(color);
+	}
+}
+
+static void fastboot_lcd_present_logo(void)
+{
+	uint32_t start_ticks = boot_ticks();
+
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_LOGO_BEGIN,
+		FASTBOOT_BOOT_LOGO, start_ticks, 0);
+	fastboot_lcd_gpio_ready();
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_LOGO_GPIO_READY,
+		(uint32_t)read_reg32(GPIOL_DIR_REG),
+		(uint32_t)read_reg32(GPIOT_DIR_REG),
+		boot_ticks() - start_ticks);
+	fastboot_lcd_reset();
+	fastboot_lcd_apply_init();
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_LOGO_PANEL_READY,
+		FASTBOOT_LCD_WIDTH, FASTBOOT_LCD_HEIGHT,
+		boot_ticks() - start_ticks);
+	fastboot_lcd_window(0, 0, FASTBOOT_LCD_WIDTH - 1u,
+		FASTBOOT_LCD_HEIGHT - 1u);
+	fastboot_lcd_fill(FASTBOOT_LOGO_BG,
+		FASTBOOT_LCD_WIDTH * FASTBOOT_LCD_HEIGHT);
+	fastboot_lcd_window(FASTBOOT_LOGO_X, FASTBOOT_LOGO_Y,
+		FASTBOOT_LOGO_X + FASTBOOT_LOGO_WIDTH - 1u,
+		FASTBOOT_LOGO_Y + FASTBOOT_LOGO_HEIGHT - 1u);
+	fastboot_lcd_draw_logo_rle();
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_LOGO_DRAW_DONE,
+		FASTBOOT_LOGO_WIDTH, FASTBOOT_LOGO_HEIGHT,
+		boot_ticks() - start_ticks);
+	fastboot_lcd_command(ST7789_DISPON);
+	delay_ms(20);
+	fastboot_backlight_on_gpio();
+	fastboot_logo_visible = 1;
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_LOGO_BACKLIGHT_ON,
+		(uint32_t)fastboot_backlight_state(), 0,
+		boot_ticks() - start_ticks);
+	rom_printf("fastboot: boot logo drawn ticks=%u\n",
+		(unsigned int)(boot_ticks() - start_ticks));
+}
+#else
+static void fastboot_lcd_present_logo(void)
+{
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_LOGO_SKIPPED,
+		FASTBOOT_BOOT_LOGO, 0, boot_ticks());
+}
+#endif
 
 static void disable_interrupts(void)
 {
@@ -436,18 +733,40 @@ static int read_handoff_path(char *path, unsigned int path_size)
 	return 0;
 }
 
+static int path_has_unifrog_payload(const char *path)
+{
+	static const char needle[] = "unifrog.bin";
+	unsigned int i;
+
+	if (!path)
+		return 0;
+	for (i = 0; path[i] != '\0'; i++) {
+		unsigned int j = 0;
+
+		while (needle[j] != '\0' && path[i + j] == needle[j])
+			j++;
+		if (needle[j] == '\0')
+			return 1;
+	}
+	return 0;
+}
+
 static void jump_to_payload(const char *path)
 {
 	entry_fn entry = (entry_fn)ENTRY_ADDR;
 	int backlight_state;
+	int keep_logo;
 
-	fastboot_backlight_off();
+	keep_logo = fastboot_logo_visible && path_has_unifrog_payload(path);
+	if (!keep_logo)
+		fastboot_backlight_off();
 	backlight_state = fastboot_backlight_state();
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_JUMP, trace_path_hash(path),
-		(unsigned int)(uintptr_t)ENTRY_ADDR, (unsigned int)backlight_state);
-	write_diag(30, backlight_state, path);
-	rom_printf("fastboot: jump %p backlight_state=0x%03x\n",
-		ENTRY_ADDR, backlight_state);
+		(unsigned int)(uintptr_t)ENTRY_ADDR,
+		(unsigned int)backlight_state | (keep_logo ? 0x10000u : 0u));
+	write_diag(30, backlight_state | (keep_logo ? 0x10000 : 0), path);
+	rom_printf("fastboot: jump %p backlight_state=0x%03x keep_logo=%d\n",
+		ENTRY_ADDR, backlight_state, keep_logo);
 	entry();
 }
 
@@ -463,6 +782,7 @@ void stage1_main(void)
 	fastboot_backlight_off();
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_BACKLIGHT_OFF,
 		(unsigned int)fastboot_backlight_state(), 0, 0);
+	fastboot_lcd_present_logo();
 	write_diag(1, 0, "");
 	rom_printf("\nfastboot: stage1 @ 0x%08x\n", FASTBOOT_STAGE1_ADDR);
 	fastboot_backlight_report("stage1_start");
