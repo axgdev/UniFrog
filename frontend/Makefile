@@ -13,11 +13,7 @@ MQJS := $(MQJS_BUILD)/mqjs
 BYTECODE_MANIFEST_TOOL := $(OUT)/tools/bytecode_manifest
 BYTECODE_MANIFEST := $(OUT)/bytecode/bytecode-manifest.txt
 ENTRY_FILES := main.js quick-menu.js
-APP_FILES := \
-	$(APP_DIR)/theme.js \
-	$(APP_DIR)/constants.js \
-	$(APP_DIR)/catalog.js \
-	$(APP_DIR)/app.js
+APP_FILES := $(sort $(wildcard $(APP_DIR)/*.js))
 THEME_FILES := $(shell find $(THEME_DIR) -type f 2>/dev/null)
 JS_FILES := $(ENTRY_FILES) $(APP_FILES) \
 	$(filter %.js,$(THEME_FILES)) $(wildcard $(SCRIPT_DIR)/*.js)

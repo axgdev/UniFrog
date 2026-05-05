@@ -468,9 +468,6 @@ static unsigned host_compute_frame_budget(unsigned fps, unsigned *scpu_mhz,
    unsigned *count_hz, unsigned *count_hz_calibrated);
 static int read_file_aligned(FILE *file, const char *path,
    uint8_t **out_data, size_t *out_size, const char *label);
-static int content_cache_file_valid(const char *path, size_t expected_size);
-static int content_cache_write_buffer(const char *path, const void *data,
-   size_t size);
 static int exit_combo_down(void);
 static int quick_js_run(const struct libretro_core_api *core,
    const char *rom_path);
@@ -3059,36 +3056,6 @@ static int content_cache_path(const char *source_path, const char *entry_name,
    return 0;
 }
 
-static int content_zip_cache_path(const char *source_path,
-   const struct zip_rom_entry *entry, const char *valid_extensions,
-   char *out, size_t out_size)
-{
-   struct stat st;
-   uint32_t hash = 2166136261u;
-   char ext[16];
-
-   if (!source_path || !entry || !out || out_size == 0)
-      return -1;
-   if (content_extension_for_cache(source_path, entry->name,
-       valid_extensions, ext, sizeof(ext)) != 0)
-      return -1;
-   hash = hash_text(hash, source_path);
-   hash = hash_text(hash, entry->name);
-   hash = hash_u32(hash, entry->crc32);
-   hash = hash_u32(hash, entry->compressed_size);
-   hash = hash_u32(hash, entry->uncompressed_size);
-   hash = hash_u32(hash, entry->method);
-   if (stat(source_path, &st) == 0) {
-      hash = hash_u32(hash, (uint32_t)st.st_size);
-      hash = hash_u32(hash, (uint32_t)(st.st_size >> 32));
-   }
-   if (ensure_content_cache_dir() != 0)
-      return -1;
-   snprintf(out, out_size, "%s/ufz%08x.%s",
-      LIBRETRO_CONTENT_CACHE_DIR, (unsigned)hash, ext);
-   return 0;
-}
-
 static int libretro_valid_extension_matches(const char *path,
    const char *valid_extensions)
 {
@@ -3550,68 +3517,6 @@ static int zip_load_rom_data_stream(FILE *file, const char *zip_path,
       return -1;
    return zip_load_rom_data_stream_entry(file, zip_path, zip_size, &entry,
       out_data, out_size, out_name, out_name_size);
-}
-
-static int zip_load_rom_data_cached(FILE *file, const char *zip_path,
-   const struct retro_system_info *info, uint8_t **out_data,
-   size_t *out_size, int *out_cache)
-{
-   struct zip_rom_entry entry;
-   size_t zip_size;
-   char cache_path[160];
-
-   if (out_cache)
-      *out_cache = 0;
-   if (!file || !zip_path || !info || !out_data || !out_size)
-      return -1;
-   if (file_size(file, &zip_size) != 0)
-      return -1;
-   if (zip_select_rom_entry_stream(file, zip_path, zip_size,
-       info->valid_extensions, &entry) != 0)
-      return -1;
-
-   cache_path[0] = '\0';
-   if (content_zip_cache_path(zip_path, &entry, info->valid_extensions,
-       cache_path, sizeof(cache_path)) == 0 &&
-       content_cache_file_valid(cache_path, entry.uncompressed_size)) {
-      FILE *cache_file = fopen(cache_path, "rb");
-
-      if (cache_file) {
-         if (read_path_aligned_direct(cache_path, out_data, out_size,
-             "READ ZIP CACHE") == 0 ||
-             read_file_aligned(cache_file, cache_path, out_data, out_size,
-             "READ ZIP CACHE") == 0) {
-            fclose(cache_file);
-            if (*out_size == entry.uncompressed_size) {
-               if (out_cache)
-                  *out_cache = 1;
-               printf("unifrog libretro zip cache hit path=%s cache=%s entry=%s size=%u\n",
-                  zip_path, cache_path, entry.name, (unsigned)*out_size);
-               loading_draw("LOADING ROM", "CACHE", 68);
-               return 0;
-            }
-            rom_free_aligned(*out_data);
-            *out_data = NULL;
-            *out_size = 0;
-         } else {
-            fclose(cache_file);
-         }
-      }
-      printf("unifrog libretro zip cache read failed path=%s cache=%s\n",
-         zip_path, cache_path);
-      unlink(cache_path);
-   }
-
-   if (zip_load_rom_data_stream_entry(file, zip_path, zip_size, &entry,
-       out_data, out_size, NULL, 0) != 0)
-      return -1;
-
-   if (cache_path[0] &&
-       content_cache_write_buffer(cache_path, *out_data, *out_size) == 0) {
-      printf("unifrog libretro zip cache write path=%s cache=%s entry=%s size=%u\n",
-         zip_path, cache_path, entry.name, (unsigned)*out_size);
-   }
-   return 0;
 }
 
 static int read_file_aligned(FILE *file, const char *path, uint8_t **out_data,
@@ -4760,34 +4665,6 @@ static int write_all(FILE *file, const void *data, size_t size)
    return 0;
 }
 
-static int content_cache_file_valid(const char *path, size_t expected_size)
-{
-   struct stat st;
-
-   return path && stat(path, &st) == 0 && st.st_size >= 0 &&
-      (size_t)st.st_size == expected_size;
-}
-
-static int content_cache_write_buffer(const char *path, const void *data,
-   size_t size)
-{
-   FILE *file;
-   int ok;
-
-   if (!path || !data || size == 0)
-      return -1;
-   file = fopen(path, "wb");
-   if (!file)
-      return -1;
-   ok = write_all(file, data, size) == 0 && fflush(file) == 0;
-   fclose(file);
-   if (!ok) {
-      unlink(path);
-      return -1;
-   }
-   return 0;
-}
-
 static int stream_lz4_to_file(FILE *in, FILE *out, const char *path)
 {
    LZ4F_dctx *ctx = NULL;
@@ -5300,16 +5177,10 @@ static int run_core(const struct libretro_core_api *core, const char *path,
             goto out_finish;
          }
          if (path_is_zip(read_path)) {
-            int zip_cache = 0;
-
-            if (zip_load_rom_data_cached(file, read_path, &info, &rom_data,
-                &rom_size, &zip_cache) != 0) {
+            if (zip_load_rom_data_stream(file, read_path, &info, &rom_data,
+                &rom_size, NULL, 0) != 0) {
                fclose(file);
                goto out_finish;
-            }
-            if (zip_cache) {
-               content_kind = "zip_cache_read";
-               content_cache = 1;
             }
          } else {
             if (read_path_aligned_direct(read_path, &rom_data, &rom_size,

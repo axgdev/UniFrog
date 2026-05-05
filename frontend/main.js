@@ -1,4 +1,11 @@
 load("app/theme.js");
 load("app/constants.js");
 load("app/catalog.js");
+load("app/text.js");
+load("app/navigation.js");
+load("app/content.js");
+load("app/settings.js");
+load("app/index.js");
+load("app/views.js");
+load("app/actions.js");
 load("app/app.js");

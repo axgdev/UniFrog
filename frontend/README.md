@@ -31,9 +31,11 @@ Installed SD-card layout:
 /unifrog/user/
 ```
 
-`main.js` loads `app/theme.js`, `app/constants.js`, `app/catalog.js`, and
-`app/app.js` in order. Put UI behavior in `app/app.js`, editable menu data and
-core lists in `app/catalog.js`, and default visual values in `app/theme.js`.
+`main.js` is a literal loader. It loads default theme data, constants, catalog
+data, helpers, screen rendering, action handling, then `app/app.js`, which owns
+frontend state and the runtime loop. Put screen behavior in the focused
+`app/*.js` module that matches it; put editable menu data and core lists in
+`app/catalog.js`, and default visual values in `app/theme.js`.
 Runtime settings live in `/unifrog/settings.ini`. Users can override colors by
 placing `/unifrog/theme.ini` on the SD card with the same keys as
 `themes/default.ini`.

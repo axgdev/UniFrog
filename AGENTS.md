@@ -19,8 +19,9 @@ Keep this repository small and direct.
 ## Scope
 
 - Build the native SF2000 `bisrv.asd` and SD-card package.
-- Keep UI screens in `frontend/main.js`, `frontend/quick-menu.js`, and
-  `frontend/app/*.js`; native code exposes fast bindings, launch actions,
+- Keep UI screens in `frontend/quick-menu.js` and `frontend/app/*.js`;
+  `frontend/main.js` is only the loader. Native JS2300 bridge code in
+  `src/frontend/js2300_frontend_*.c` exposes fast bindings, launch actions,
   diagnostics, and crash handling.
 - Package JavaScript source with `.js.mqbc` bytecode and
   `bytecode-manifest.txt`; do not rely on file timestamps for freshness.

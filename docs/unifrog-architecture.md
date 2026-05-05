@@ -29,6 +29,14 @@ the editable JavaScript UI, quick menu, themes, and diagnostics installed under
 `/unifrog` on the SD card. Native code provides high-throughput bindings; UI
 screens belong in JavaScript.
 
+The native frontend bridge is split by role:
+
+- `src/frontend/js2300_frontend.c`: launch loop and JS2300 host wiring
+- `src/frontend/js2300_frontend_bindings.c`: drawing, input, battery, and FS
+  bindings exposed to JavaScript
+- `src/frontend/js2300_frontend_catalog.c`: fast native game/media indexing
+- `src/frontend/js2300_frontend_actions.c`: launch actions and system checks
+
 Updating JavaScript or themes should not require relinking firmware. Updating
 native bindings, runtime modules, or ABI headers requires a rebuild.
 Packaged JavaScript ships as source plus manifest-verified MQuickJS bytecode.

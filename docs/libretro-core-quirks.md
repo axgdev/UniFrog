@@ -110,11 +110,10 @@ The log should report `mode=stream_ram` when this path is used. Seeing
 the allocator diagnostics immediately before it matter more than FAT seek
 behavior.
 
-ZIP entries for byte-loading cores are cached under `/media/mmcblk0/unifrog/cache`
-after the first successful inflate. The cache key uses the archive path, archive
-size, selected entry name, entry CRC, and entry sizes; it does not depend on FAT
-timestamps. Subsequent launches should report `zip_cache_read` instead of
-paying the inflate cost again.
+Do not add a persistent ZIP-entry cache for byte-loading cores unless device
+logs prove it wins on the target SD path. A first-launch cache write adds a full
+ROM-sized SD write, and reading a cached GBA-sized ROM can be slower than
+streaming inflate on this device.
 
 ## Exception screen
 

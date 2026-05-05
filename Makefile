@@ -240,9 +240,16 @@ WHOLE_LIBS := \
 	-lmmchosthc15 \
 	-lefuse
 
+FRONTEND_HOST_SOURCES := \
+	src/frontend/js2300_frontend.c \
+	src/frontend/js2300_frontend_actions.c \
+	src/frontend/js2300_frontend_bindings.c \
+	src/frontend/js2300_frontend_catalog.c
+FRONTEND_HOST_OBJECTS := $(patsubst src/%.c,$(BUILD)/%.o,$(FRONTEND_HOST_SOURCES))
+
 APP_OBJECTS := \
 	$(BUILD)/main.o \
-	$(BUILD)/frontend/js2300_frontend.o
+	$(FRONTEND_HOST_OBJECTS)
 
 BUILD_IDENTITY_STAMP := $(BUILD)/build-identity.stamp
 BUILD_IDENTITY_OBJECTS := \
