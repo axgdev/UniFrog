@@ -38,6 +38,8 @@ int frontend_fb_open(struct js2300_frontend *frontend)
    frontend->frame_open = 0;
    frontend->frame_draw_ops = 0;
    frontend->frame_has_visible_content = 0;
+   frontend->frame_clear_seen = 0;
+   frontend->frame_clear_color = 0;
    frontend->boot_logo_present_skips = 0;
    frontend->pending_backlight_valid = 0;
    frontend->pending_av_valid = 0;
@@ -81,6 +83,33 @@ static void frontend_begin_frame(struct js2300_frontend *frontend)
    frontend->frame_open = 1;
    frontend->frame_draw_ops = 0;
    frontend->frame_has_visible_content = 0;
+   frontend->frame_clear_seen = 0;
+   frontend->frame_clear_color = 0;
+}
+
+static uint32_t frontend_sample_nonzero_x100(const struct js2300_frontend *frontend)
+{
+   struct unifrog_surface surface;
+   unsigned samples = 0;
+   unsigned nonzero = 0;
+
+   if (!frontend)
+      return 0;
+   surface = unifrog_fb_surface_for_buffer(&frontend->fb, frontend->draw_buffer);
+   if (!surface.pixels || surface.width == 0 || surface.height == 0)
+      return 0;
+   for (unsigned y = 0; y < surface.height; y += 4u) {
+      const uint16_t *row = surface.pixels + y * surface.stride;
+
+      for (unsigned x = 0; x < surface.width; x += 4u) {
+         if (row[x] != 0)
+            nonzero++;
+         samples++;
+      }
+   }
+   if (samples == 0)
+      return 0;
+   return (uint32_t)(((uint64_t)nonzero * 10000ull) / samples);
 }
 
 static void frontend_apply_deferred_display(struct js2300_frontend *frontend)
@@ -153,6 +182,8 @@ void host_video_clear(void *opaque, uint16_t color)
 
    frontend_begin_frame(frontend);
    frontend->frame_draw_ops++;
+   frontend->frame_clear_seen = 1;
+   frontend->frame_clear_color = color;
    if (color != 0)
       frontend->frame_has_visible_content = 1;
    surface = frontend_surface(frontend);
@@ -270,9 +301,12 @@ void host_video_present(void *opaque)
    uint32_t start_ms;
    uint32_t flush_ms;
    uint32_t wait_ms;
+   uint32_t handoff_wait_ms = 0;
    uint32_t pan_ms;
    uint32_t done_ms;
+   uint32_t sample_nonzero_x100 = 0;
    int pan_ret = -1;
+   int handoff_wait_ret = 0;
    int replaced = 0;
    int logo_active;
    unsigned present_index;
@@ -294,10 +328,18 @@ void host_video_present(void *opaque)
    }
    start_ms = unifrog_perf_time_ms();
    logo_active = unifrog_boot_logo_is_active();
+   if (logo_active)
+      sample_nonzero_x100 = frontend_sample_nonzero_x100(frontend);
    unifrog_fb_flush_buffer(&frontend->fb, frontend->draw_buffer);
    flush_ms = unifrog_perf_time_ms();
    unifrog_fb_wait_vsync(&frontend->fb);
    wait_ms = unifrog_perf_time_ms();
+   if (logo_active) {
+      handoff_wait_ret = unifrog_fb_wait_vsync(&frontend->fb);
+      handoff_wait_ms = unifrog_perf_time_ms();
+   } else {
+      handoff_wait_ms = wait_ms;
+   }
    pan_ret = unifrog_fb_pan(&frontend->fb, frontend->draw_buffer);
    pan_ms = unifrog_perf_time_ms();
    if (pan_ret == 0 && unifrog_boot_logo_is_active()) {
@@ -318,16 +360,23 @@ void host_video_present(void *opaque)
    if (replaced || frontend->video_present_log_count < 4) {
       printf("unifrog video_present n=%u ops=%u visible=%d buffer=%u "
          "logo_before=%d replaced=%d ret=%d total_ms=%lu flush_ms=%lu "
-         "wait_ms=%lu pan_ms=%lu deferred_ms=%lu frontend_ms=%lu\n",
+         "wait_ms=%lu handoff_wait_ms=%lu handoff_wait_ret=%d pan_ms=%lu "
+         "deferred_ms=%lu frontend_ms=%lu clear=%u clear_color=0x%04x "
+         "sample_nonzero_x100=%lu\n",
          present_index, frontend->frame_draw_ops,
          frontend->frame_has_visible_content, frontend->draw_buffer,
          logo_active, replaced, pan_ret,
          (unsigned long)(done_ms - start_ms),
          (unsigned long)(flush_ms - start_ms),
          (unsigned long)(wait_ms - flush_ms),
-         (unsigned long)(pan_ms - wait_ms),
+         (unsigned long)(handoff_wait_ms - wait_ms),
+         handoff_wait_ret,
+         (unsigned long)(pan_ms - handoff_wait_ms),
          (unsigned long)(done_ms - pan_ms),
-         (unsigned long)(done_ms - frontend->frontend_start_ms));
+         (unsigned long)(done_ms - frontend->frontend_start_ms),
+         frontend->frame_clear_seen,
+         frontend->frame_clear_color,
+         (unsigned long)sample_nonzero_x100);
       frontend->video_present_log_count++;
    }
    frontend->frame_open = 0;

@@ -347,6 +347,7 @@ APP_OBJECTS := \
 BUILD_IDENTITY_STAMP := $(BUILD)/build-identity.stamp
 BUILD_IDENTITY_OBJECTS := \
 	$(BUILD)/main.o \
+	$(BUILD)/frontend/js2300_frontend_actions.o \
 	$(BUILD)/unifrog_libretro_host.o \
 	$(BUILD)/unifrog_platform.o
 
