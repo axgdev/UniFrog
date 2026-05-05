@@ -678,7 +678,7 @@ static int host_fs_index_once(const char *root,
    scan.game_file = game_file;
    scan.media_file = media_file;
    scan.result = result;
-   ret = frontend_index_scan_dir(root, 0, &scan);
+   ret = frontend_index_scan_roots(root, &scan);
    if (fclose(game_file) != 0)
       ret = -1;
    game_file = NULL;

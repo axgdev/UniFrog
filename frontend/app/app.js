@@ -8,6 +8,7 @@ var config = {
   display: 0,
   av: 0,
   autoIndex: 0,
+  romRoots: "/ROMS|/",
   lastPath: "",
   lastCore: ""
 };

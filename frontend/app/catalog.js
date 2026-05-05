@@ -35,83 +35,81 @@ var storageModeItems = [
   { id: "uhs", label: "uhs", detail: "UHS SDR50 path" },
   { id: "wide50", label: "wide50", detail: "4-bit 50 MHz cap" }
 ];
-var psxFolders = ["/psx/", "/ps1/", "/playstation/"];
+var psxFolders = ["psx", "ps", "ps1", "playstation", "playstation1"];
 var coreCatalog = [
   {
     label: "gpSP",
     value: "gpsp",
     system: "Game Boy Advance",
-    suffixes: [".gba"],
-    folders: ["/gba/", "/game boy advance/"]
+    folders: ["gba", "gbadvance", "gameboyadvance", "game boy advance"]
   },
   {
     label: "Gambatte",
     value: "gambatte",
     system: "Game Boy / Color",
-    suffixes: [".gb", ".gbc"],
-    folders: ["/gb/", "/gbc/", "/gbb/", "/game boy/"]
+    folders: ["gb", "gbc", "gbb", "gameboy", "game boy", "gameboycolor",
+      "game boy color"]
   },
   {
     label: "Gearboy",
     value: "gearboy",
     system: "Game Boy / Color",
-    suffixes: [".gb", ".gbc"],
-    folders: ["/gb/", "/gbc/", "/gbb/", "/game boy/"]
+    folders: ["gb", "gbc", "gbb", "gameboy", "game boy", "gameboycolor",
+      "game boy color"]
   },
   {
     label: "QuickNES",
     value: "quicknes",
     system: "Nintendo (NES)",
-    suffixes: [".nes"],
-    folders: ["/nes/", "/famicom/"]
+    folders: ["nes", "fc", "fds", "famicom", "nintendo",
+      "nintendo entertainment system"]
   },
   {
     label: "FCEUmm",
     value: "fceumm",
     system: "Nintendo (NES)",
-    suffixes: [".nes", ".fds"],
-    folders: ["/nes/", "/famicom/"]
+    folders: ["nes", "fc", "fds", "famicom", "nintendo",
+      "nintendo entertainment system"]
   },
   {
     label: "Snes9x 2005",
     value: "snes9x2005",
     system: "Super Nintendo",
-    suffixes: [".sfc", ".smc"],
-    folders: ["/snes/", "/super nintendo/"]
+    folders: ["snes", "sfc", "super nintendo",
+      "super nintendo entertainment system", "super famicom"]
   },
   {
     label: "Snes9x 2002",
     value: "snes9x2002",
     system: "Super Nintendo",
-    suffixes: [".sfc", ".smc"],
-    folders: ["/snes/", "/super nintendo/"]
+    folders: ["snes", "sfc", "super nintendo",
+      "super nintendo entertainment system", "super famicom"]
   },
   {
     label: "PicoDrive",
     value: "picodrive",
     system: "Sega Genesis",
-    suffixes: [".md", ".gen", ".smd", ".32x", ".sms", ".gg", ".sg"],
-    folders: ["/genesis/", "/megadrive/", "/mega drive/", "/sms/", "/gg/"]
+    folders: ["genesis", "megadrive", "mega drive", "md", "sms",
+      "mastersystem", "master system", "gg", "gamegear", "game gear",
+      "sg", "sg1000"]
   },
   {
     label: "PCE Fast",
     value: "pce-fast",
     system: "PC Engine",
-    suffixes: [".pce", ".sgx"],
-    folders: ["/pce/", "/pc engine/", "/turbografx/"]
+    folders: ["pce", "pcengine", "pc engine", "tg16", "turbografx",
+      "turbografx16", "turbografx-16", "sgx", "supergrafx"]
   },
   {
     label: "QPSX",
     value: "qpsx",
     system: "PlayStation",
-    suffixes: [".cue", ".iso", ".img", ".pbp"],
     folders: psxFolders
   },
   {
     label: "PMP Video",
     value: "pmp-video",
     system: "Media",
-    suffixes: [".avi"],
-    folders: ["/video/", "/videos/", "/media/"]
+    folders: ["video", "videos", "media", "movies"]
   }
 ];

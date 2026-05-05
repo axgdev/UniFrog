@@ -1,9 +1,14 @@
 APP_DIR := app
 THEME_DIR := themes
 SCRIPT_DIR := scripts
+DEFAULT_DIR := defaults
+LOCALE_DIR := locales
 OUT := output
 PACKAGE := $(OUT)/unifrog-frontend
 MQUICKJS_DIR ?= ../.deps/mquickjs
+FONT_SOURCE_DIR ?= ../.deps/fonts
+FONT_DIR := fonts
+USER_DIR := user
 MQUICKJS_ATOM_ALIGN ?= 256
 MQUICKJS_TCC_PATCH ?= ../patches/mquickjs/0001-use-portable-int-overflow-checks.patch
 HOSTCC ?= cc
@@ -15,6 +20,9 @@ BYTECODE_MANIFEST := $(OUT)/bytecode/bytecode-manifest.txt
 ENTRY_FILES := main.js quick-menu.js
 APP_FILES := $(sort $(wildcard $(APP_DIR)/*.js))
 THEME_FILES := $(shell find $(THEME_DIR) -type f 2>/dev/null)
+DEFAULT_FILES := $(shell find $(DEFAULT_DIR) -type f 2>/dev/null)
+LOCALE_FILES := $(shell find $(LOCALE_DIR) -type f 2>/dev/null)
+FONT_FILES := $(shell find $(FONT_SOURCE_DIR) -maxdepth 1 -type f 2>/dev/null)
 JS_FILES := $(ENTRY_FILES) $(APP_FILES) \
 	$(filter %.js,$(THEME_FILES)) $(wildcard $(SCRIPT_DIR)/*.js)
 JS_BYTECODE := $(patsubst %.js,$(OUT)/lint/%.mqbc,$(JS_FILES))
@@ -49,13 +57,19 @@ check: $(JS_BYTECODE) $(JS_COMPAT_STAMP)
 	@test -f $(THEME_DIR)/default.ini
 	@echo "OK"
 
-package: check $(JS_PACKAGE_BYTECODE) $(BYTECODE_MANIFEST) $(THEME_FILES)
+package: check $(JS_PACKAGE_BYTECODE) $(BYTECODE_MANIFEST) $(THEME_FILES) $(DEFAULT_FILES) $(LOCALE_FILES)
 	@rm -rf $(PACKAGE)
 	@mkdir -p $(PACKAGE)
 	@cp $(ENTRY_FILES) $(PACKAGE)/
-	@mkdir -p $(PACKAGE)/$(APP_DIR) $(PACKAGE)/$(THEME_DIR) $(PACKAGE)/$(SCRIPT_DIR)
+	@mkdir -p $(PACKAGE)/$(APP_DIR) $(PACKAGE)/$(THEME_DIR) $(PACKAGE)/$(SCRIPT_DIR) $(PACKAGE)/$(DEFAULT_DIR) $(PACKAGE)/$(LOCALE_DIR) $(PACKAGE)/$(USER_DIR)
 	@cp $(APP_FILES) $(PACKAGE)/$(APP_DIR)/
 	@cp -R $(THEME_DIR)/. $(PACKAGE)/$(THEME_DIR)/
+	@cp -R $(DEFAULT_DIR)/. $(PACKAGE)/$(DEFAULT_DIR)/
+	@cp -R $(LOCALE_DIR)/. $(PACKAGE)/$(LOCALE_DIR)/
+	@if test -d "$(FONT_SOURCE_DIR)" && test -n "$(FONT_FILES)"; then \
+		mkdir -p "$(PACKAGE)/$(FONT_DIR)"; \
+		cp "$(FONT_SOURCE_DIR)"/* "$(PACKAGE)/$(FONT_DIR)/"; \
+	fi
 	@cp $(SCRIPT_DIR)/*.js $(PACKAGE)/$(SCRIPT_DIR)/
 	@for f in $(JS_FILES); do \
 		mkdir -p "$(PACKAGE)/$$(dirname "$$f")"; \

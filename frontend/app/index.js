@@ -237,11 +237,10 @@ function drawScan(pathText, games, media) {
   JS2300.video.present();
 }
 
-function scanDirectory(dir, depth, scan) {
+function scanSystemDirectory(dir, depth, scan, cat) {
   var list;
   var i;
   var full;
-  var cat;
   var label;
   if (depth > 10 || scan.files > 4096 || scan.dirs > 512) return;
   scan.dirs++;
@@ -251,25 +250,63 @@ function scanDirectory(dir, depth, scan) {
     full = joinPath(dir, list[i].name);
     if (list[i].dir) {
       if (!skipDir(list[i].name, full))
-        scanDirectory(full, depth + 1, scan);
+        scanSystemDirectory(full, depth + 1, scan, cat);
     } else {
       scan.files++;
       if (shouldHideFile(list[i].name, dir))
         continue;
       label = list[i].name;
-      if (isGame(list[i].name)) {
-        cat = catalogForPath(full);
-        if (cat) {
-          scan.gameText += "game|" + cat.system + "|" + cat.value + "|" +
-            full + "|" + label + "\n";
-          scan.games++;
+      if (cat.system === "Media") {
+        if (isVideo(list[i].name)) {
+          scan.mediaText += "media|Media|video|" + full + "|" + label + "\n";
+          scan.media++;
         }
-      } else if (isVideo(list[i].name)) {
-        scan.mediaText += "media|Media|video|" + full + "|" + label + "\n";
-        scan.media++;
+      } else {
+        scan.gameText += "game|" + cat.system + "|" + cat.value + "|" +
+          full + "|" + label + "\n";
+        scan.games++;
       }
       if ((scan.files % 24) === 0)
         drawScan(dir, scan.games, scan.media);
+    }
+  }
+}
+
+function expandRomRoot(root) {
+  if (!root || root === "/") return "/media/mmcblk0";
+  if (startsWithText(root, "/media/mmcblk0")) return root;
+  if (root.charCodeAt(0) === 47) return "/media/mmcblk0" + root;
+  return "/media/mmcblk0/" + root;
+}
+
+function scanRoot(root, scan) {
+  var dir = expandRomRoot(root);
+  var list = JS2300.fs.list(dir);
+  var i;
+  var full;
+  var cat;
+  drawScan(dir, scan.games, scan.media);
+  scan.dirs++;
+  for (i = 0; i < list.length; i++) {
+    if (!list[i].dir) continue;
+    cat = catalogForFolderName(list[i].name);
+    if (!cat) continue;
+    full = joinPath(dir, list[i].name);
+    scanSystemDirectory(full, 1, scan, cat);
+  }
+}
+
+function forEachRomRoot(callback, scan) {
+  var text = config.romRoots || "/ROMS|/";
+  var start = 0;
+  var i;
+  var part;
+  for (i = 0; i <= text.length; i++) {
+    if (i === text.length || text.charCodeAt(i) === 124 ||
+        text.charCodeAt(i) === 44) {
+      part = trimAscii(textWindow(text, start, i - start));
+      if (part) callback(part, scan);
+      start = i + 1;
     }
   }
 }
@@ -278,8 +315,8 @@ function nativeIndexGames(now) {
   var result;
   var text;
   if (!JS2300.fs.index) return 0;
-  drawScan("/media/mmcblk0", 0, 0);
-  result = JS2300.fs.index("/media/mmcblk0", INDEX_PATH, MEDIA_INDEX_PATH);
+  drawScan(config.romRoots, 0, 0);
+  result = JS2300.fs.index(config.romRoots, INDEX_PATH, MEDIA_INDEX_PATH);
   if (!result || !result.ok) return 0;
   loadIndex();
   text = String(result.games) + " games indexed";
@@ -298,7 +335,7 @@ function nativeIndexGames(now) {
 function indexGames(now) {
   var scan = { gameText: "", mediaText: "", games: 0, media: 0, files: 0, dirs: 0 };
   if (nativeIndexGames(now)) return;
-  scanDirectory("/media/mmcblk0", 0, scan);
+  forEachRomRoot(scanRoot, scan);
   if (JS2300.fs.writeText) {
     JS2300.fs.writeText(INDEX_PATH, scan.gameText);
     JS2300.fs.writeText(MEDIA_INDEX_PATH, scan.mediaText);

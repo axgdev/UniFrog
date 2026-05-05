@@ -404,6 +404,7 @@ function settingValue(id) {
   if (id === "frameskip")
     return launchFrameskipOptions[optionIndex(launchFrameskipOptions, config.frameskip, 1)].label;
   if (id === "auto_index") return config.autoIndex ? "On" : "Off";
+  if (id === "rom_roots") return shortText(config.romRoots, 18);
   if (id === "index") return "Scan";
   if (id === "system_check") return "Verify";
   if (id === "developer") return "Tools";

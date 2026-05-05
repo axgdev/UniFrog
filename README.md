@@ -88,6 +88,15 @@ The SD-card package also installs `LICENSE.txt` and `THIRD_PARTY.md` under
 `/unifrog`. Keep `THIRD_PARTY.md` current whenever adding, removing, or
 replacing fetched or vendored third-party code.
 
+Game discovery is directory based. The default frontend option
+`rom_roots=/ROMS|/` scans system folders directly under `/ROMS` and directly
+under the SD root, so both `/ROMS/gba` and `/gba` are valid. Files inside a
+recognized system folder are treated as games without guessing from their file
+extensions. Common retro-handheld folder aliases such as `gba`, `gb`, `gbc`,
+`nes`, `snes`, `megadrive`, `pcengine`, and `psx` are matched
+case-insensitively. Edit `/unifrog/user/frontend.opt` on the SD card to change
+ROM roots without modifying packaged defaults.
+
 SD builds boot with the reliable 1-bit profile. Frontend startup reads and ROM
 loads use a guarded `SD_READ_MODE=uhs25` read window by default, then restore
 the boot profile before normal UI writes or core init; use `SD_READ_MODE=boot`

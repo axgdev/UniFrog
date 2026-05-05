@@ -8,6 +8,8 @@ audio, content launch, battery, standby, firmware handoff, and logging.
 
 ```text
 app/        JavaScript UI files
+defaults/   Packaged default .opt files
+locales/    Packaged translation string files
 main.js     Small loader that loads app modules
 quick-menu.js  In-game paused quick menu
 scripts/    Device smoke and performance diagnostics
@@ -26,6 +28,8 @@ Installed SD-card layout:
 /unifrog/app/*.js.mqbc
 /unifrog/scripts/*.js
 /unifrog/scripts/*.js.mqbc
+/unifrog/defaults/frontend.opt
+/unifrog/locales/*.ini
 /unifrog/themes/*.ini
 /unifrog/themes/system-icons/icons/*.png
 /unifrog/user/
@@ -40,8 +44,46 @@ Runtime settings live in `/unifrog/settings.ini`. Users can override colors by
 placing `/unifrog/theme.ini` on the SD card with the same keys as
 `themes/default.ini`.
 
+Packaged defaults live under `/unifrog/defaults`. User-owned overrides belong
+under `/unifrog/user`; the root install target replaces packaged app, default,
+theme, script, core, and module directories, but preserves `/unifrog/user` and
+runtime state files during upgrades.
+
+Frontend options use `.opt` files with the same comment shape used by SF2000
+multicore core options:
+
+```text
+### [rom_roots] :[/ROMS|/] :[/ROMS|/|/ROMS]
+rom_roots=/ROMS|/
+```
+
+`/unifrog/defaults/frontend.opt` provides shipped defaults.
+`/unifrog/user/frontend.opt` overrides those defaults. Runtime `settings.ini`
+can still hold the current value after the on-device settings screen changes
+it. Frontend settings that have `.opt` keys are also written back to
+`/unifrog/user/frontend.opt`, so the settings screen is the first-pass on-device
+editor for the shipped frontend options.
+
+ROM discovery is based on folder structure, not extension guessing. The
+default `rom_roots=/ROMS|/` scans system folders directly under `/ROMS` and
+directly under the SD root. For example, `/ROMS/gba`, `/ROMS/psx`, `/gba`, and
+`/psx` are valid. Recognized folder aliases are case-insensitive and follow
+common retro-handheld names, including `gba`, `gb`, `gbc`, `nes`, `fc`, `snes`,
+`sfc`, `genesis`, `megadrive`, `md`, `sms`, `gg`, `pce`, `pcengine`, `tg16`,
+`psx`, `ps`, and `ps1`. Every non-hidden file inside a recognized game folder
+is indexed as a game for that system; PlayStation `.bin` tracks are hidden
+when they are inside a PlayStation folder.
+
+Translation files under `/unifrog/locales` are packaged as key/value `.ini`
+files for English, Simplified Chinese, Hindi, Spanish, French, Arabic,
+Bengali, Portuguese, Russian, Urdu, Indonesian, German, Japanese, Swahili,
+Marathi, Telugu, Turkish, Tamil, Vietnamese, and Korean. The current renderer
+still bakes ASCII glyphs for active UI text, so the locale files are shipped as
+the data contract for the upcoming Unicode renderer pass.
+
 Themes may set `font=/media/mmcblk0/unifrog/font.ufnt` for a fixed 5x7 bitmap
-font. Font files are text files with one printable ASCII glyph per line:
+font, or a `.ttf`/`.otf` path for the current ASCII TTF renderer. Font files
+with `.ufnt` are text files with one printable ASCII glyph per line:
 
 ```text
 A=7e 11 11 11 7e
@@ -49,6 +91,11 @@ A=7e 11 11 11 7e
 
 Icon keys such as `icon_gba`, `icon_snes`, `icon_media`, and `icon_settings`
 accept absolute paths or paths relative to `icon_root`.
+
+`make deps-fonts` fetches permissively licensed Noto fonts into `.deps/fonts`;
+`make -C frontend package` includes them as `/unifrog/fonts` when present.
+These files are packaged for future multilingual rendering and for downstream
+themes that explicitly select a supported font path.
 
 `quick-menu.js` is the in-game JavaScript pause menu opened with
 `SELECT+START`. Its shortcuts are `B` resume, `X` return to the frontend,

@@ -40,17 +40,24 @@ function isCoreFile(name) {
 
 function isPsxTrackBin(name, dir) {
   if (!endsWithCI(catalogName(name), ".bin")) return false;
-  return hasAnyFolderHint(dir, psxFolders);
+  return folderNameMatches(basename(dir), psxFolders);
 }
 
-function hasAnyFolderHint(pathText, folders) {
-  var p = pathText;
+function folderNameMatches(name, folders) {
   var i;
-  if (!endsWithCI(p, "/")) p += "/";
   for (i = 0; i < folders.length; i++) {
-    if (containsCI(p, folders[i])) return true;
+    if (lowerAscii(name) === lowerAscii(folders[i])) return true;
   }
   return false;
+}
+
+function catalogForFolderName(name) {
+  var i;
+  for (i = 0; i < coreCatalog.length; i++) {
+    if (folderNameMatches(name, coreCatalog[i].folders))
+      return coreCatalog[i];
+  }
+  return null;
 }
 
 function pushCoreOption(out, core) {
@@ -67,14 +74,8 @@ function pushAllCoreOptions(out) {
 }
 
 function isGame(name) {
-  var i;
-  var detect = catalogName(name);
   if (isLegacyStubName(name)) return false;
-  if (isCompressedWrapper(name)) return true;
-  for (i = 0; i < coreCatalog.length; i++) {
-    if (hasAnySuffix(detect, coreCatalog[i].suffixes)) return true;
-  }
-  return false;
+  return true;
 }
 
 function isVideo(name) {
@@ -96,15 +97,15 @@ function shouldHideFile(name, dir) {
 }
 
 function catalogForPath(pathText) {
-  var i;
-  var detect = catalogName(pathText);
-  for (i = 0; i < coreCatalog.length; i++) {
-    if (hasAnySuffix(detect, coreCatalog[i].suffixes))
-      return coreCatalog[i];
-  }
-  for (i = 0; i < coreCatalog.length; i++) {
-    if (hasAnyFolderHint(pathText, coreCatalog[i].folders))
-      return coreCatalog[i];
+  var dir = parentPath(pathText);
+  var guard = 0;
+  var cat;
+  while (dir && guard < 16) {
+    cat = catalogForFolderName(basename(dir));
+    if (cat) return cat;
+    if (dir === "/media/mmcblk0" || dir === "/") break;
+    dir = parentPath(dir);
+    guard++;
   }
   return null;
 }
@@ -112,17 +113,8 @@ function catalogForPath(pathText) {
 function gameCoreOptions(pathText) {
   var out = [];
   var i;
-  var detect = catalogName(pathText);
-  for (i = 0; i < coreCatalog.length; i++) {
-    if (hasAnySuffix(detect, coreCatalog[i].suffixes))
-      pushCoreOption(out, coreCatalog[i]);
-  }
-  if (out.length === 0) {
-    for (i = 0; i < coreCatalog.length; i++) {
-      if (hasAnyFolderHint(pathText, coreCatalog[i].folders))
-        pushCoreOption(out, coreCatalog[i]);
-    }
-  }
+  var cat = catalogForPath(pathText);
+  if (cat) pushCoreOption(out, cat);
   pushAllCoreOptions(out);
   return out;
 }
@@ -164,7 +156,8 @@ function stripExtension(name) {
 function accepted(entry) {
   if (entry.dir) return true;
   if (filter !== "core" && shouldHideFile(entry.name, path)) return false;
-  if (filter === "games") return isGame(entry.name);
+  if (filter === "games") return isGame(entry.name) &&
+    catalogForPath(joinPath(path, entry.name));
   if (filter === "media") return isVideo(entry.name);
   if (filter === "firmware") return isAsd(entry.name);
   if (filter === "core") return entry.dir || isCoreFile(entry.name);

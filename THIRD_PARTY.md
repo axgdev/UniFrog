@@ -44,6 +44,7 @@ These inputs are fetched by `make deps` and pinned by the root `Makefile` or
 | zlib | `.deps/support/zlib` | Boot-logo PNG decode helper, CHD support, and core support | zlib license. See `.deps/support/zlib/LICENSE`. |
 | Zstandard | `.deps/support/zstd` | Zstd decode support | BSD 3-Clause. See `.deps/support/zstd/LICENSE`. |
 | HCRTOS SDK | `unifrog-hcrtos-sdk/` | Headers, libraries, kernel rebuild, media module | Mixed open-source and vendor terms. See the SDK license and third-party notice files. |
+| Noto Fonts | `.deps/fonts` | Optional packaged UI fonts | SIL Open Font License 1.1. Fetched from the notofonts GitHub repositories by `make deps-fonts`. |
 
 ## Libretro Core Modules
 

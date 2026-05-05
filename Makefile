@@ -15,6 +15,14 @@ MQUICKJS_DIR ?= $(DEPS)/mquickjs
 MQUICKJS_URL ?= https://github.com/bellard/mquickjs.git
 MQUICKJS_POLICY ?= head
 MQUICKJS_REF ?= ee50431eac9b14b99f722b537ec4cac0c8dd75ab
+FONT_DIR ?= $(DEPS)/fonts
+NOTO_SANS_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Regular.ttf
+NOTO_SANS_ARABIC_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansArabic/NotoSansArabic-Regular.ttf
+NOTO_SANS_DEVANAGARI_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Regular.ttf
+NOTO_SANS_BENGALI_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansBengali/NotoSansBengali-Regular.ttf
+NOTO_SANS_TAMIL_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansTamil/NotoSansTamil-Regular.ttf
+NOTO_SANS_TELUGU_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansTelugu/NotoSansTelugu-Regular.ttf
+NOTO_SANS_CJK_URL ?= https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 SD_MODE ?= safe
@@ -676,7 +684,7 @@ $(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 
 .DELETE_ON_ERROR:
 COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild
-SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores
+SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-fonts deps-support deps-cores
 PACKAGE_TARGETS := frontend-package core-package module-package sdcard-package sd-zip install refresh-sd refresh-sd-clean
 VERIFY_TARGETS := asdcheck fastboot-check fastboot-only-check layout-check boot-logo-check js2300-check frontend-check core-smoke-check
 ADVANCED_TARGETS := sdk dtb lib fastboot fastboot-only size ci-deps ci-toolchain ci-commit-check ci-sd-zip print-config
@@ -706,6 +714,7 @@ help:
 	@echo "  make deps-alpine   Install Alpine host packages"
 	@echo "  make deps-ubuntu   Print Ubuntu host package command"
 	@echo "  make deps-sdk      Initialize only the HCRTOS SDK submodule"
+	@echo "  make deps-fonts    Fetch packaged Noto UI fonts"
 	@echo "  make deps-cores    Fetch only libretro core sources"
 	@echo ""
 	@echo "Packaging and device:"
@@ -753,6 +762,7 @@ print-config:
 	@echo "JS2300=$(JS2300)"
 	@echo "FRONTEND=$(FRONTEND)"
 	@echo "MQUICKJS_DIR=$(MQUICKJS_DIR)"
+	@echo "FONT_DIR=$(FONT_DIR)"
 	@echo "HOSTCC=$(HOSTCC)"
 	@echo "DTC=$(DTC)"
 	@echo "SD_MODE=$(SD_MODE)"
@@ -772,7 +782,7 @@ print-config:
 	@echo "OPT_FAST=$(OPT_FAST)"
 	@echo "OPT_AUDIO=$(OPT_AUDIO)"
 
-deps: deps-sdk deps-mquickjs deps-cores
+deps: deps-sdk deps-mquickjs deps-fonts deps-cores
 
 deps-alpine:
 	apk add git make dtc tcc tcc-libs-static musl-dev ccache curl tar xz zip patch
@@ -802,6 +812,21 @@ deps-mquickjs:
 	git -C "$(MQUICKJS_DIR)" checkout -q "$(MQUICKJS_REF)"; \
 	git -C "$(MQUICKJS_DIR)" reset --hard -q "$(MQUICKJS_REF)"; \
 	git -C "$(MQUICKJS_DIR)" clean -fdx -q
+
+deps-fonts:
+	@mkdir -p "$(FONT_DIR)"
+	@set -e; fetch_font() { \
+		url="$$1"; out="$(FONT_DIR)/$$2"; \
+		if test -f "$$out"; then echo "  REUSE   $$out"; \
+		else echo "  FETCH   $$out"; curl -fsSL "$$url" -o "$$out"; fi; \
+	}; \
+	fetch_font "$(NOTO_SANS_URL)" NotoSans-Regular.ttf; \
+	fetch_font "$(NOTO_SANS_ARABIC_URL)" NotoSansArabic-Regular.ttf; \
+	fetch_font "$(NOTO_SANS_DEVANAGARI_URL)" NotoSansDevanagari-Regular.ttf; \
+	fetch_font "$(NOTO_SANS_BENGALI_URL)" NotoSansBengali-Regular.ttf; \
+	fetch_font "$(NOTO_SANS_TAMIL_URL)" NotoSansTamil-Regular.ttf; \
+	fetch_font "$(NOTO_SANS_TELUGU_URL)" NotoSansTelugu-Regular.ttf; \
+	fetch_font "$(NOTO_SANS_CJK_URL)" NotoSansCJKsc-Regular.otf
 
 deps-status:
 	@set -e; \
@@ -1356,8 +1381,12 @@ install: fastboot-check layout-check
 	$(Q)mkdir -p $(SDCARD_FIRMWARE_DIR)
 	$(Q)cp $(OUT)/unifrog.bin $(SDCARD_FIRMWARE_DIR)/unifrog.bin
 	@echo "  INSTALL $(SDCARD)/unifrog"
-	$(Q)rm -rf $(SDCARD)/unifrog
-	$(Q)cp -R $(FRONTEND_PACKAGE) $(SDCARD)/unifrog
+	$(Q)mkdir -p $(SDCARD)/unifrog
+	$(Q)rm -rf $(SDCARD)/unifrog/app $(SDCARD)/unifrog/cores \
+		$(SDCARD)/unifrog/defaults $(SDCARD)/unifrog/fonts \
+		$(SDCARD)/unifrog/locales $(SDCARD)/unifrog/modules \
+		$(SDCARD)/unifrog/scripts $(SDCARD)/unifrog/themes
+	$(Q)cp -R $(FRONTEND_PACKAGE)/. $(SDCARD)/unifrog/
 	$(Q)cp LICENSE $(SDCARD)/unifrog/LICENSE.txt
 	$(Q)cp $(THIRD_PARTY_NOTICE) $(SDCARD)/unifrog/THIRD_PARTY.md
 	$(Q)sync

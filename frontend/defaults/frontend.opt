@@ -1,0 +1,8 @@
+### [rom_roots] :[/ROMS|/] :[/ROMS|/|/ROMS]
+rom_roots=/ROMS|/
+### [auto_index] :[0] :[0|1]
+auto_index=0
+### [home_layout] :[grid] :[grid|systems_horizontal|systems_vertical|kiosk]
+home_layout=grid
+### [language] :[en] :[en|zh-Hans|hi|es|fr|ar|bn|pt|ru|ur|id|de|ja|sw|mr|te|tr|ta|vi|ko]
+language=en

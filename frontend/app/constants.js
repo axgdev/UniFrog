@@ -33,6 +33,8 @@ var buttons = [
 ];
 
 var SETTINGS_PATH = "/media/mmcblk0/unifrog/settings.ini";
+var DEFAULT_OPTIONS_PATH = "/media/mmcblk0/unifrog/defaults/frontend.opt";
+var USER_OPTIONS_PATH = "/media/mmcblk0/unifrog/user/frontend.opt";
 var THEME_PATH = "/media/mmcblk0/unifrog/theme.ini";
 var DEFAULT_THEME_PATH = "/media/mmcblk0/unifrog/themes/default.ini";
 var INDEX_PATH = "/media/mmcblk0/unifrog/game-index.txt";
@@ -107,6 +109,7 @@ var settingRows = [
   { id: "av", label: "AV output" },
   { id: "frameskip", label: "Frameskip" },
   { id: "auto_index", label: "Auto index boot" },
+  { id: "rom_roots", label: "ROM roots" },
   { id: "index", label: "Index library" },
   { id: "system_check", label: "System check" },
   { id: "input", label: "Input monitor" },

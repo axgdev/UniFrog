@@ -426,6 +426,8 @@ function changeSetting(delta, now) {
       launchFrameskipOptions.length + delta) % launchFrameskipOptions.length].value;
   } else if (id === "auto_index") {
     config.autoIndex = config.autoIndex ? 0 : 1;
+  } else if (id === "rom_roots") {
+    config.romRoots = config.romRoots === "/ROMS|/" ? "/ROMS" : "/ROMS|/";
   }
   writeSettings();
   dirty = true;

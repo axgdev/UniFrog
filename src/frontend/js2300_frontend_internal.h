@@ -112,8 +112,6 @@ struct js2300_frontend {
 struct frontend_catalog_entry {
    const char *system;
    const char *core;
-   const char *const *suffixes;
-   unsigned suffix_count;
    const char *const *folders;
    unsigned folder_count;
 };
@@ -128,14 +126,14 @@ struct frontend_index_scan {
 
 int is_video_file(const char *name);
 const struct frontend_catalog_entry *frontend_catalog_for_path(const char *path);
-int frontend_is_game_name(const char *name);
+const struct frontend_catalog_entry *frontend_catalog_for_dir_name(
+   const char *name);
 int frontend_should_hide_file(const char *name, const char *dir);
 int frontend_path_join_checked(char *dst, size_t dst_size,
    const char *base, const char *name);
 int frontend_dirent_is_dot(const struct dirent *entry);
 int frontend_dirent_is_dir(const struct dirent *entry, const char *full);
-int frontend_index_scan_dir(const char *dir, unsigned depth,
-   struct frontend_index_scan *scan);
+int frontend_index_scan_roots(const char *roots, struct frontend_index_scan *scan);
 
 int frontend_fb_open(struct js2300_frontend *frontend);
 void frontend_fb_reopen(struct js2300_frontend *frontend, const char *tag);

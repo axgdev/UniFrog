@@ -17,70 +17,52 @@ int is_video_file(const char *name)
 }
 
 static const char *const frontend_psx_folders[] = {
-   "/psx/", "/ps1/", "/playstation/",
+   "psx", "ps", "ps1", "playstation", "playstation1", "sony playstation",
 };
-static const char *const frontend_gba_suffixes[] = { ".gba" };
 static const char *const frontend_gba_folders[] = {
-   "/gba/", "/game boy advance/",
+   "gba", "gbadvance", "gameboyadvance", "game boy advance",
 };
-static const char *const frontend_gb_suffixes[] = { ".gb", ".gbc" };
 static const char *const frontend_gb_folders[] = {
-   "/gb/", "/gbc/", "/gbb/", "/game boy/",
+   "gb", "gbc", "gbb", "gameboy", "game boy", "gameboycolor",
+   "game boy color",
 };
-static const char *const frontend_nes_suffixes[] = { ".nes" };
-static const char *const frontend_nes_folders[] = { "/nes/", "/famicom/" };
-static const char *const frontend_fds_suffixes[] = { ".fds" };
-static const char *const frontend_snes_suffixes[] = { ".sfc", ".smc" };
+static const char *const frontend_nes_folders[] = {
+   "nes", "fc", "fds", "famicom", "nintendo", "nintendo entertainment system",
+};
 static const char *const frontend_snes_folders[] = {
-   "/snes/", "/super nintendo/",
-};
-static const char *const frontend_genesis_suffixes[] = {
-   ".md", ".gen", ".smd", ".32x", ".sms", ".gg", ".sg",
+   "snes", "sfc", "super nintendo", "super nintendo entertainment system",
+   "super famicom",
 };
 static const char *const frontend_genesis_folders[] = {
-   "/genesis/", "/megadrive/", "/mega drive/", "/sms/", "/gg/",
+   "genesis", "megadrive", "mega drive", "md", "sms", "mastersystem",
+   "master system", "gg", "gamegear", "game gear", "sg", "sg1000",
 };
-static const char *const frontend_pce_suffixes[] = { ".pce", ".sgx" };
 static const char *const frontend_pce_folders[] = {
-   "/pce/", "/pc engine/", "/turbografx/",
+   "pce", "pcengine", "pc engine", "tg16", "turbografx", "turbografx16",
+   "turbografx-16", "sgx", "supergrafx",
 };
-static const char *const frontend_psx_suffixes[] = {
-   ".cue", ".iso", ".img", ".pbp",
-};
-static const char *const frontend_avi_suffixes[] = { ".avi" };
-static const char *const frontend_avi_folders[] = {
-   "/video/", "/videos/", "/media/",
+static const char *const frontend_media_folders[] = {
+   "video", "videos", "media", "movies",
 };
 
 /* Keep this order in sync with frontend/main.js coreCatalog. */
 static const struct frontend_catalog_entry frontend_catalog[] = {
    { "Game Boy Advance", "gpsp",
-      frontend_gba_suffixes, FRONTEND_ARRAY_SIZE(frontend_gba_suffixes),
       frontend_gba_folders, FRONTEND_ARRAY_SIZE(frontend_gba_folders) },
    { "Game Boy / Color", "gambatte",
-      frontend_gb_suffixes, FRONTEND_ARRAY_SIZE(frontend_gb_suffixes),
       frontend_gb_folders, FRONTEND_ARRAY_SIZE(frontend_gb_folders) },
    { "Nintendo (NES)", "quicknes",
-      frontend_nes_suffixes, FRONTEND_ARRAY_SIZE(frontend_nes_suffixes),
-      frontend_nes_folders, FRONTEND_ARRAY_SIZE(frontend_nes_folders) },
-   { "Nintendo (NES)", "fceumm",
-      frontend_fds_suffixes, FRONTEND_ARRAY_SIZE(frontend_fds_suffixes),
       frontend_nes_folders, FRONTEND_ARRAY_SIZE(frontend_nes_folders) },
    { "Super Nintendo", "snes9x2005",
-      frontend_snes_suffixes, FRONTEND_ARRAY_SIZE(frontend_snes_suffixes),
       frontend_snes_folders, FRONTEND_ARRAY_SIZE(frontend_snes_folders) },
    { "Sega Genesis", "picodrive",
-      frontend_genesis_suffixes, FRONTEND_ARRAY_SIZE(frontend_genesis_suffixes),
       frontend_genesis_folders, FRONTEND_ARRAY_SIZE(frontend_genesis_folders) },
    { "PC Engine", "pce-fast",
-      frontend_pce_suffixes, FRONTEND_ARRAY_SIZE(frontend_pce_suffixes),
       frontend_pce_folders, FRONTEND_ARRAY_SIZE(frontend_pce_folders) },
    { "PlayStation", "qpsx",
-      frontend_psx_suffixes, FRONTEND_ARRAY_SIZE(frontend_psx_suffixes),
       frontend_psx_folders, FRONTEND_ARRAY_SIZE(frontend_psx_folders) },
    { "Media", "pmp-video",
-      frontend_avi_suffixes, FRONTEND_ARRAY_SIZE(frontend_avi_suffixes),
-      frontend_avi_folders, FRONTEND_ARRAY_SIZE(frontend_avi_folders) },
+      frontend_media_folders, FRONTEND_ARRAY_SIZE(frontend_media_folders) },
 };
 
 static char frontend_ascii_lower(char c)
@@ -90,58 +72,24 @@ static char frontend_ascii_lower(char c)
    return c;
 }
 
-static int frontend_contains_ci(const char *text, const char *part)
+static int frontend_equals_ci(const char *a, const char *b)
 {
-   size_t part_len;
-
-   if (!text || !part)
+   if (!a || !b)
       return 0;
-   part_len = strlen(part);
-   if (part_len == 0)
-      return 1;
-
-   while (*text) {
-      size_t i;
-
-      for (i = 0; i < part_len; i++) {
-         if (!text[i] ||
-             frontend_ascii_lower(text[i]) != frontend_ascii_lower(part[i]))
-            break;
-      }
-      if (i == part_len)
-         return 1;
-      text++;
+   while (*a && *b) {
+      if (frontend_ascii_lower(*a) != frontend_ascii_lower(*b))
+         return 0;
+      a++;
+      b++;
    }
-   return 0;
+   return *a == '\0' && *b == '\0';
 }
 
-static int frontend_has_folder_hint(const char *path,
-   const char *const *folders, unsigned folder_count)
+static int frontend_is_alias(const char *name, const char *const *folders,
+   unsigned folder_count)
 {
-   char with_slash[JS2300_FRONTEND_MAX_PATH + 2u];
-   size_t len;
-
-   if (!path)
-      return 0;
-   unifrog_text_copy(with_slash, sizeof(with_slash), path);
-   len = strlen(with_slash);
-   if (len > 0 && with_slash[len - 1u] != '/' &&
-       len + 1u < sizeof(with_slash)) {
-      with_slash[len++] = '/';
-      with_slash[len] = '\0';
-   }
    for (unsigned i = 0; i < folder_count; i++) {
-      if (frontend_contains_ci(with_slash, folders[i]))
-         return 1;
-   }
-   return 0;
-}
-
-static int frontend_has_suffixes(const char *text, const char *const *suffixes,
-   unsigned suffix_count)
-{
-   for (unsigned i = 0; i < suffix_count; i++) {
-      if (unifrog_text_ends_with_ci(text, suffixes[i]))
+      if (frontend_equals_ci(name, folders[i]))
          return 1;
    }
    return 0;
@@ -189,38 +137,66 @@ static void frontend_catalog_name(const char *name, char *out, size_t out_size)
       unifrog_text_copy(out, out_size, name ? name : "");
 }
 
-const struct frontend_catalog_entry *frontend_catalog_for_path(
-   const char *path)
+const struct frontend_catalog_entry *frontend_catalog_for_dir_name(
+   const char *name)
 {
-   char detect[JS2300_FRONTEND_MAX_PATH];
-
-   frontend_catalog_name(path, detect, sizeof(detect));
    for (unsigned i = 0; i < FRONTEND_ARRAY_SIZE(frontend_catalog); i++) {
-      if (frontend_has_suffixes(detect, frontend_catalog[i].suffixes,
-          frontend_catalog[i].suffix_count))
-         return &frontend_catalog[i];
-   }
-   for (unsigned i = 0; i < FRONTEND_ARRAY_SIZE(frontend_catalog); i++) {
-      if (frontend_has_folder_hint(path, frontend_catalog[i].folders,
+      if (frontend_is_alias(name, frontend_catalog[i].folders,
           frontend_catalog[i].folder_count))
          return &frontend_catalog[i];
    }
    return NULL;
 }
 
-int frontend_is_game_name(const char *name)
+const struct frontend_catalog_entry *frontend_catalog_for_path(
+   const char *path)
 {
-   char detect[JS2300_FRONTEND_MAX_PATH];
+   char part[JS2300_FRONTEND_MAX_PATH];
+   size_t len = 0;
 
-   if (frontend_is_legacy_stub_name(name))
+   if (!path)
+      return NULL;
+   for (const char *p = path; ; p++) {
+      if (*p == '/' || *p == '\0') {
+         if (len > 0) {
+            part[len] = '\0';
+            const struct frontend_catalog_entry *entry =
+               frontend_catalog_for_dir_name(part);
+
+            if (entry)
+               return entry;
+            len = 0;
+         }
+         if (*p == '\0')
+            break;
+      } else if (len + 1u < sizeof(part)) {
+         part[len++] = *p;
+      }
+   }
+   return NULL;
+}
+
+static int frontend_has_psx_folder_hint(const char *dir)
+{
+   char part[JS2300_FRONTEND_MAX_PATH];
+   size_t len = 0;
+
+   if (!dir)
       return 0;
-   if (frontend_is_compressed_wrapper(name))
-      return 1;
-   frontend_catalog_name(name, detect, sizeof(detect));
-   for (unsigned i = 0; i < FRONTEND_ARRAY_SIZE(frontend_catalog); i++) {
-      if (frontend_has_suffixes(detect, frontend_catalog[i].suffixes,
-          frontend_catalog[i].suffix_count))
-         return 1;
+   for (const char *p = dir; ; p++) {
+      if (*p == '/' || *p == '\0') {
+         if (len > 0) {
+            part[len] = '\0';
+            if (frontend_is_alias(part, frontend_psx_folders,
+                FRONTEND_ARRAY_SIZE(frontend_psx_folders)))
+               return 1;
+            len = 0;
+         }
+         if (*p == '\0')
+            break;
+      } else if (len + 1u < sizeof(part)) {
+         part[len++] = *p;
+      }
    }
    return 0;
 }
@@ -233,8 +209,7 @@ int frontend_should_hide_file(const char *name, const char *dir)
       return 1;
    frontend_catalog_name(name, detect, sizeof(detect));
    return unifrog_text_ends_with_ci(detect, ".bin") &&
-      frontend_has_folder_hint(dir, frontend_psx_folders,
-         FRONTEND_ARRAY_SIZE(frontend_psx_folders));
+      frontend_has_psx_folder_hint(dir);
 }
 
 static int frontend_skip_index_dir(const char *name, const char *full)
@@ -331,8 +306,9 @@ static int frontend_index_write_media(struct frontend_index_scan *scan,
    return frontend_index_note_bytes(scan, &scan->media_bytes, written);
 }
 
-int frontend_index_scan_dir(const char *dir, unsigned depth,
-   struct frontend_index_scan *scan)
+static int frontend_index_scan_system_dir(const char *dir, unsigned depth,
+   struct frontend_index_scan *scan,
+   const struct frontend_catalog_entry *catalog)
 {
    DIR *handle;
    struct dirent *entry;
@@ -365,7 +341,8 @@ int frontend_index_scan_dir(const char *dir, unsigned depth,
          continue;
       if (is_dir) {
          if (!frontend_skip_index_dir(entry->d_name, full) &&
-             frontend_index_scan_dir(full, depth + 1u, scan) != 0) {
+             frontend_index_scan_system_dir(full, depth + 1u, scan,
+                catalog) != 0) {
             ret = -1;
             break;
          }
@@ -379,23 +356,32 @@ int frontend_index_scan_dir(const char *dir, unsigned depth,
       scan->result->files++;
       if (frontend_should_hide_file(entry->d_name, dir))
          continue;
-      if (frontend_is_game_name(entry->d_name)) {
-         const struct frontend_catalog_entry *catalog =
-            frontend_catalog_for_path(full);
+      if (catalog) {
+         if (strcmp(catalog->system, "Media") == 0) {
+            if (is_video_file(entry->d_name)) {
+               int write_ret = frontend_index_write_media(scan, full,
+                  entry->d_name);
 
-         if (catalog) {
-            int write_ret = frontend_index_write_game(scan, catalog, full,
-               entry->d_name);
-
-            if (write_ret < 0) {
-               ret = -1;
-               break;
+               if (write_ret < 0) {
+                  ret = -1;
+                  break;
+               }
+               if (write_ret != 2)
+                  scan->result->media++;
             }
-            if (write_ret != 2)
-               scan->result->games++;
-            if (write_ret > 0)
-               continue;
+            continue;
          }
+         int write_ret = frontend_index_write_game(scan, catalog, full,
+            entry->d_name);
+
+         if (write_ret < 0) {
+            ret = -1;
+            break;
+         }
+         if (write_ret != 2)
+            scan->result->games++;
+         if (write_ret > 0)
+            continue;
       } else if (is_video_file(entry->d_name)) {
          int write_ret = frontend_index_write_media(scan, full, entry->d_name);
 
@@ -415,3 +401,108 @@ int frontend_index_scan_dir(const char *dir, unsigned depth,
    return ret;
 }
 
+static int frontend_index_scan_root(const char *root,
+   struct frontend_index_scan *scan)
+{
+   DIR *handle;
+   struct dirent *entry;
+   int ret = 0;
+
+   handle = opendir(root);
+   if (!handle)
+      return 0;
+   scan->result->dirs++;
+   while ((entry = readdir(handle)) != NULL) {
+      char full[JS2300_FRONTEND_MAX_PATH];
+      int is_dir;
+      const struct frontend_catalog_entry *catalog;
+
+      if (frontend_dirent_is_dot(entry) || frontend_skip_index_dir(entry->d_name,
+          root))
+         continue;
+      if (frontend_path_join_checked(full, sizeof(full), root,
+          entry->d_name) != 0) {
+         scan->result->truncated = 1;
+         continue;
+      }
+      is_dir = frontend_dirent_is_dir(entry, full);
+      if (is_dir <= 0)
+         continue;
+      catalog = frontend_catalog_for_dir_name(entry->d_name);
+      if (!catalog)
+         continue;
+      if (frontend_index_scan_system_dir(full, 1u, scan, catalog) != 0) {
+         ret = -1;
+         break;
+      }
+   }
+   if (closedir(handle) != 0)
+      ret = -1;
+   return ret;
+}
+
+static void frontend_expand_root(char *out, size_t out_size, const char *root,
+   size_t root_len)
+{
+   if (root_len == 1u && root[0] == '/') {
+      unifrog_text_copy(out, out_size, "/media/mmcblk0");
+      return;
+   }
+   if (root_len >= strlen("/media/mmcblk0") &&
+       memcmp(root, "/media/mmcblk0", strlen("/media/mmcblk0")) == 0) {
+      size_t len = root_len < out_size - 1u ? root_len : out_size - 1u;
+
+      memcpy(out, root, len);
+      out[len] = '\0';
+      return;
+   }
+   unifrog_text_copy(out, out_size, "/media/mmcblk0");
+   if (root_len > 0 && root[0] != '/') {
+      size_t used = strlen(out);
+
+      if (used + 1u < out_size) {
+         out[used++] = '/';
+         out[used] = '\0';
+      }
+   }
+   {
+      size_t used = strlen(out);
+      size_t copy = root_len;
+
+      if (used + copy >= out_size)
+         copy = out_size - used - 1u;
+      memcpy(out + used, root, copy);
+      out[used + copy] = '\0';
+   }
+}
+
+int frontend_index_scan_roots(const char *roots, struct frontend_index_scan *scan)
+{
+   const char *start;
+
+   if (!roots || !roots[0])
+      roots = "/ROMS|/";
+   start = roots;
+   for (const char *p = roots; ; p++) {
+      if (*p == '|' || *p == ',' || *p == '\n' || *p == '\0') {
+         const char *end = p;
+
+         while (start < p && (*start == ' ' || *start == '\t'))
+            start++;
+         while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+            end--;
+         if (end > start) {
+            char expanded[JS2300_FRONTEND_MAX_PATH];
+
+            frontend_expand_root(expanded, sizeof(expanded), start,
+               (size_t)(end - start));
+            if (frontend_index_scan_root(expanded, scan) != 0)
+               return -1;
+         }
+         if (*p == '\0')
+            break;
+         start = p + 1;
+      }
+   }
+   return 0;
+}

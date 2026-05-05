@@ -79,6 +79,18 @@ function containsCI(text, part) {
   return lowerAscii(text).indexOf(lowerAscii(part)) >= 0;
 }
 
+function trimAscii(text) {
+  var start = 0;
+  var end = text ? text.length : 0;
+  while (start < end &&
+      (text.charCodeAt(start) === 32 || text.charCodeAt(start) === 9))
+    start++;
+  while (end > start &&
+      (text.charCodeAt(end - 1) === 32 || text.charCodeAt(end - 1) === 9))
+    end--;
+  return textWindow(text, start, end - start);
+}
+
 function readKey(text, key) {
   var i = 0;
   var line = "";

@@ -30,14 +30,30 @@ function writeSettings() {
   text += "display=" + String(config.display) + "\n";
   text += "av=" + String(config.av) + "\n";
   text += "auto_index=" + String(config.autoIndex) + "\n";
+  text += "rom_roots=" + config.romRoots + "\n";
   text += "last_path=" + config.lastPath + "\n";
   text += "last_core=" + config.lastCore + "\n";
   JS2300.fs.writeText(SETTINGS_PATH, text);
+  writeUserOptions();
+}
+
+function writeUserOptions() {
+  var text = "";
+  if (!JS2300.fs.writeText) return;
+  text += "### [rom_roots] :[" + config.romRoots + "] :[/ROMS|/|/ROMS]\n";
+  text += "rom_roots=" + config.romRoots + "\n";
+  text += "### [auto_index] :[" + String(config.autoIndex) + "] :[0|1]\n";
+  text += "auto_index=" + String(config.autoIndex) + "\n";
+  JS2300.fs.writeText(USER_OPTIONS_PATH, text);
 }
 
 function loadSettings() {
   var text = JS2300.fs.readText ? JS2300.fs.readText(SETTINGS_PATH) : null;
+  var defaultOptions = JS2300.fs.readText ? JS2300.fs.readText(DEFAULT_OPTIONS_PATH) : null;
+  var userOptions = JS2300.fs.readText ? JS2300.fs.readText(USER_OPTIONS_PATH) : null;
   var firstBoot = !text;
+  applyFrontendOptions(defaultOptions);
+  applyFrontendOptions(userOptions);
   if (text) {
     config.brightness = toInt(readKey(text, "brightness"), config.brightness);
     config.audio = toInt(readKey(text, "audio"), config.audio) ? 1 : 0;
@@ -48,6 +64,7 @@ function loadSettings() {
     config.display = toInt(readKey(text, "display"), config.display);
     config.av = toInt(readKey(text, "av"), config.av);
     config.autoIndex = toInt(readKey(text, "auto_index"), config.autoIndex) ? 1 : 0;
+    config.romRoots = readKey(text, "rom_roots") || config.romRoots;
     config.lastPath = readKey(text, "last_path");
     config.lastCore = readKey(text, "last_core");
   }
@@ -71,6 +88,15 @@ function loadSettings() {
     else
       writeSettings();
   }
+}
+
+function applyFrontendOptions(text) {
+  var value;
+  if (!text) return;
+  value = readKey(text, "rom_roots");
+  if (value) config.romRoots = value;
+  value = readKey(text, "auto_index");
+  if (value) config.autoIndex = toInt(value, config.autoIndex) ? 1 : 0;
 }
 
 function loadThemeFile() {
