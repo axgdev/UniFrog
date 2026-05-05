@@ -44,8 +44,10 @@ static int draw_logo(struct unifrog_fb *fb, const char *tag)
    uint32_t draw_ms;
    uint32_t flush_ms;
    uint32_t pan_ms;
+   uint32_t vsync_ms;
    uint32_t av_ms;
    uint32_t done_ms;
+   int vsync_ret;
    int ret;
 
    if (!fb || !fb->pixels ||
@@ -84,6 +86,8 @@ static int draw_logo(struct unifrog_fb *fb, const char *tag)
    flush_ms = unifrog_perf_time_ms();
    (void)unifrog_fb_pan(fb, fb->current_buffer);
    pan_ms = unifrog_perf_time_ms();
+   vsync_ret = unifrog_fb_wait_vsync(fb);
+   vsync_ms = unifrog_perf_time_ms();
    (void)unifrog_av_set_mode(0);
    av_ms = unifrog_perf_time_ms();
    ret = unifrog_backlight_set(BOOT_LOGO_BACKLIGHT);
@@ -94,7 +98,7 @@ static int draw_logo(struct unifrog_fb *fb, const char *tag)
    unifrog_boot_trace_log("boot.logo_done");
    printf("unifrog boot_logo shown tag=%s %ux%u backlight=%u ret=%d "
       "total_ms=%lu fill_ms=%lu draw_ms=%lu flush_ms=%lu pan_ms=%lu "
-      "av_ms=%lu backlight_ms=%lu\n",
+      "vsync_ms=%lu vsync_ret=%d av_ms=%lu backlight_ms=%lu\n",
       tag ? tag : "", BOOT_LOGO_WIDTH, BOOT_LOGO_HEIGHT,
       BOOT_LOGO_BACKLIGHT, ret,
       (unsigned long)(done_ms - start_ms),
@@ -102,7 +106,8 @@ static int draw_logo(struct unifrog_fb *fb, const char *tag)
       (unsigned long)(draw_ms - fill_ms),
       (unsigned long)(flush_ms - draw_ms),
       (unsigned long)(pan_ms - flush_ms),
-      (unsigned long)(av_ms - pan_ms),
+      (unsigned long)(vsync_ms - pan_ms), vsync_ret,
+      (unsigned long)(av_ms - vsync_ms),
       (unsigned long)(done_ms - av_ms));
    return ret;
 }
