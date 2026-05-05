@@ -17,7 +17,7 @@ MQUICKJS_POLICY ?= head
 MQUICKJS_REF ?= ee50431eac9b14b99f722b537ec4cac0c8dd75ab
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
-SD_MODE ?= uhs
+SD_MODE ?= safe
 
 -include config.mk
 
@@ -91,16 +91,19 @@ SD_BUS_WIDTH := 1
 SD_CAP_HIGHSPEED := 0
 SD_CAP_UHS := 0
 SD_NO_1V8 := 1
+SD_EXPERIMENTAL := 0
 else ifeq ($(SD_MODE),wide)
 SD_BUS_WIDTH := 4
 SD_CAP_HIGHSPEED := 1
 SD_CAP_UHS := 0
 SD_NO_1V8 := 1
+SD_EXPERIMENTAL := 1
 else
 SD_BUS_WIDTH := 4
 SD_CAP_HIGHSPEED := 1
 SD_CAP_UHS := 1
 SD_NO_1V8 := 0
+SD_EXPERIMENTAL := 1
 endif
 
 GCC_LIBDIR ?= $(firstword $(wildcard $(TOOLCHAIN)/lib/gcc/mipsel-mti-elf/*))
@@ -164,6 +167,7 @@ DEFINES := \
 	-DSF2000 \
 	-DSUPPORT_FFPLAYER \
 	-DUNIFROG_SD_MODE=\"$(SD_MODE)\" \
+	-DUNIFROG_SD_EXPERIMENTAL=$(SD_EXPERIMENTAL) \
 	-DUNIFROG_GIT_COMMIT=\"$(UNIFROG_GIT_COMMIT)\" \
 	-DUNIFROG_GIT_DIRTY=$(UNIFROG_GIT_DIRTY) \
 	-DUNIFROG_SDK_GIT_COMMIT=\"$(UNIFROG_SDK_GIT_COMMIT)\" \
@@ -283,7 +287,8 @@ APP_OBJECTS := \
 BUILD_IDENTITY_STAMP := $(BUILD)/build-identity.stamp
 BUILD_IDENTITY_OBJECTS := \
 	$(BUILD)/main.o \
-	$(BUILD)/unifrog_libretro_host.o
+	$(BUILD)/unifrog_libretro_host.o \
+	$(BUILD)/unifrog_platform.o
 
 # These objects print build identity in device logs. Rebuild them only when the
 # embedded identity changes, and let dependent core modules relink from the
@@ -503,7 +508,9 @@ help:
 	@echo "Config:"
 	@echo "  make print-config  Show current paths and tools"
 	@echo "  make V=1           Show full compiler/linker commands"
-	@echo "  make SD_MODE=safe  Use the old 1-bit SD profile"
+	@echo "  make SD_MODE=safe  Use the default reliable 1-bit SD profile"
+	@echo "  make SD_MODE=wide  Diagnostic 4-bit high-speed SD build"
+	@echo "  make SD_MODE=uhs   Diagnostic UHS/1.8V SD build"
 	@echo "  Override paths in untracked config.mk, or on the command line."
 
 print-config:
@@ -519,6 +526,7 @@ print-config:
 	@echo "HOSTCC=$(HOSTCC)"
 	@echo "DTC=$(DTC)"
 	@echo "SD_MODE=$(SD_MODE)"
+	@echo "SD_EXPERIMENTAL=$(SD_EXPERIMENTAL)"
 	@echo "CCACHE=$(if $(CCACHE),$(CCACHE),disabled)"
 	@echo "ARCH_CFLAGS=$(ARCH_CFLAGS)"
 	@echo "OPT_SIZE=$(OPT_SIZE)"
@@ -683,7 +691,8 @@ core-smoke-check:
 sdk:
 	$(Q)$(MAKE) -C $(SDK) check TOOLCHAIN=$(TOOLCHAIN) \
 		CROSS_COMPILE=$(CROSS_COMPILE) CCACHE=$(CCACHE) JOBS=$(JOBS) \
-		SD_MODE=$(SD_MODE)
+		SD_MODE=$(SD_MODE) BOARD_DTS=$(abspath $(DTS)) \
+		DTS_INCLUDE=$(abspath dts/include)
 
 js2300-check:
 	$(Q)$(MAKE) -C $(JS2300) check TOOLCHAIN=$(TOOLCHAIN) \
@@ -838,7 +847,8 @@ $(DTS_MODE_STAMP): | $(BUILD)
 		"SD_BUS_WIDTH=$(SD_BUS_WIDTH)" \
 		"SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED)" \
 		"SD_CAP_UHS=$(SD_CAP_UHS)" \
-		"SD_NO_1V8=$(SD_NO_1V8)" > $@
+		"SD_NO_1V8=$(SD_NO_1V8)" \
+		"SD_EXPERIMENTAL=$(SD_EXPERIMENTAL)" > $@
 
 $(DTS_PRE): $(DTS) $(DTS_MODE_STAMP) | $(BUILD)
 	@echo "  CPP     $<"
@@ -892,7 +902,7 @@ $(CORE_REV_STAMP): FORCE | $(BUILD)
 	if test "$$value" != "$$old"; then printf '%s\n' "$$value" > $@; fi
 
 $(BUILD_IDENTITY_STAMP): FORCE | $(BUILD)
-	$(Q)value="$(UNIFROG_GIT_COMMIT) $(UNIFROG_GIT_DIRTY) $(UNIFROG_SDK_GIT_COMMIT) $(UNIFROG_CORES_GIT_COMMIT) $(UNIFROG_JS2300_GIT_COMMIT) $(UNIFROG_FRONTEND_GIT_COMMIT)"; \
+	$(Q)value="$(UNIFROG_GIT_COMMIT) $(UNIFROG_GIT_DIRTY) $(UNIFROG_SDK_GIT_COMMIT) $(UNIFROG_CORES_GIT_COMMIT) $(UNIFROG_JS2300_GIT_COMMIT) $(UNIFROG_FRONTEND_GIT_COMMIT) $(SD_MODE) $(SD_EXPERIMENTAL)"; \
 	old=$$(cat $@ 2>/dev/null || true); \
 	if test "$$value" != "$$old"; then printf '%s\n' "$$value" > $@; fi
 

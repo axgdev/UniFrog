@@ -32,6 +32,9 @@ extern unsigned long PINMUXR;
 #ifndef UNIFROG_SD_MODE
 #define UNIFROG_SD_MODE "unknown"
 #endif
+#ifndef UNIFROG_SD_EXPERIMENTAL
+#define UNIFROG_SD_EXPERIMENTAL 0
+#endif
 
 struct storage_mount {
    const char *dev;
@@ -114,10 +117,11 @@ static void log_storage_config(void)
    (void)fdt_get_property_u_32_index(node, "bus-width", 0, &bus_width);
    (void)fdt_get_property_u_32_index(node, "clock-frequency", 0, &clock);
 
-   printf("unifrog storage config mode=%s node=%d status=%s clock=%lu "
+   printf("unifrog storage config mode=%s experimental=%d node=%d status=%s clock=%lu "
           "bus-width=%lu cap-highspeed=%d supports-highspeed=%d "
           "uhs-sdr12=%d uhs-sdr25=%d uhs-sdr50=%d no-1v8=%d broken-cd=%d\n",
       UNIFROG_SD_MODE,
+      UNIFROG_SD_EXPERIMENTAL,
       node, status,
       (unsigned long)clock,
       (unsigned long)bus_width,

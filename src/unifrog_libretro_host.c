@@ -43,6 +43,13 @@
 
 #define printf unifrog_log
 
+#ifndef UNIFROG_SD_MODE
+#define UNIFROG_SD_MODE "unknown"
+#endif
+#ifndef UNIFROG_SD_EXPERIMENTAL
+#define UNIFROG_SD_EXPERIMENTAL 0
+#endif
+
 #define DEFAULT_SAMPLE_RATE 32000u
 #define LIBRETRO_AUDIO_OUTPUT_RATE 32000u
 #define LIBRETRO_AUDIO_DEFAULT_GAIN 2u
@@ -453,6 +460,28 @@ struct libretro_host {
 };
 
 static struct libretro_host host;
+
+static int experimental_sd_log_defer_begin(const char *tag)
+{
+   if (!UNIFROG_SD_EXPERIMENTAL)
+      return 0;
+   unifrog_log_defer_begin();
+   printf("unifrog log defer begin tag=%s reason=experimental_sd mode=%s pending=%u capacity=%u\n",
+      tag ? tag : "", UNIFROG_SD_MODE,
+      (unsigned)unifrog_log_pending(), (unsigned)unifrog_log_capacity());
+   return 1;
+}
+
+static void experimental_sd_log_defer_end(int active, const char *tag, int ret)
+{
+   if (!active)
+      return;
+   printf("unifrog log defer end tag=%s reason=experimental_sd mode=%s ret=%d pending=%u deferred=%d\n",
+      tag ? tag : "", UNIFROG_SD_MODE, ret,
+      (unsigned)unifrog_log_pending(), unifrog_log_flush_deferred());
+   unifrog_log_defer_end();
+   (void)unifrog_log_flush();
+}
 
 static int16_t audio_mix_buffer[2048 * 2];
 static int16_t audio_silence_buffer[384 * 2];
@@ -5686,6 +5715,7 @@ int unifrog_libretro_run_path_ex(const char *path,
    const struct unifrog_libretro_run_options *options)
 {
    const char *core_id;
+   int log_defer;
    int ret;
 
    if (!path) {
@@ -5694,6 +5724,7 @@ int unifrog_libretro_run_path_ex(const char *path,
       return -1;
    }
 
+   log_defer = experimental_sd_log_defer_begin("libretro_dispatch");
    core_id = options && options->core_id[0] ?
       libretro_canonical_core_id(options->core_id) :
       libretro_default_core_id_for_path(path);
@@ -5705,12 +5736,14 @@ int unifrog_libretro_run_path_ex(const char *path,
       ret = run_core_id(core_id, path, options);
       printf("unifrog libretro dispatch core=%s ret=%d\n", core_id, ret);
       (void)unifrog_log_flush();
+      experimental_sd_log_defer_end(log_defer, "libretro_dispatch", ret);
       return ret;
    }
 
    printf("unifrog libretro dispatch unsupported path=%s requested_core=%s\n",
       path, options && options->core_id[0] ? options->core_id : "auto");
    (void)unifrog_log_flush();
+   experimental_sd_log_defer_end(log_defer, "libretro_dispatch", -1);
    return -1;
 }
 

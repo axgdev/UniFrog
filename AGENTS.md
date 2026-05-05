@@ -13,7 +13,9 @@ Keep this repository small and direct.
 - Dependency pins: `make deps-status` and `make upgrade-deps`; use
   `MODE=head|tag` only to override repository policy.
 - Defaults: `TOOLCHAIN=/opt/mipsel-mti-elf`, `SDK=unifrog-hcrtos-sdk`,
-  `DEPS=.deps`
+  `DEPS=.deps`, `SD_MODE=safe`
+- SD diagnostics: `SD_MODE=wide|uhs` are experimental and may defer normal
+  file-log flushes during game launch.
 - Local overrides belong in untracked `config.mk`.
 
 ## Scope
@@ -25,6 +27,8 @@ Keep this repository small and direct.
   diagnostics, and crash handling.
 - Package JavaScript source with `.js.mqbc` bytecode and
   `bytecode-manifest.txt`; do not rely on file timestamps for freshness.
+- Keep the SF2000 board DTS in `board/hc15xx/common/dts/sf2000_min.dts`; the
+  SDK rebuild consumes that file instead of carrying a second copy.
 - Keep the mixed-license HCRTOS SDK in the `unifrog-hcrtos-sdk` submodule.
 - Fetch external source dependencies with `make deps`; do not commit `.deps`,
   generated outputs, downloaded toolchains, or upstream core/MQuickJS checkouts.

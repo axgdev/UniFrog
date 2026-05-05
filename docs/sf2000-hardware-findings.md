@@ -77,7 +77,18 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 ### Storage
 
 - The SD/MMC path is sensitive to signal integrity. A flat SD extender cable caused frequent CRC errors and automount churn.
-- Switching to 1-bit SD mode greatly improved reliability with only modest speed loss.
+- The default build uses the reliable 1-bit SD profile. `SD_MODE=wide` and
+  `SD_MODE=uhs` are diagnostics only; `logunifrog0009.txt` showed both were
+  unstable on the tested device.
+- SD cards support 1-bit and 4-bit transfer widths here. The HCRTOS MMC driver
+  reports invalid `bus-width` values, so 2-bit and 3-bit profiles are not valid
+  experiments.
+- Runtime mixed-mode fallback is not currently exposed by the SDK. The MMC
+  profile is parsed from the DTB when the block device is initialized, and
+  switching timing/bus width under a mounted filesystem would need explicit
+  driver support.
+- Experimental SD builds defer normal file-log flushes during game launch so
+  ROM/core reads are not competing with diagnostic writes on an unstable bus.
 - UniFrog appends a boot marker to `/log.txt` instead of truncating the file.
   The in-memory log buffer now flushes before overflow when file I/O is safe
   instead of truncating older buffered data.
