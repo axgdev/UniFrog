@@ -32,6 +32,11 @@ The global `load("relative/path.js")` helper evaluates scripts relative to the
 current app root, which lets the SD-card frontend stay modular without a
 bundling step.
 
+When a packaged `.js.mqbc` file and `bytecode-manifest.txt` are present,
+JS2300 verifies source and bytecode fingerprints before executing bytecode.
+This avoids relying on FAT timestamps and falls back to source if a file was
+edited without rebuilding bytecode.
+
 ## Contract
 
 - Keep hot paths in C and expose batched JavaScript APIs.

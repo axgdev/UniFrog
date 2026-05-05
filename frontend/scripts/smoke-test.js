@@ -124,7 +124,12 @@ function smokeFiles() {
   var mediaIndex = JS2300.fs.readText("/media/mmcblk0/unifrog/media-index.txt");
   smokeCheck("sd_root", root.length > 0, "count=" + String(root.length));
   smokeCheck("unifrog_main", smokeHasFile(unifrog, "main.js"), "");
+  smokeCheck("unifrog_main_bytecode", smokeHasFile(unifrog, "main.js.mqbc"), "");
+  smokeCheck("quick_menu", smokeHasFile(unifrog, "quick-menu.js"), "");
+  smokeCheck("quick_menu_bytecode", smokeHasFile(unifrog, "quick-menu.js.mqbc"), "");
+  smokeCheck("bytecode_manifest", smokeHasFile(unifrog, "bytecode-manifest.txt"), "");
   smokeCheck("script_packaged", smokeHasFile(scripts, "smoke-test.js"), "");
+  smokeCheck("perf_script_packaged", smokeHasFile(scripts, "perf-test.js"), "");
   smokeCheck("theme_default", smokeHasFile(themes, "default.ini"), "");
   smokeCheck("theme_icon_gba", smokeHasFile(icons, "gba.png"), "");
   smokeCheck("settings_read", settings !== null, "");

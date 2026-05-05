@@ -24,9 +24,8 @@ services through the stable `unifrog/abi.h` table.
 The application arena is for one active high-level guest at a time:
 
 - a libretro core image, BSS, and fixed work buffers
-- or a future JavaScript/script UI bundle when no game core is running
-- or a pause/menu overlay application while a game core is suspended, if the
-  loader chooses that policy
+- or a JavaScript/script runtime when no game core is running
+- or the JavaScript quick menu while a game core is suspended
 - or scratch buffers owned by a loader step
 
 On exit, UniFrog can wipe or reuse the whole arena. Nothing needed to redraw the
@@ -67,16 +66,3 @@ semantic-versioned ABI table. If the table grows, new callbacks are appended and
 old fields keep their meaning after v1.0. While the ABI is still v0.x, breaking
 changes are allowed when they remove experimental interfaces or make the design
 cleaner.
-
-## Device Test
-
-The test frontend has `MEMORY ABI PROBE`. It logs:
-
-- ABI version and compatibility result
-- runtime, application/external, and media memory regions
-- application arena boundary pattern writes
-- heap allocations after the arena writes
-
-This test is intentionally small. It should prove that the reported arena is not
-colliding with firmware or the HCRTOS heap before we put a real external core
-loader or mquickjs bundle there.

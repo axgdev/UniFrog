@@ -15,6 +15,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include <js2300/js2300.h>
+
 #include <kernel/lib/zlib.h>
 
 #include <unifrog/audio.h>
@@ -69,6 +71,11 @@
 #define LIBRETRO_WATCHDOG_PHASE_RUN 2u
 #define LIBRETRO_SAVE_DIR "/media/mmcblk0/unifrog/saves"
 #define LIBRETRO_CONTENT_CACHE_DIR "/media/mmcblk0/unifrog/cache"
+#define LIBRETRO_QUICK_JS_ROOT "/media/mmcblk0/unifrog"
+#define LIBRETRO_QUICK_JS_ENTRY "quick-menu.js"
+#define LIBRETRO_QUICK_JS_HEAP_BYTES (2u * 1024u * 1024u)
+#define LIBRETRO_QUICK_JS_STACK_BYTES (96u * 1024u)
+#define LIBRETRO_QUICK_JS_BYTECODE_BYTES (512u * 1024u)
 #define LIBRETRO_MEMORY_AUTOSAVE_FRAMES 600u
 #define LIBRETRO_MEMORY_FILE_MAX (16u * 1024u * 1024u)
 #define LIBRETRO_ZIP_MAX_UNCOMPRESSED (64u * 1024u * 1024u)
@@ -118,6 +125,11 @@ enum quick_memory_slot {
    QUICK_MEMORY_SAVE_RAM = 0,
    QUICK_MEMORY_RTC,
    QUICK_MEMORY_COUNT,
+};
+
+enum quick_js_action {
+   QUICK_JS_ACTION_RESUME = 0,
+   QUICK_JS_ACTION_RETURN_MENU = 1,
 };
 
 struct quick_memory_file {
@@ -428,6 +440,9 @@ struct libretro_host {
    unsigned memory_autosaves;
    int fast_forward;
    int content_alloc_appmem;
+   int quick_js_action;
+   int quick_js_frame_open;
+   unsigned quick_js_draw_buffer;
    char quick_status[96];
 };
 
@@ -443,12 +458,18 @@ static volatile unsigned watchdog_heartbeat;
 static void loading_draw(const char *title, const char *detail,
    unsigned percent);
 static uint64_t host_time_us(void);
+static unsigned host_elapsed_ms(uint64_t start_us, uint64_t end_us);
 static int exit_combo_down(void);
+static int quick_js_run(void);
 static void host_pace_begin(void);
 
 static const struct quick_memory_file quick_memory_files[] = {
    { RETRO_MEMORY_SAVE_RAM, "srm" },
    { RETRO_MEMORY_RTC, "rtc" },
+};
+
+static const unsigned quick_backlight_levels[] = {
+   1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
 };
 
 void unifrog_libretro_run_options_init(
@@ -1676,6 +1697,331 @@ static int exit_combo_down(void)
 {
    return (host.buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_SELECT)) &&
       (host.buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_START));
+}
+
+static int quick_js_status_value(void)
+{
+   unsigned backlight = 0;
+
+   (void)unifrog_backlight_get(&backlight);
+   if (backlight > 100)
+      backlight = 100;
+   return (int)(backlight * 100u + (unsigned)host.display_mode * 10u +
+      (host.audio_enabled ? 1u : 0u));
+}
+
+static int quick_js_toggle_audio(void)
+{
+   host.audio_enabled = host.audio_enabled ? 0 : 1;
+   host.options.audio_enabled = host.audio_enabled;
+   host.audio_gate_open = 0;
+   host.audio_quiet_batches = 0;
+   if (host.audio_open)
+      (void)unifrog_audio_set_output_enabled(&host.audio, 0);
+   printf("unifrog quick_js audio=%d\n", host.audio_enabled);
+   return quick_js_status_value();
+}
+
+static int quick_js_cycle_display(void)
+{
+   switch (host.display_mode) {
+   case UNIFROG_LIBRETRO_DISPLAY_FIT:
+      host.display_mode = UNIFROG_LIBRETRO_DISPLAY_STRETCH;
+      break;
+   case UNIFROG_LIBRETRO_DISPLAY_STRETCH:
+      host.display_mode = UNIFROG_LIBRETRO_DISPLAY_ORIGINAL;
+      break;
+   default:
+      host.display_mode = UNIFROG_LIBRETRO_DISPLAY_FIT;
+      break;
+   }
+   host.options.display_mode = host.display_mode;
+   if (host.presenter_open) {
+      host.presenter.flags = present_flags_for_display_mode(host.display_mode);
+      host.presenter.cleared_buffer_mask = 0;
+   }
+   printf("unifrog quick_js display=%s\n",
+      display_mode_label(host.display_mode));
+   return quick_js_status_value();
+}
+
+static int quick_js_cycle_backlight(void)
+{
+   unsigned current = 0;
+   unsigned next = quick_backlight_levels[0];
+
+   if (unifrog_backlight_get(&current) == 0) {
+      for (unsigned i = 0; i < ARRAY_SIZE(quick_backlight_levels); i++) {
+         if (quick_backlight_levels[i] > current) {
+            next = quick_backlight_levels[i];
+            break;
+         }
+      }
+   }
+   (void)unifrog_backlight_set(next);
+   host.options.backlight_level = (int)next;
+   printf("unifrog quick_js backlight=%u\n", next);
+   return quick_js_status_value();
+}
+
+static struct unifrog_surface quick_js_surface(void)
+{
+   return unifrog_fb_surface_for_buffer(&host.presenter.fb,
+      host.quick_js_draw_buffer);
+}
+
+static void quick_js_begin_frame(void)
+{
+   if (!host.presenter_open || host.quick_js_frame_open)
+      return;
+
+   host.quick_js_draw_buffer = host.presenter.active_buffer;
+   if (host.presenter.buffer_count > 1)
+      host.quick_js_draw_buffer =
+         (host.presenter.active_buffer + 1u) % host.presenter.buffer_count;
+   host.quick_js_frame_open = 1;
+}
+
+static void quick_js_log(void *opaque, const char *message)
+{
+   (void)opaque;
+   printf("js2300 quick: %s\n", message ? message : "");
+}
+
+static int quick_js_flush_log(void *opaque)
+{
+   (void)opaque;
+   return unifrog_log_flush();
+}
+
+static uint32_t quick_js_millis(void *opaque)
+{
+   (void)opaque;
+   return unifrog_perf_time_ms();
+}
+
+static void quick_js_sleep(void *opaque, uint32_t ms)
+{
+   (void)opaque;
+   if (ms > 1000)
+      ms = 1000;
+   if (ms)
+      usleep((useconds_t)ms * 1000u);
+}
+
+static void quick_js_video_clear(void *opaque, uint16_t color)
+{
+   struct unifrog_surface surface;
+   (void)opaque;
+
+   if (!host.presenter_open)
+      return;
+   quick_js_begin_frame();
+   surface = quick_js_surface();
+   unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height, color);
+}
+
+static void quick_js_video_rects(void *opaque,
+   const struct js2300_rect *rects, size_t count)
+{
+   struct unifrog_surface surface;
+   (void)opaque;
+
+   if (!host.presenter_open || !rects)
+      return;
+   quick_js_begin_frame();
+   surface = quick_js_surface();
+   for (size_t i = 0; i < count; i++)
+      unifrog_gfx_fill_rect(&surface, rects[i].x, rects[i].y,
+         rects[i].w, rects[i].h, rects[i].color);
+}
+
+static void quick_js_video_text(void *opaque, int x, int y,
+   const char *text, uint16_t color)
+{
+   struct unifrog_surface surface;
+   (void)opaque;
+
+   if (!host.presenter_open)
+      return;
+   quick_js_begin_frame();
+   surface = quick_js_surface();
+   unifrog_gfx_draw_text(&surface, x, y, text ? text : "", color, 1);
+}
+
+static void quick_js_video_present(void *opaque)
+{
+   (void)opaque;
+
+   if (!host.presenter_open)
+      return;
+   if (!host.quick_js_frame_open) {
+      (void)unifrog_fb_wait_vsync(&host.presenter.fb);
+      return;
+   }
+
+   unifrog_fb_flush_buffer(&host.presenter.fb, host.quick_js_draw_buffer);
+   (void)unifrog_fb_wait_vsync(&host.presenter.fb);
+   if (unifrog_fb_pan(&host.presenter.fb, host.quick_js_draw_buffer) == 0)
+      host.presenter.active_buffer = host.quick_js_draw_buffer;
+   host.quick_js_frame_open = 0;
+}
+
+static uint32_t quick_js_input_mask(uint32_t buttons)
+{
+   uint32_t out = 0;
+
+   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_UP))
+      out |= 1u << 0;
+   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_DOWN))
+      out |= 1u << 1;
+   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_LEFT))
+      out |= 1u << 2;
+   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_RIGHT))
+      out |= 1u << 3;
+   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_A))
+      out |= 1u << 4;
+   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_B))
+      out |= 1u << 5;
+   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_X))
+      out |= 1u << 6;
+   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_Y))
+      out |= 1u << 7;
+   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_L))
+      out |= 1u << 8;
+   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_R))
+      out |= 1u << 9;
+   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_SELECT))
+      out |= 1u << 10;
+   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_START))
+      out |= 1u << 11;
+   return out;
+}
+
+static uint32_t quick_js_input_poll(void *opaque)
+{
+   uint32_t buttons;
+   (void)opaque;
+
+   unifrog_input_save_previous();
+   unifrog_input_poll_with_wireless_divisor(1);
+   host.buttons = unifrog_input_buttons();
+   buttons = unifrog_input_menu_buttons();
+   return quick_js_input_mask(buttons);
+}
+
+static int quick_js_backlight(void *opaque, int level, int *out_level)
+{
+   unsigned current = 0;
+   int ret = 0;
+   (void)opaque;
+
+   if (level >= 0) {
+      if (level > 100)
+         level = 100;
+      ret = unifrog_backlight_set((unsigned)level);
+      host.options.backlight_level = level;
+   }
+   if (unifrog_backlight_get(&current) != 0)
+      return -1;
+   if (out_level)
+      *out_level = (int)current;
+   return ret;
+}
+
+static int quick_js_action(void *opaque, const char *id)
+{
+   (void)opaque;
+
+   if (!id)
+      return -1;
+   if (strcmp(id, "quick:status") == 0)
+      return quick_js_status_value();
+   if (strcmp(id, "quick:resume") == 0) {
+      host.quick_js_action = QUICK_JS_ACTION_RESUME;
+      return 0;
+   }
+   if (strcmp(id, "quick:return") == 0) {
+      host.quick_js_action = QUICK_JS_ACTION_RETURN_MENU;
+      return 0;
+   }
+   if (strcmp(id, "quick:audio") == 0)
+      return quick_js_toggle_audio();
+   if (strcmp(id, "quick:display") == 0)
+      return quick_js_cycle_display();
+   if (strcmp(id, "quick:backlight") == 0)
+      return quick_js_cycle_backlight();
+   return -1;
+}
+
+static void quick_js_exit(void *opaque, const char *reason)
+{
+   (void)opaque;
+   printf("unifrog quick_js exit reason=%s action=%d\n",
+      reason ? reason : "", host.quick_js_action);
+}
+
+static void quick_js_configure_host(struct js2300_host *js_host)
+{
+   memset(js_host, 0, sizeof(*js_host));
+   js_host->size = sizeof(*js_host);
+   js_host->log = quick_js_log;
+   js_host->flush_log = quick_js_flush_log;
+   js_host->millis = quick_js_millis;
+   js_host->sleep_ms = quick_js_sleep;
+   js_host->video_clear = quick_js_video_clear;
+   js_host->video_rects = quick_js_video_rects;
+   js_host->video_text = quick_js_video_text;
+   js_host->video_present = quick_js_video_present;
+   js_host->input_poll = quick_js_input_poll;
+   js_host->action = quick_js_action;
+   js_host->exit = quick_js_exit;
+   js_host->backlight = quick_js_backlight;
+}
+
+static int quick_js_run(void)
+{
+   struct js2300_config config;
+   struct js2300_host js_host;
+   struct js2300_runtime *runtime = NULL;
+   uint64_t start_us;
+   int ret;
+
+   if (!host.presenter_open)
+      return 0;
+
+   if (host.audio_open)
+      (void)unifrog_audio_set_output_enabled(&host.audio, 0);
+   host.audio_gate_open = 0;
+   host.quick_js_action = QUICK_JS_ACTION_RESUME;
+   host.quick_js_frame_open = 0;
+
+   if (js2300_config_init(&config) != 0)
+      return 1;
+   config.app_root = LIBRETRO_QUICK_JS_ROOT;
+   config.entry_script = LIBRETRO_QUICK_JS_ENTRY;
+   config.heap_bytes = LIBRETRO_QUICK_JS_HEAP_BYTES;
+   config.stack_bytes = LIBRETRO_QUICK_JS_STACK_BYTES;
+   config.bytecode_cache_bytes = LIBRETRO_QUICK_JS_BYTECODE_BYTES;
+   quick_js_configure_host(&js_host);
+
+   start_us = host_time_us();
+   printf("unifrog quick_js start entry=%s\n", LIBRETRO_QUICK_JS_ENTRY);
+   (void)unifrog_log_flush_force();
+   ret = js2300_runtime_create(&config, &js_host, &runtime);
+   if (ret == 0)
+      ret = js2300_runtime_run(runtime);
+   js2300_runtime_destroy(runtime);
+   if (ret != 0)
+      host.quick_js_action = QUICK_JS_ACTION_RETURN_MENU;
+   printf("unifrog quick_js done ret=%d action=%d ms=%u\n",
+      ret, host.quick_js_action,
+      host_elapsed_ms(start_us, host_time_us()));
+   (void)unifrog_log_flush_force();
+
+   host.quick_js_frame_open = 0;
+   host.presenter.cleared_buffer_mask = 0;
+   return host.quick_js_action == QUICK_JS_ACTION_RETURN_MENU ? 1 : 0;
 }
 
 static unsigned host_calibrate_count_hz(void)
@@ -4719,10 +5065,17 @@ static int run_core(const struct libretro_core_api *core, const char *path,
       unifrog_input_poll_with_wireless_divisor(LIBRETRO_WIRELESS_POLL_DIVISOR);
       host.buttons = unifrog_input_buttons();
       if (exit_combo_down()) {
-         printf("unifrog libretro return_to_js core=%s frame=%u\n",
+         printf("unifrog libretro quick_js core=%s frame=%u\n",
             core->id, host.run_frames);
          (void)unifrog_log_flush_force();
-         break;
+         if (quick_js_run()) {
+            printf("unifrog libretro return_to_js core=%s frame=%u\n",
+               core->id, host.run_frames);
+            (void)unifrog_log_flush_force();
+            break;
+         }
+         host_pace_begin();
+         continue;
       }
 
       host_notify_audio_status();

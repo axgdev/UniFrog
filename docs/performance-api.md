@@ -190,25 +190,12 @@ are intentionally outside individual core source changes:
   `mmz0` at size zero and relies on the SDK sysmem fallback for vendor media
   callers.
 
-## On-Device Test Menu
+## On-Device Diagnostics
 
-The C test frontend includes `PERFORMANCE LAB` on the main menu. It runs the
-performance probes individually:
-
-- capability snapshot
-- memory/cache timing
-- framebuffer timing
-- GE fill/stretch timing
-- presenter timing for the reusable RGB565 frame path
-- display/video node and layer probes
-- audio DMA output timing
-- storage I/O timing
-- open-only probes for hardware leads
-- safe SCPU clock info
-- risky SCPU runtime clock probe, guarded behind `X`
-
-The hardware-lead probe is intentionally open-only. It does not change pinmuxes,
-configure buses, or start unvalidated engines.
+The JavaScript Developer menu includes `Performance test`. It records JS screen
+draw, directory-list, file-read, and module-load timings to
+`/unifrog/perf-test-result.txt` and `PERF ...` log lines. Libretro hosting also
+logs periodic `unifrog perf_*` timing buckets while a core runs.
 
 ## Leads Not Yet Wrapped
 

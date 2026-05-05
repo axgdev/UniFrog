@@ -9,7 +9,8 @@ audio, content launch, battery, standby, firmware handoff, and logging.
 ```text
 app/        JavaScript UI files
 main.js     Small loader that loads app modules
-scripts/    Device smoke-test scripts
+quick-menu.js  In-game paused quick menu
+scripts/    Device smoke and performance diagnostics
 themes/     User-editable color themes and icons
 Makefile    Syntax checks and package assembly
 ```
@@ -18,8 +19,13 @@ Installed SD-card layout:
 
 ```text
 /unifrog/main.js
+/unifrog/quick-menu.js
+/unifrog/*.js.mqbc
+/unifrog/bytecode-manifest.txt
 /unifrog/app/*.js
+/unifrog/app/*.js.mqbc
 /unifrog/scripts/*.js
+/unifrog/scripts/*.js.mqbc
 /unifrog/themes/*.ini
 /unifrog/themes/system-icons/icons/*.png
 /unifrog/user/
@@ -55,6 +61,11 @@ make -C frontend check
 make -C frontend package
 ```
 
+`make package` stages both source and `.mqbc` bytecode. The generated
+`bytecode-manifest.txt` stores source and bytecode fingerprints, because device
+timestamps are not reliable. JS2300 executes bytecode only when the manifest
+matches the current bytes; otherwise it falls back to source and logs why.
+
 The direct frontend default is `../.deps/mquickjs`, which is the same checkout
 the root Makefile fetches as `.deps/mquickjs`. Override it when needed:
 
@@ -69,7 +80,12 @@ Current MQuickJS syntax guidance:
   object shorthand, spread syntax, and trailing commas.
 - Keep shipped files compatible with the parser used by JS2300 on device.
 
-The packaged smoke test is `/unifrog/scripts/smoke-test.js`. Run it from the
-Developer UI to exercise video, input, filesystem, backlight, battery,
-packaged-core, log-flush, and timing bindings. It writes
-`/unifrog/smoke-test-result.txt` and `SMOKE ...` lines to `/log.txt`.
+Packaged diagnostics live under `/unifrog/scripts`. Run them from the Developer
+UI:
+
+- `smoke-test.js` exercises video, input, filesystem, backlight, battery,
+  packaged-core, log-flush, bytecode packaging, and timing bindings.
+- `perf-test.js` records JS screen draw, list, read, and module-load timings.
+
+They write `/unifrog/smoke-test-result.txt` or
+`/unifrog/perf-test-result.txt` and log `SMOKE ...` or `PERF ...` lines.

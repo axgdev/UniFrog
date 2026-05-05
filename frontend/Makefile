@@ -10,15 +10,19 @@ HOSTCC ?= cc
 HOST_NO_PIE := $(if $(findstring tcc,$(notdir $(HOSTCC))),,-no-pie)
 MQJS_BUILD := $(OUT)/mqjs-build
 MQJS := $(MQJS_BUILD)/mqjs
+BYTECODE_MANIFEST_TOOL := $(OUT)/tools/bytecode_manifest
+BYTECODE_MANIFEST := $(OUT)/bytecode/bytecode-manifest.txt
+ENTRY_FILES := main.js quick-menu.js
 APP_FILES := \
 	$(APP_DIR)/theme.js \
 	$(APP_DIR)/constants.js \
 	$(APP_DIR)/catalog.js \
 	$(APP_DIR)/app.js
 THEME_FILES := $(shell find $(THEME_DIR) -type f 2>/dev/null)
-JS_FILES := main.js $(APP_FILES) \
+JS_FILES := $(ENTRY_FILES) $(APP_FILES) \
 	$(filter %.js,$(THEME_FILES)) $(wildcard $(SCRIPT_DIR)/*.js)
 JS_BYTECODE := $(patsubst %.js,$(OUT)/lint/%.mqbc,$(JS_FILES))
+JS_PACKAGE_BYTECODE := $(patsubst %.js,$(OUT)/bytecode/%.js.mqbc,$(JS_FILES))
 JS_COMPAT_STAMP := $(OUT)/lint/js-compat.stamp
 JS_FORBIDDEN_PATTERN := \.(substr|substring|slice|toLowerCase|toUpperCase|trim|startsWith|endsWith|includes|map|filter|reduce|forEach|find|some|every)[[:space:]]*\(
 
@@ -41,6 +45,7 @@ print-config:
 
 check: $(JS_BYTECODE) $(JS_COMPAT_STAMP)
 	@test -f main.js
+	@test -f quick-menu.js
 	@test -f $(APP_DIR)/app.js
 	@test -f $(APP_DIR)/theme.js
 	@test -f $(APP_DIR)/constants.js
@@ -48,14 +53,19 @@ check: $(JS_BYTECODE) $(JS_COMPAT_STAMP)
 	@test -f $(THEME_DIR)/default.ini
 	@echo "OK"
 
-package: check $(THEME_FILES)
+package: check $(JS_PACKAGE_BYTECODE) $(BYTECODE_MANIFEST) $(THEME_FILES)
 	@rm -rf $(PACKAGE)
 	@mkdir -p $(PACKAGE)
-	@cp main.js $(PACKAGE)/
+	@cp $(ENTRY_FILES) $(PACKAGE)/
 	@mkdir -p $(PACKAGE)/$(APP_DIR) $(PACKAGE)/$(THEME_DIR) $(PACKAGE)/$(SCRIPT_DIR)
 	@cp $(APP_FILES) $(PACKAGE)/$(APP_DIR)/
 	@cp -R $(THEME_DIR)/. $(PACKAGE)/$(THEME_DIR)/
 	@cp $(SCRIPT_DIR)/*.js $(PACKAGE)/$(SCRIPT_DIR)/
+	@for f in $(JS_FILES); do \
+		mkdir -p "$(PACKAGE)/$$(dirname "$$f")"; \
+		cp "$(OUT)/bytecode/$$f.mqbc" "$(PACKAGE)/$$f.mqbc"; \
+	done
+	@cp $(BYTECODE_MANIFEST) $(PACKAGE)/bytecode-manifest.txt
 
 clean:
 	@rm -rf $(OUT)
@@ -82,6 +92,20 @@ $(OUT)/lint/%.mqbc: %.js $(MQJS)
 	@rm -f $@
 	@$(MQJS) -o $@ -m32 $<
 	@test -s $@ || { echo "MQuickJS syntax check failed: $<"; exit 1; }
+
+$(OUT)/bytecode/%.js.mqbc: %.js $(MQJS)
+	@mkdir -p $(@D)
+	@rm -f $@
+	@$(MQJS) -o $@ -m32 $<
+	@test -s $@ || { echo "MQuickJS bytecode build failed: $<"; exit 1; }
+
+$(BYTECODE_MANIFEST_TOOL): tools/bytecode_manifest.c
+	@mkdir -p $(@D)
+	@$(HOSTCC) $(HOST_NO_PIE) -O2 -Wall -Wextra $< -o $@
+
+$(BYTECODE_MANIFEST): $(JS_FILES) $(JS_PACKAGE_BYTECODE) $(BYTECODE_MANIFEST_TOOL)
+	@mkdir -p $(@D)
+	@$(BYTECODE_MANIFEST_TOOL) "$(OUT)/bytecode" $@ $(JS_FILES)
 
 $(JS_COMPAT_STAMP): $(JS_FILES)
 	@mkdir -p $(@D)
