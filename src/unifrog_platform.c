@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <dirent.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/unistd.h>
 
@@ -57,6 +58,391 @@ extern int fdt_get_property_u_32_index(int offset, const char *name, int index,
 extern int fdt_get_property_string_index(int offset, const char *name, int index,
    const char **outval);
 extern bool fdt_property_read_bool(int offset, const char *propname);
+extern int umount2(const char *target, unsigned int flags);
+
+struct bus_type;
+struct device;
+
+extern struct bus_type platform_bus_type;
+extern int bus_for_each_dev(struct bus_type *bus, struct device *start,
+   void *data, int (*fn)(struct device *dev, void *data));
+extern void mmc_stop_host(void *host);
+extern void mmc_start_host(void *host);
+extern const char hc_mmc_host_hw_ops[];
+extern void fileuart_set_storage_suspended(int suspended);
+
+#ifndef MNT_DETACH
+#define MNT_DETACH (1u << 1)
+#endif
+
+#define SD_DEVICE_DRIVER_DATA_OFFSET 64u
+#define SD_MMC_HOST_PARENT_OFFSET 0u
+#define SD_MMC_HOST_F_MAX_OFFSET 208u
+#define SD_MMC_HOST_CAPS_OFFSET 256u
+#define SD_MMC_HOST_CAPS2_OFFSET 260u
+#define SD_MMC_HOST_PM_CAPS_OFFSET 264u
+#define SD_MMC_HOST_IOS_OFFSET 292u
+#define SD_MMC_HOST_CARD_OFFSET 392u
+#define SD_MMC_HOST_ACTUAL_CLOCK_OFFSET 532u
+#define SD_HC_HOST_OFFSET 576u
+#define SD_HC_HOST_PDATA_OFFSET (SD_HC_HOST_OFFSET + 16u)
+#define SD_HC_HOST_OPS_OFFSET (SD_HC_HOST_OFFSET + 20u)
+#define SD_HC_HOST_MMC_OFFSET (SD_HC_HOST_OFFSET + 24u)
+#define SD_HC_PDATA_BUS_HZ_OFFSET 8u
+#define SD_HC_PDATA_MAX_FREQUENCY_OFFSET 16u
+#define SD_HC_PDATA_CAPS_OFFSET 20u
+
+#define SD_MMC_CAP_4_BIT_DATA (1u << 0)
+#define SD_MMC_CAP_MMC_HIGHSPEED (1u << 1)
+#define SD_MMC_CAP_SD_HIGHSPEED (1u << 2)
+#define SD_MMC_CAP_8_BIT_DATA (1u << 6)
+#define SD_MMC_CAP_UHS_SDR12 (1u << 15)
+#define SD_MMC_CAP_UHS_SDR25 (1u << 16)
+#define SD_MMC_CAP_UHS_SDR50 (1u << 17)
+#define SD_MMC_CAP_UHS_SDR104 (1u << 18)
+#define SD_MMC_CAP_UHS_DDR50 (1u << 19)
+#define SD_MMC_CAP_SPEED_MASK \
+   (SD_MMC_CAP_4_BIT_DATA | SD_MMC_CAP_8_BIT_DATA | \
+    SD_MMC_CAP_MMC_HIGHSPEED | SD_MMC_CAP_SD_HIGHSPEED | \
+    SD_MMC_CAP_UHS_SDR12 | SD_MMC_CAP_UHS_SDR25 | \
+    SD_MMC_CAP_UHS_SDR50 | SD_MMC_CAP_UHS_SDR104 | \
+    SD_MMC_CAP_UHS_DDR50)
+#define SD_MMC_CAP2_NO_1_8V (1u << 19)
+
+struct sd_runtime_profile {
+   const char *name;
+   uint32_t f_max;
+   uint32_t set_caps;
+   uint32_t clear_caps;
+   uint32_t set_caps2;
+   uint32_t clear_caps2;
+};
+
+struct sd_runtime_boot_state {
+   uintptr_t host;
+   uintptr_t pdata;
+   uint32_t f_max;
+   uint32_t caps;
+   uint32_t caps2;
+   uint32_t pm_caps;
+   uint32_t pdata_bus_hz;
+   uint32_t pdata_max_frequency;
+   uint32_t pdata_caps;
+   int saved;
+   char active_profile[16];
+};
+
+static struct sd_runtime_boot_state sd_runtime_boot;
+
+static const struct sd_runtime_profile sd_runtime_profiles[] = {
+   {
+      "hs1",
+      198000000u,
+      SD_MMC_CAP_SD_HIGHSPEED,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide50",
+      50000000u,
+      SD_MMC_CAP_4_BIT_DATA | SD_MMC_CAP_SD_HIGHSPEED,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide",
+      198000000u,
+      SD_MMC_CAP_4_BIT_DATA | SD_MMC_CAP_SD_HIGHSPEED,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "uhs12",
+      50000000u,
+      SD_MMC_CAP_4_BIT_DATA | SD_MMC_CAP_SD_HIGHSPEED |
+         SD_MMC_CAP_UHS_SDR12,
+      SD_MMC_CAP_SPEED_MASK,
+      0u,
+      SD_MMC_CAP2_NO_1_8V,
+   },
+   {
+      "uhs25",
+      99000000u,
+      SD_MMC_CAP_4_BIT_DATA | SD_MMC_CAP_SD_HIGHSPEED |
+         SD_MMC_CAP_UHS_SDR12 | SD_MMC_CAP_UHS_SDR25,
+      SD_MMC_CAP_SPEED_MASK,
+      0u,
+      SD_MMC_CAP2_NO_1_8V,
+   },
+   {
+      "uhs",
+      198000000u,
+      SD_MMC_CAP_4_BIT_DATA | SD_MMC_CAP_SD_HIGHSPEED |
+         SD_MMC_CAP_UHS_SDR12 | SD_MMC_CAP_UHS_SDR25 |
+         SD_MMC_CAP_UHS_SDR50,
+      SD_MMC_CAP_SPEED_MASK,
+      0u,
+      SD_MMC_CAP2_NO_1_8V,
+   },
+};
+
+static uint32_t sd_read_u32(uintptr_t base, size_t offset)
+{
+   uint32_t value;
+
+   memcpy(&value, (const void *)(base + offset), sizeof(value));
+   return value;
+}
+
+static void sd_write_u32(uintptr_t base, size_t offset, uint32_t value)
+{
+   memcpy((void *)(base + offset), &value, sizeof(value));
+}
+
+static uint8_t sd_read_u8(uintptr_t base, size_t offset)
+{
+   uint8_t value;
+
+   memcpy(&value, (const void *)(base + offset), sizeof(value));
+   return value;
+}
+
+static void sd_write_u8(uintptr_t base, size_t offset, uint8_t value)
+{
+   memcpy((void *)(base + offset), &value, sizeof(value));
+}
+
+static uintptr_t sd_read_ptr(uintptr_t base, size_t offset)
+{
+   uintptr_t value;
+
+   memcpy(&value, (const void *)(base + offset), sizeof(value));
+   return value;
+}
+
+static const struct sd_runtime_profile *sd_runtime_profile_by_name(
+   const char *name)
+{
+   if (!name || !name[0])
+      return NULL;
+   for (unsigned i = 0;
+        i < sizeof(sd_runtime_profiles) / sizeof(sd_runtime_profiles[0]);
+        i++) {
+      if (strcmp(name, sd_runtime_profiles[i].name) == 0)
+         return &sd_runtime_profiles[i];
+   }
+   return NULL;
+}
+
+static int sd_runtime_host_valid(uintptr_t host, struct device *dev)
+{
+   if (!host || (host & 3u) != 0)
+      return 0;
+   if (sd_read_ptr(host, SD_MMC_HOST_PARENT_OFFSET) != (uintptr_t)dev)
+      return 0;
+   if (sd_read_ptr(host, SD_HC_HOST_OPS_OFFSET) !=
+       (uintptr_t)hc_mmc_host_hw_ops)
+      return 0;
+   if (sd_read_ptr(host, SD_HC_HOST_MMC_OFFSET) != host)
+      return 0;
+   return 1;
+}
+
+struct sd_find_host_context {
+   uintptr_t host;
+   struct device *dev;
+};
+
+static int sd_runtime_find_host_cb(struct device *dev, void *data)
+{
+   struct sd_find_host_context *ctx = data;
+   uintptr_t host;
+
+   if (!dev || !ctx)
+      return 0;
+
+   host = sd_read_ptr((uintptr_t)dev, SD_DEVICE_DRIVER_DATA_OFFSET);
+   if (!sd_runtime_host_valid(host, dev))
+      return 0;
+
+   ctx->host = host;
+   ctx->dev = dev;
+   return 1;
+}
+
+static void sd_runtime_save_boot(uintptr_t host)
+{
+   uintptr_t pdata;
+
+   if (sd_runtime_boot.saved)
+      return;
+
+   pdata = sd_read_ptr(host, SD_HC_HOST_PDATA_OFFSET);
+   sd_runtime_boot.host = host;
+   sd_runtime_boot.pdata = pdata;
+   sd_runtime_boot.f_max = sd_read_u32(host, SD_MMC_HOST_F_MAX_OFFSET);
+   sd_runtime_boot.caps = sd_read_u32(host, SD_MMC_HOST_CAPS_OFFSET);
+   sd_runtime_boot.caps2 = sd_read_u32(host, SD_MMC_HOST_CAPS2_OFFSET);
+   sd_runtime_boot.pm_caps = sd_read_u32(host, SD_MMC_HOST_PM_CAPS_OFFSET);
+   if (pdata) {
+      sd_runtime_boot.pdata_bus_hz =
+         sd_read_u32(pdata, SD_HC_PDATA_BUS_HZ_OFFSET);
+      sd_runtime_boot.pdata_max_frequency =
+         sd_read_u32(pdata, SD_HC_PDATA_MAX_FREQUENCY_OFFSET);
+      sd_runtime_boot.pdata_caps =
+         sd_read_u32(pdata, SD_HC_PDATA_CAPS_OFFSET);
+   }
+   snprintf(sd_runtime_boot.active_profile,
+      sizeof(sd_runtime_boot.active_profile), "boot");
+   sd_runtime_boot.saved = 1;
+
+   unifrog_log("unifrog sd runtime boot host=0x%08lx pdata=0x%08lx fmax=%lu "
+          "caps=0x%08lx caps2=0x%08lx pdata_bus=%lu pdata_max=%lu "
+          "pdata_caps=0x%08lx mode=%s\n",
+      (unsigned long)host,
+      (unsigned long)pdata,
+      (unsigned long)sd_runtime_boot.f_max,
+      (unsigned long)sd_runtime_boot.caps,
+      (unsigned long)sd_runtime_boot.caps2,
+      (unsigned long)sd_runtime_boot.pdata_bus_hz,
+      (unsigned long)sd_runtime_boot.pdata_max_frequency,
+      (unsigned long)sd_runtime_boot.pdata_caps,
+      UNIFROG_SD_MODE);
+}
+
+static uintptr_t sd_runtime_find_host(void)
+{
+   struct sd_find_host_context ctx;
+
+   memset(&ctx, 0, sizeof(ctx));
+   (void)bus_for_each_dev(&platform_bus_type, NULL, &ctx,
+      sd_runtime_find_host_cb);
+   if (!ctx.host)
+      return 0;
+   sd_runtime_save_boot(ctx.host);
+   return ctx.host;
+}
+
+static void sd_runtime_format_detail(const char *name, uintptr_t host,
+   int mount_ret, uint32_t ms, char *detail, size_t detail_size)
+{
+   const char *active = name ? name : "";
+
+   if (!detail || detail_size == 0)
+      return;
+   snprintf(detail, detail_size,
+      "%s fmax=%lu actual=%lu caps=%08lx caps2=%08lx ios=%u/%u/%u mount=%d %lums",
+      active,
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_F_MAX_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_ACTUAL_CLOCK_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS2_OFFSET),
+      (unsigned)sd_read_u8(host, SD_MMC_HOST_IOS_OFFSET + 9u),
+      (unsigned)sd_read_u8(host, SD_MMC_HOST_IOS_OFFSET + 10u),
+      (unsigned)sd_read_u8(host, SD_MMC_HOST_IOS_OFFSET + 11u),
+      mount_ret,
+      (unsigned long)ms);
+}
+
+static int sd_runtime_unmount_storage(const char *tag)
+{
+   int ret = 0;
+
+   for (int i = (int)(sizeof(storage_mounts) / sizeof(storage_mounts[0])) - 1;
+        i >= 0; i--) {
+      int unmount_ret;
+      int unmount_errno;
+      int detach_ret = 0;
+      int detach_errno = 0;
+
+      errno = 0;
+      unmount_ret = umount2(storage_mounts[i].target, 0);
+      unmount_errno = errno;
+      if (unmount_ret != 0 && unmount_errno == EBUSY) {
+         errno = 0;
+         detach_ret = umount2(storage_mounts[i].target, MNT_DETACH);
+         detach_errno = errno;
+      }
+
+      if (unmount_ret == 0 ||
+          (unmount_ret != 0 && unmount_errno == EINVAL) ||
+          (unmount_ret != 0 && unmount_errno == ENOENT) ||
+          (unmount_ret != 0 && unmount_errno == EBUSY && detach_ret == 0)) {
+         storage_mounted_mask &= ~(1u << i);
+      } else {
+         ret = -1;
+      }
+
+      unifrog_log("unifrog sd runtime unmount tag=%s target=%s ret=%d errno=%d "
+             "detach_ret=%d detach_errno=%d mask=0x%lx\n",
+         tag ? tag : "",
+         storage_mounts[i].target,
+         unmount_ret,
+         unmount_errno,
+         unmount_errno == EBUSY ? detach_ret : 0,
+         unmount_errno == EBUSY ? detach_errno : 0,
+         (unsigned long)storage_mounted_mask);
+   }
+
+   return ret;
+}
+
+static void sd_runtime_clear_ios(uintptr_t host)
+{
+   sd_write_u32(host, SD_MMC_HOST_IOS_OFFSET, 0);
+   sd_write_u8(host, SD_MMC_HOST_IOS_OFFSET + 9u, 0);
+   sd_write_u8(host, SD_MMC_HOST_IOS_OFFSET + 10u, 0);
+   sd_write_u8(host, SD_MMC_HOST_IOS_OFFSET + 11u, 0);
+   sd_write_u8(host, SD_MMC_HOST_IOS_OFFSET + 12u, 0);
+   sd_write_u32(host, SD_MMC_HOST_ACTUAL_CLOCK_OFFSET, 0);
+}
+
+static void sd_runtime_write_profile(uintptr_t host,
+   const struct sd_runtime_profile *profile)
+{
+   uintptr_t pdata = sd_read_ptr(host, SD_HC_HOST_PDATA_OFFSET);
+   uint32_t caps = sd_runtime_boot.caps;
+   uint32_t caps2 = sd_runtime_boot.caps2;
+
+   caps &= ~profile->clear_caps;
+   caps |= profile->set_caps;
+   caps2 &= ~profile->clear_caps2;
+   caps2 |= profile->set_caps2;
+
+   sd_write_u32(host, SD_MMC_HOST_F_MAX_OFFSET, profile->f_max);
+   sd_write_u32(host, SD_MMC_HOST_CAPS_OFFSET, caps);
+   sd_write_u32(host, SD_MMC_HOST_CAPS2_OFFSET, caps2);
+   sd_write_u32(host, SD_MMC_HOST_PM_CAPS_OFFSET, sd_runtime_boot.pm_caps);
+   sd_runtime_clear_ios(host);
+
+   if (pdata) {
+      sd_write_u32(pdata, SD_HC_PDATA_MAX_FREQUENCY_OFFSET, profile->f_max);
+      sd_write_u32(pdata, SD_HC_PDATA_CAPS_OFFSET, caps);
+   }
+}
+
+static void sd_runtime_write_boot(uintptr_t host)
+{
+   uintptr_t pdata = sd_read_ptr(host, SD_HC_HOST_PDATA_OFFSET);
+
+   sd_write_u32(host, SD_MMC_HOST_F_MAX_OFFSET, sd_runtime_boot.f_max);
+   sd_write_u32(host, SD_MMC_HOST_CAPS_OFFSET, sd_runtime_boot.caps);
+   sd_write_u32(host, SD_MMC_HOST_CAPS2_OFFSET, sd_runtime_boot.caps2);
+   sd_write_u32(host, SD_MMC_HOST_PM_CAPS_OFFSET, sd_runtime_boot.pm_caps);
+   sd_runtime_clear_ios(host);
+
+   if (pdata) {
+      sd_write_u32(pdata, SD_HC_PDATA_BUS_HZ_OFFSET,
+         sd_runtime_boot.pdata_bus_hz);
+      sd_write_u32(pdata, SD_HC_PDATA_MAX_FREQUENCY_OFFSET,
+         sd_runtime_boot.pdata_max_frequency);
+      sd_write_u32(pdata, SD_HC_PDATA_CAPS_OFFSET,
+         sd_runtime_boot.pdata_caps);
+   }
+}
 
 static void write_reg32(uint32_t addr, uint32_t value)
 {
@@ -303,6 +689,146 @@ int unifrog_platform_recover_storage(const char *tag, unsigned attempts,
       (unsigned long)(unifrog_perf_time_ms() - start_ms),
       (unsigned long)storage_mounted_mask);
    return -1;
+}
+
+int unifrog_platform_sd_runtime_supported(void)
+{
+   return sd_runtime_find_host() ? 1 : 0;
+}
+
+int unifrog_platform_sd_apply_profile(const char *profile,
+   unsigned mount_attempts, unsigned mount_delay_ms, char *detail,
+   size_t detail_size)
+{
+   const struct sd_runtime_profile *runtime_profile;
+   uintptr_t host;
+   uint32_t start_ms;
+   int unmount_ret;
+   int mount_ret = 0;
+
+   runtime_profile = sd_runtime_profile_by_name(profile);
+   if (!runtime_profile) {
+      if (detail && detail_size)
+         snprintf(detail, detail_size, "unknown profile %s",
+            profile ? profile : "");
+      return -1;
+   }
+
+   host = sd_runtime_find_host();
+   if (!host) {
+      if (detail && detail_size)
+         snprintf(detail, detail_size, "mmc host not found");
+      unifrog_log("unifrog sd runtime switch profile=%s ret=-1 reason=no_host\n",
+         profile);
+      return -1;
+   }
+
+   start_ms = unifrog_perf_time_ms();
+   unifrog_log("unifrog sd runtime switch begin profile=%s host=0x%08lx "
+          "card=0x%08lx caps=0x%08lx caps2=0x%08lx\n",
+      profile,
+      (unsigned long)host,
+      (unsigned long)sd_read_ptr(host, SD_MMC_HOST_CARD_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS2_OFFSET));
+
+   unmount_ret = sd_runtime_unmount_storage(profile);
+   if (unmount_ret != 0) {
+      sd_runtime_format_detail(profile, host, -1,
+         unifrog_perf_time_ms() - start_ms, detail, detail_size);
+      unifrog_log("unifrog sd runtime switch profile=%s ret=-1 "
+             "reason=unmount_failed ms=%lu\n",
+         profile, (unsigned long)(unifrog_perf_time_ms() - start_ms));
+      return -1;
+   }
+
+   mmc_stop_host((void *)host);
+   sd_runtime_write_profile(host, runtime_profile);
+   mmc_start_host((void *)host);
+   msleep(250);
+
+   if (mount_attempts)
+      mount_ret = unifrog_platform_recover_storage(profile,
+         mount_attempts, mount_delay_ms);
+
+   snprintf(sd_runtime_boot.active_profile,
+      sizeof(sd_runtime_boot.active_profile), "%s", profile);
+   sd_runtime_format_detail(profile, host, mount_ret,
+      unifrog_perf_time_ms() - start_ms, detail, detail_size);
+   unifrog_log("unifrog sd runtime switch done profile=%s ret=%d ms=%lu "
+          "caps=0x%08lx caps2=0x%08lx actual=%lu mount_ret=%d\n",
+      profile,
+      mount_ret == 0 ? 0 : -1,
+      (unsigned long)(unifrog_perf_time_ms() - start_ms),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS2_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_ACTUAL_CLOCK_OFFSET),
+      mount_ret);
+
+   return mount_ret == 0 ? 0 : -1;
+}
+
+int unifrog_platform_sd_restore_boot(unsigned mount_attempts,
+   unsigned mount_delay_ms, char *detail, size_t detail_size)
+{
+   uintptr_t host;
+   uint32_t start_ms;
+   int unmount_ret;
+   int mount_ret = 0;
+
+   host = sd_runtime_find_host();
+   if (!host) {
+      if (detail && detail_size)
+         snprintf(detail, detail_size, "mmc host not found");
+      unifrog_log("unifrog sd runtime restore ret=-1 reason=no_host\n");
+      return -1;
+   }
+   if (!sd_runtime_boot.saved)
+      sd_runtime_save_boot(host);
+
+   start_ms = unifrog_perf_time_ms();
+   unifrog_log("unifrog sd runtime restore begin host=0x%08lx active=%s\n",
+      (unsigned long)host, sd_runtime_boot.active_profile);
+
+   unmount_ret = sd_runtime_unmount_storage("restore");
+   if (unmount_ret != 0) {
+      sd_runtime_format_detail("restore", host, -1,
+         unifrog_perf_time_ms() - start_ms, detail, detail_size);
+      unifrog_log("unifrog sd runtime restore ret=-1 reason=unmount_failed "
+             "ms=%lu\n",
+         (unsigned long)(unifrog_perf_time_ms() - start_ms));
+      return -1;
+   }
+
+   mmc_stop_host((void *)host);
+   sd_runtime_write_boot(host);
+   mmc_start_host((void *)host);
+   msleep(250);
+
+   if (mount_attempts)
+      mount_ret = unifrog_platform_recover_storage("restore",
+         mount_attempts, mount_delay_ms);
+
+   snprintf(sd_runtime_boot.active_profile,
+      sizeof(sd_runtime_boot.active_profile), "boot");
+   sd_runtime_format_detail("boot", host, mount_ret,
+      unifrog_perf_time_ms() - start_ms, detail, detail_size);
+   unifrog_log("unifrog sd runtime restore done ret=%d ms=%lu caps=0x%08lx "
+          "caps2=0x%08lx actual=%lu mount_ret=%d\n",
+      mount_ret == 0 ? 0 : -1,
+      (unsigned long)(unifrog_perf_time_ms() - start_ms),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS2_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_ACTUAL_CLOCK_OFFSET),
+      mount_ret);
+
+   return mount_ret == 0 ? 0 : -1;
+}
+
+void unifrog_platform_set_storage_log_suspended(int suspended)
+{
+   fileuart_set_storage_suspended(suspended);
+   unifrog_log("unifrog storage log_suspended=%d\n", suspended ? 1 : 0);
 }
 
 int unifrog_platform_wait_for_storage(void)

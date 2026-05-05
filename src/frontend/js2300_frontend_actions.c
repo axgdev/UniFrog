@@ -621,29 +621,30 @@ static int storage_test_read_file(const struct storage_test_case *test,
    return ret;
 }
 
-static int run_storage_test(void)
+#define STORAGE_TEST_MAX_CASES 8u
+#define STORAGE_TEST_REPORT_BYTES 16384u
+#define STORAGE_TEST_PROFILE_REPORT_BYTES 4096u
+#define STORAGE_TEST_SWITCH_ATTEMPTS 18u
+#define STORAGE_TEST_SWITCH_DELAY_MS 150u
+
+static unsigned storage_test_build_cases(struct storage_test_case *tests,
+   unsigned max_tests, char unique_paths[][JS2300_FRONTEND_MAX_PATH],
+   unsigned *out_known_count, char *indexed_path, size_t indexed_path_size,
+   unsigned long *out_indexed_size, int compact)
 {
    static const char *known_paths[] = {
       "/media/mmcblk0/firmware/unifrog.bin",
       "/media/mmcblk0/unifrog/cores/gpsp.bin",
       "/media/mmcblk0/bios/bisrv.asd",
    };
-   struct storage_test_case tests[8];
-   struct storage_test_result results[8];
-   char unique_paths[4][JS2300_FRONTEND_MAX_PATH];
-   char indexed_path[JS2300_FRONTEND_MAX_PATH];
-   char report[4096];
-   size_t report_used = 0;
-   size_t old_auto_flush;
    unsigned known_count = 0;
    unsigned test_count = 0;
-   unsigned pass_count = 0;
-   unsigned fail_count = 0;
    unsigned long indexed_size = 0;
-   uint32_t start_ms;
 
-   memset(tests, 0, sizeof(tests));
-   memset(results, 0, sizeof(results));
+   if (!tests || !max_tests || !unique_paths || !indexed_path)
+      return 0;
+
+   memset(tests, 0, sizeof(*tests) * max_tests);
    indexed_path[0] = '\0';
 
    for (unsigned i = 0; i < sizeof(known_paths) / sizeof(known_paths[0]); i++) {
@@ -659,42 +660,162 @@ static int run_storage_test(void)
       known_count++;
    }
 
-   if (known_count > 0) {
+   if (known_count > 0 && test_count < max_tests) {
       tests[test_count].label = "firmware/core 64K";
       tests[test_count].path = unique_paths[0];
       tests[test_count].chunk_size = 64u * 1024u;
+      if (compact)
+         tests[test_count].byte_limit = 2u * 1024u * 1024u;
       test_count++;
    }
-   if (known_count > 1) {
+   if (known_count > 1 && test_count < max_tests) {
       tests[test_count].label = "second file 64K";
       tests[test_count].path = unique_paths[1];
       tests[test_count].chunk_size = 64u * 1024u;
+      if (compact)
+         tests[test_count].byte_limit = 2u * 1024u * 1024u;
       test_count++;
    }
 
-   if (storage_test_index_path(indexed_path, sizeof(indexed_path),
+   if (storage_test_index_path(indexed_path, indexed_path_size,
        &indexed_size) == 0) {
-      tests[test_count].label = "indexed 32K pause";
-      tests[test_count].path = indexed_path;
-      tests[test_count].chunk_size = 32u * 1024u;
-      tests[test_count].byte_limit = 4u * 1024u * 1024u;
-      tests[test_count].pause_ms = 2;
-      test_count++;
+      if (test_count < max_tests) {
+         tests[test_count].label = "indexed 32K pause";
+         tests[test_count].path = indexed_path;
+         tests[test_count].chunk_size = 32u * 1024u;
+         tests[test_count].byte_limit = 4u * 1024u * 1024u;
+         tests[test_count].pause_ms = 2;
+         test_count++;
+      }
 
-      tests[test_count].label = "indexed 256K";
-      tests[test_count].path = indexed_path;
-      tests[test_count].chunk_size = 256u * 1024u;
-      tests[test_count].byte_limit = indexed_size < 16u * 1024u * 1024u ?
-         (size_t)indexed_size : 16u * 1024u * 1024u;
-      test_count++;
+      if (test_count < max_tests) {
+         tests[test_count].label = "indexed 256K";
+         tests[test_count].path = indexed_path;
+         tests[test_count].chunk_size = 256u * 1024u;
+         tests[test_count].byte_limit =
+            indexed_size < (compact ? 8u : 16u) * 1024u * 1024u ?
+            (size_t)indexed_size : (compact ? 8u : 16u) * 1024u * 1024u;
+         test_count++;
+      }
 
-      tests[test_count].label = "indexed 512K";
-      tests[test_count].path = indexed_path;
-      tests[test_count].chunk_size = 512u * 1024u;
-      tests[test_count].byte_limit = indexed_size < 32u * 1024u * 1024u ?
-         (size_t)indexed_size : 32u * 1024u * 1024u;
-      test_count++;
+      if (!compact && test_count < max_tests) {
+         tests[test_count].label = "indexed 512K";
+         tests[test_count].path = indexed_path;
+         tests[test_count].chunk_size = 512u * 1024u;
+         tests[test_count].byte_limit =
+            indexed_size < 32u * 1024u * 1024u ?
+            (size_t)indexed_size : 32u * 1024u * 1024u;
+         test_count++;
+      }
    }
+
+   if (out_known_count)
+      *out_known_count = known_count;
+   if (out_indexed_size)
+      *out_indexed_size = indexed_size;
+   return test_count;
+}
+
+static void storage_test_run_profile(const char *profile,
+   const char *switch_detail, const struct storage_test_case *tests,
+   unsigned test_count, char *report, size_t report_size, size_t *report_used,
+   unsigned *total_pass, unsigned *total_fail)
+{
+   char case_report[STORAGE_TEST_PROFILE_REPORT_BYTES];
+   size_t case_used = 0;
+   unsigned pass_count = 0;
+   unsigned fail_count = 0;
+   uint32_t start_ms = unifrog_perf_time_ms();
+
+   case_report[0] = '\0';
+   for (unsigned i = 0; i < test_count; i++) {
+      struct storage_test_result result;
+      unsigned long kib_s;
+
+      if (storage_test_read_file(&tests[i], &result) == 0) {
+         pass_count++;
+         if (total_pass)
+            (*total_pass)++;
+      } else {
+         fail_count++;
+         if (total_fail)
+            (*total_fail)++;
+      }
+
+      printf("unifrog storage_test profile=%s case=%s ret=%d errno=%d bytes=%lu chunks=%lu chunk=%lu pause=%u ms=%lu checksum=0x%08lx path=%s\n",
+         profile,
+         result.label,
+         result.ret,
+         result.err,
+         result.bytes,
+         result.chunks,
+         (unsigned long)result.chunk_size,
+         result.pause_ms,
+         (unsigned long)result.ms,
+         (unsigned long)result.checksum,
+         result.path);
+
+      kib_s = result.ms ?
+         ((result.bytes / 1024ul) * 1000ul) / result.ms : 0ul;
+      storage_test_append(case_report, sizeof(case_report), &case_used,
+         "item|%s|%s %s|%lu KiB/s|%lu bytes %lu ms chunk=%lu pause=%u crc=%08lx %s\n",
+         result.ret == 0 ? "OK" : "FAIL",
+         profile,
+         result.label,
+         kib_s,
+         result.bytes,
+         (unsigned long)result.ms,
+         (unsigned long)result.chunk_size,
+         result.pause_ms,
+         (unsigned long)result.checksum,
+         result.path);
+
+      if (result.ret != 0)
+         (void)unifrog_platform_recover_storage(profile, 2, 100);
+   }
+
+   storage_test_append(report, report_size, report_used,
+      "item|%s|Profile %s|%u ok  %u failed  %lu ms|%s\n",
+      fail_count == 0 ? "OK" : "FAIL",
+      profile,
+      pass_count,
+      fail_count,
+      (unsigned long)(unifrog_perf_time_ms() - start_ms),
+      switch_detail ? switch_detail : "");
+   storage_test_append(report, report_size, report_used, "%s", case_report);
+}
+
+static int run_storage_test(void)
+{
+   static const char *runtime_profiles[] = {
+      "hs1",
+      "wide50",
+      "wide",
+      "uhs12",
+      "uhs25",
+      "uhs",
+   };
+   struct storage_test_case tests[STORAGE_TEST_MAX_CASES];
+   char unique_paths[4][JS2300_FRONTEND_MAX_PATH];
+   char indexed_path[JS2300_FRONTEND_MAX_PATH];
+   char report[STORAGE_TEST_REPORT_BYTES];
+   size_t report_used = 0;
+   size_t old_auto_flush;
+   unsigned known_count = 0;
+   unsigned test_count = 0;
+   unsigned pass_count = 0;
+   unsigned fail_count = 0;
+   unsigned long indexed_size = 0;
+   int runtime_sweep;
+   int runtime_supported;
+   uint32_t start_ms;
+
+   runtime_supported = unifrog_platform_sd_runtime_supported();
+   runtime_sweep = runtime_supported &&
+      strcmp(UNIFROG_SD_MODE, "safe") == 0;
+   test_count = storage_test_build_cases(tests, STORAGE_TEST_MAX_CASES,
+      unique_paths, &known_count, indexed_path, sizeof(indexed_path),
+      &indexed_size, runtime_sweep);
 
    if (test_count == 0) {
       storage_test_append(report, sizeof(report), &report_used,
@@ -710,67 +831,98 @@ static int run_storage_test(void)
       return 0;
    }
 
-   printf("unifrog storage_test begin mode=%s tests=%u indexed=%s indexed_bytes=%lu\n",
-      UNIFROG_SD_MODE, test_count, indexed_path[0] ? indexed_path : "",
-      indexed_size);
+   printf("unifrog storage_test begin mode=%s runtime_supported=%d runtime_sweep=%d tests=%u known=%u indexed=%s indexed_bytes=%lu\n",
+      UNIFROG_SD_MODE, runtime_supported, runtime_sweep, test_count,
+      known_count, indexed_path[0] ? indexed_path : "", indexed_size);
 
+   (void)unifrog_log_flush();
    old_auto_flush = unifrog_log_auto_flush_bytes();
    unifrog_log_set_auto_flush_bytes(0);
    unifrog_log_defer_begin();
+   unifrog_platform_set_storage_log_suspended(1);
    start_ms = unifrog_perf_time_ms();
-
-   for (unsigned i = 0; i < test_count; i++) {
-      if (storage_test_read_file(&tests[i], &results[i]) == 0)
-         pass_count++;
-      else
-         fail_count++;
-      printf("unifrog storage_test case=%s ret=%d errno=%d bytes=%lu chunks=%lu chunk=%lu pause=%u ms=%lu checksum=0x%08lx path=%s\n",
-         results[i].label,
-         results[i].ret,
-         results[i].err,
-         results[i].bytes,
-         results[i].chunks,
-         (unsigned long)results[i].chunk_size,
-         results[i].pause_ms,
-         (unsigned long)results[i].ms,
-         (unsigned long)results[i].checksum,
-         results[i].path);
-      if (results[i].ret != 0)
-         (void)unifrog_platform_recover_storage("storage_test", 2, 100);
-   }
-
-   unifrog_log_defer_end();
-   unifrog_log_set_auto_flush_bytes(old_auto_flush);
 
    storage_test_append(report, sizeof(report), &report_used,
       "show=1\n"
-      "title=STORAGE TEST\n"
-      "detail=mode %s  %u ok  %u failed  %lu ms\n",
-      UNIFROG_SD_MODE, pass_count, fail_count,
-      (unsigned long)(unifrog_perf_time_ms() - start_ms));
-   for (unsigned i = 0; i < test_count; i++) {
-      unsigned long kib_s = results[i].ms ?
-         ((results[i].bytes / 1024ul) * 1000ul) / results[i].ms : 0ul;
+      "title=STORAGE TEST\n");
 
-      storage_test_append(report, sizeof(report), &report_used,
-         "item|%s|%s|%lu KiB/s|%lu bytes %lu ms chunk=%lu pause=%u crc=%08lx %s\n",
-         results[i].ret == 0 ? "OK" : "FAIL",
-         results[i].label,
-         kib_s,
-         results[i].bytes,
-         (unsigned long)results[i].ms,
-         (unsigned long)results[i].chunk_size,
-         results[i].pause_ms,
-         (unsigned long)results[i].checksum,
-         results[i].path);
+   if (runtime_sweep) {
+      char restore_detail[192];
+      int restore_ret;
+
+      storage_test_run_profile("boot", "safe boot", tests, test_count,
+         report, sizeof(report), &report_used, &pass_count, &fail_count);
+
+      for (unsigned i = 0;
+           i < sizeof(runtime_profiles) / sizeof(runtime_profiles[0]); i++) {
+         char switch_detail[192];
+         int switch_ret;
+
+         switch_detail[0] = '\0';
+         switch_ret = unifrog_platform_sd_apply_profile(runtime_profiles[i],
+            STORAGE_TEST_SWITCH_ATTEMPTS, STORAGE_TEST_SWITCH_DELAY_MS,
+            switch_detail, sizeof(switch_detail));
+         if (switch_ret != 0) {
+            fail_count++;
+            storage_test_append(report, sizeof(report), &report_used,
+               "item|FAIL|Profile %s|switch failed|%s\n",
+               runtime_profiles[i], switch_detail);
+            (void)unifrog_platform_sd_restore_boot(
+               STORAGE_TEST_SWITCH_ATTEMPTS, STORAGE_TEST_SWITCH_DELAY_MS,
+               restore_detail, sizeof(restore_detail));
+            continue;
+         }
+
+         storage_test_run_profile(runtime_profiles[i], switch_detail,
+            tests, test_count, report, sizeof(report), &report_used,
+            &pass_count, &fail_count);
+      }
+
+      restore_detail[0] = '\0';
+      restore_ret = unifrog_platform_sd_restore_boot(
+         STORAGE_TEST_SWITCH_ATTEMPTS, STORAGE_TEST_SWITCH_DELAY_MS,
+         restore_detail, sizeof(restore_detail));
+      if (restore_ret != 0) {
+         msleep(500);
+         restore_ret = unifrog_platform_sd_restore_boot(
+            STORAGE_TEST_SWITCH_ATTEMPTS, STORAGE_TEST_SWITCH_DELAY_MS,
+            restore_detail, sizeof(restore_detail));
+      }
+      if (restore_ret != 0) {
+         fail_count++;
+         storage_test_append(report, sizeof(report), &report_used,
+            "item|FAIL|Restore safe boot|storage may still be unavailable|%s\n",
+            restore_detail);
+      } else {
+         storage_test_append(report, sizeof(report), &report_used,
+            "item|OK|Restore safe boot|Ready for report flush|%s\n",
+            restore_detail);
+      }
+   } else {
+      char detail[96];
+
+      snprintf(detail, sizeof(detail), "mode %s%s", UNIFROG_SD_MODE,
+         runtime_supported ? "" : " runtime switch unavailable");
+      storage_test_run_profile(UNIFROG_SD_MODE, detail, tests, test_count,
+         report, sizeof(report), &report_used, &pass_count, &fail_count);
    }
+
+   storage_test_append(report, sizeof(report), &report_used,
+      "detail=%s  %u ok  %u failed  %lu ms\n",
+      runtime_sweep ? "safe boot runtime sweep" : "single profile",
+      pass_count, fail_count,
+      (unsigned long)(unifrog_perf_time_ms() - start_ms));
+
+   unifrog_log_defer_end();
+   unifrog_log_set_auto_flush_bytes(old_auto_flush);
+   unifrog_platform_set_storage_log_suspended(0);
 
    storage_test_write_file(JS2300_FRONTEND_STORAGE_TEST_REPORT,
       report, report_used);
    storage_test_write_file(JS2300_FRONTEND_SYSTEM_CHECK_REPORT,
       report, report_used);
-   printf("unifrog storage_test done mode=%s ok=%u fail=%u ms=%lu report=%s\n",
-      UNIFROG_SD_MODE, pass_count, fail_count,
+   printf("unifrog storage_test done mode=%s runtime_sweep=%d ok=%u fail=%u ms=%lu report=%s\n",
+      UNIFROG_SD_MODE, runtime_sweep, pass_count, fail_count,
       (unsigned long)(unifrog_perf_time_ms() - start_ms),
       JS2300_FRONTEND_STORAGE_TEST_REPORT);
    (void)unifrog_log_flush();
