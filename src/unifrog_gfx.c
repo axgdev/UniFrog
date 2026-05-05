@@ -12,12 +12,12 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "third_party/stb_truetype.h"
 
-#define TTF_FIRST_CHAR 32
-#define TTF_CHAR_COUNT 95
-#define TTF_BITMAP_W 512
-#define TTF_BITMAP_H 256
+#define TTF_MAX_FONTS 8
+#define TTF_GLYPH_CACHE 160
 #define TTF_PIXEL_HEIGHT 10.0f
-#define TTF_MAX_BYTES (4u * 1024u * 1024u)
+#define TTF_MAX_BYTES (24u * 1024u * 1024u)
+#define TTF_PATH_LIST_MAX 1024
+#define TTF_PATH_MAX 512
 
 struct font5x7_glyph {
    char c;
@@ -82,9 +82,34 @@ static const struct font5x7_glyph font5x7_punctuation[] = {
 
 static uint8_t font5x7_custom[95][5];
 static uint8_t font5x7_custom_valid[95];
-static uint8_t *ttf_data;
-static uint8_t *ttf_bitmap;
-static stbtt_bakedchar ttf_chars[TTF_CHAR_COUNT];
+struct ttf_loaded_font {
+   uint8_t *data;
+   size_t size;
+   stbtt_fontinfo info;
+   float scale;
+   int ascent;
+   int descent;
+   int line_gap;
+};
+
+struct ttf_cached_glyph {
+   uint32_t codepoint;
+   unsigned font_index;
+   int glyph_index;
+   int width;
+   int height;
+   int xoff;
+   int yoff;
+   int advance;
+   int lsb;
+   uint8_t *bitmap;
+   uint32_t age;
+};
+
+static struct ttf_loaded_font ttf_fonts[TTF_MAX_FONTS];
+static unsigned ttf_font_count;
+static struct ttf_cached_glyph ttf_cache[TTF_GLYPH_CACHE];
+static uint32_t ttf_cache_age;
 static int ttf_active;
 static int ttf_baseline_offset;
 
@@ -126,10 +151,20 @@ static int surface_is_valid(const struct unifrog_surface *surface)
 
 static void ttf_clear(void)
 {
-   free(ttf_data);
-   free(ttf_bitmap);
-   ttf_data = NULL;
-   ttf_bitmap = NULL;
+   for (unsigned i = 0; i < ttf_font_count; i++) {
+      free(ttf_fonts[i].data);
+      ttf_fonts[i].data = NULL;
+   }
+   for (unsigned i = 0; i < TTF_GLYPH_CACHE; i++) {
+      stbtt_FreeBitmap(ttf_cache[i].bitmap, NULL);
+      ttf_cache[i].bitmap = NULL;
+      ttf_cache[i].codepoint = 0;
+      ttf_cache[i].glyph_index = 0;
+   }
+   memset(ttf_fonts, 0, sizeof(ttf_fonts));
+   memset(ttf_cache, 0, sizeof(ttf_cache));
+   ttf_font_count = 0;
+   ttf_cache_age = 0;
    ttf_active = 0;
    ttf_baseline_offset = 0;
 }
@@ -157,54 +192,187 @@ static uint16_t blend_rgb565(uint16_t dst, uint16_t src, unsigned alpha)
    return (uint16_t)((r << 11) | (g << 5) | b);
 }
 
+static uint32_t utf8_next_codepoint(const char **text)
+{
+   const unsigned char *p = (const unsigned char *)*text;
+   uint32_t cp;
+
+   if (!p || !*p)
+      return 0;
+   if (p[0] < 0x80) {
+      *text += 1;
+      return p[0];
+   }
+   if ((p[0] & 0xe0u) == 0xc0u && (p[1] & 0xc0u) == 0x80u) {
+      cp = ((uint32_t)(p[0] & 0x1fu) << 6) |
+         (uint32_t)(p[1] & 0x3fu);
+      *text += 2;
+      return cp >= 0x80u ? cp : '?';
+   }
+   if ((p[0] & 0xf0u) == 0xe0u && (p[1] & 0xc0u) == 0x80u &&
+       (p[2] & 0xc0u) == 0x80u) {
+      cp = ((uint32_t)(p[0] & 0x0fu) << 12) |
+         ((uint32_t)(p[1] & 0x3fu) << 6) |
+         (uint32_t)(p[2] & 0x3fu);
+      *text += 3;
+      return cp >= 0x800u ? cp : '?';
+   }
+   if ((p[0] & 0xf8u) == 0xf0u && (p[1] & 0xc0u) == 0x80u &&
+       (p[2] & 0xc0u) == 0x80u && (p[3] & 0xc0u) == 0x80u) {
+      cp = ((uint32_t)(p[0] & 0x07u) << 18) |
+         ((uint32_t)(p[1] & 0x3fu) << 12) |
+         ((uint32_t)(p[2] & 0x3fu) << 6) |
+         (uint32_t)(p[3] & 0x3fu);
+      *text += 4;
+      return cp >= 0x10000u && cp <= 0x10ffffu ? cp : '?';
+   }
+   *text += 1;
+   return '?';
+}
+
+static struct ttf_cached_glyph *ttf_find_cache(uint32_t codepoint,
+   uint32_t next_codepoint, int *out_kern)
+{
+   struct ttf_cached_glyph *slot = NULL;
+   uint32_t oldest_age = UINT32_MAX;
+   unsigned oldest = 0;
+
+   if (out_kern)
+      *out_kern = 0;
+   for (unsigned i = 0; i < TTF_GLYPH_CACHE; i++) {
+      if (ttf_cache[i].glyph_index &&
+          ttf_cache[i].codepoint == codepoint) {
+         ttf_cache[i].age = ++ttf_cache_age;
+         if (out_kern && next_codepoint) {
+            struct ttf_loaded_font *font =
+               &ttf_fonts[ttf_cache[i].font_index];
+            int next_glyph = stbtt_FindGlyphIndex(&font->info,
+               (int)next_codepoint);
+
+            if (next_glyph)
+               *out_kern = (int)(font->scale *
+                  (float)stbtt_GetGlyphKernAdvance(&font->info,
+                     ttf_cache[i].glyph_index, next_glyph));
+         }
+         return &ttf_cache[i];
+      }
+      if (!ttf_cache[i].glyph_index)
+         slot = &ttf_cache[i];
+      if (ttf_cache[i].age < oldest_age) {
+         oldest_age = ttf_cache[i].age;
+         oldest = i;
+      }
+   }
+   if (!slot)
+      slot = &ttf_cache[oldest];
+   stbtt_FreeBitmap(slot->bitmap, NULL);
+   memset(slot, 0, sizeof(*slot));
+   return slot;
+}
+
+static struct ttf_cached_glyph *ttf_load_glyph(uint32_t codepoint,
+   uint32_t next_codepoint, int *out_kern)
+{
+   struct ttf_cached_glyph *slot = ttf_find_cache(codepoint, next_codepoint,
+      out_kern);
+
+   if (!slot || slot->glyph_index)
+      return slot;
+   for (unsigned i = 0; i < ttf_font_count; i++) {
+      struct ttf_loaded_font *font = &ttf_fonts[i];
+      int glyph = stbtt_FindGlyphIndex(&font->info, (int)codepoint);
+      int advance = 0;
+      int lsb = 0;
+
+      if (!glyph)
+         continue;
+      slot->bitmap = stbtt_GetGlyphBitmap(&font->info, font->scale,
+         font->scale, glyph, &slot->width, &slot->height, &slot->xoff,
+         &slot->yoff);
+      stbtt_GetGlyphHMetrics(&font->info, glyph, &advance, &lsb);
+      slot->advance = (int)((float)advance * font->scale + 0.5f);
+      slot->lsb = (int)((float)lsb * font->scale + 0.5f);
+      slot->codepoint = codepoint;
+      slot->font_index = i;
+      slot->glyph_index = glyph;
+      slot->age = ++ttf_cache_age;
+      if (out_kern && next_codepoint) {
+         int next_glyph = stbtt_FindGlyphIndex(&font->info,
+            (int)next_codepoint);
+
+         if (next_glyph)
+            *out_kern = (int)(font->scale *
+               (float)stbtt_GetGlyphKernAdvance(&font->info, glyph,
+                  next_glyph));
+      }
+      return slot;
+   }
+   return NULL;
+}
+
+static void ttf_blit_glyph(const struct unifrog_surface *surface,
+   int x, int y, const struct ttf_cached_glyph *glyph, uint16_t color)
+{
+   if (!glyph || !glyph->bitmap)
+      return;
+   for (int yy = 0; yy < glyph->height; yy++) {
+      int dy = y + glyph->yoff + yy;
+      const uint8_t *src_row;
+      uint16_t *dst_row;
+
+      if (dy < 0 || dy >= (int)surface->height)
+         continue;
+      src_row = glyph->bitmap + yy * glyph->width;
+      dst_row = surface->pixels + (unsigned)dy * surface->stride;
+      for (int xx = 0; xx < glyph->width; xx++) {
+         int dx = x + glyph->xoff + xx;
+         unsigned alpha;
+
+         if (dx < 0 || dx >= (int)surface->width)
+            continue;
+         alpha = src_row[xx];
+         if (alpha)
+            dst_row[dx] = blend_rgb565(dst_row[dx], color, alpha);
+      }
+   }
+}
+
+static uint32_t utf8_peek_codepoint(const char *text)
+{
+   return utf8_next_codepoint(&text);
+}
+
 static void ttf_draw_text(const struct unifrog_surface *surface,
    int x, int y, const char *text, uint16_t color)
 {
-   float xpos = (float)x;
-   float ypos = (float)(y + ttf_baseline_offset);
+   int xpos = x;
+   int baseline = y + ttf_baseline_offset;
 
    if (!surface_is_valid(surface) || !text)
       return;
    while (*text) {
-      unsigned char ch = (unsigned char)*text++;
-      stbtt_aligned_quad quad;
-      const stbtt_bakedchar *glyph;
-      int gx0;
-      int gy0;
-      int gw;
-      int gh;
+      const char *next = text;
+      uint32_t cp = utf8_next_codepoint(&next);
+      uint32_t next_cp = utf8_peek_codepoint(next);
+      int kern = 0;
+      struct ttf_cached_glyph *glyph;
 
-      if (ch < TTF_FIRST_CHAR || ch >= TTF_FIRST_CHAR + TTF_CHAR_COUNT)
-         ch = '?';
-      glyph = &ttf_chars[ch - TTF_FIRST_CHAR];
-      stbtt_GetBakedQuad(ttf_chars, TTF_BITMAP_W, TTF_BITMAP_H,
-         ch - TTF_FIRST_CHAR, &xpos, &ypos, &quad, 1);
-      gx0 = (int)quad.x0;
-      gy0 = (int)quad.y0;
-      gw = (int)(glyph->x1 - glyph->x0);
-      gh = (int)(glyph->y1 - glyph->y0);
-
-      for (int yy = 0; yy < gh; yy++) {
-         int dy = gy0 + yy;
-         const uint8_t *src_row;
-         uint16_t *dst_row;
-
-         if (dy < 0 || dy >= (int)surface->height)
-            continue;
-         src_row = ttf_bitmap + ((unsigned)glyph->y0 + (unsigned)yy) *
-            TTF_BITMAP_W + glyph->x0;
-         dst_row = surface->pixels + (unsigned)dy * surface->stride;
-         for (int xx = 0; xx < gw; xx++) {
-            int dx = gx0 + xx;
-            unsigned alpha;
-
-            if (dx < 0 || dx >= (int)surface->width)
-               continue;
-            alpha = src_row[xx];
-            if (alpha)
-               dst_row[dx] = blend_rgb565(dst_row[dx], color, alpha);
-         }
+      if (cp == '\n') {
+         xpos = x;
+         baseline += (int)(TTF_PIXEL_HEIGHT + 3.0f);
+         text = next;
+         continue;
       }
+      glyph = ttf_load_glyph(cp, next_cp, &kern);
+      if (!glyph && cp != '?')
+         glyph = ttf_load_glyph('?', next_cp, &kern);
+      if (glyph) {
+         ttf_blit_glyph(surface, xpos, baseline, glyph, color);
+         xpos += glyph->advance + kern;
+      } else {
+         xpos += 6;
+      }
+      text = next;
    }
 }
 
@@ -383,55 +551,78 @@ static int load_file_bytes(const char *path, uint8_t **out_data,
    return 0;
 }
 
-static int load_ttf_file(const char *path)
+static int ttf_add_font_file(const char *path)
 {
-   stbtt_fontinfo info;
+   struct ttf_loaded_font *font;
    uint8_t *data = NULL;
-   uint8_t *bitmap = NULL;
    size_t size = 0;
    int offset;
-   int bake_ret;
-   int ascent;
-   int descent;
-   int line_gap;
-   float scale;
+
+   if (ttf_font_count >= TTF_MAX_FONTS)
+      return -1;
 
    if (load_file_bytes(path, &data, &size) != 0)
       return -1;
-   (void)size;
    offset = stbtt_GetFontOffsetForIndex(data, 0);
    if (offset < 0)
       offset = 0;
-   if (!stbtt_InitFont(&info, data, offset)) {
+   font = &ttf_fonts[ttf_font_count];
+   memset(font, 0, sizeof(*font));
+   if (!stbtt_InitFont(&font->info, data, offset)) {
       free(data);
       return -1;
    }
-   bitmap = calloc(1, TTF_BITMAP_W * TTF_BITMAP_H);
-   if (!bitmap) {
-      free(data);
-      return -1;
+   font->data = data;
+   font->size = size;
+   font->scale = stbtt_ScaleForPixelHeight(&font->info, TTF_PIXEL_HEIGHT);
+   stbtt_GetFontVMetrics(&font->info, &font->ascent, &font->descent,
+      &font->line_gap);
+   if (ttf_font_count == 0) {
+      ttf_baseline_offset = (int)((float)font->ascent * font->scale + 0.5f);
+      if (ttf_baseline_offset < 1)
+         ttf_baseline_offset = (int)TTF_PIXEL_HEIGHT;
    }
-   bake_ret = stbtt_BakeFontBitmap(data, offset, TTF_PIXEL_HEIGHT,
-      bitmap, TTF_BITMAP_W, TTF_BITMAP_H, TTF_FIRST_CHAR,
-      TTF_CHAR_COUNT, ttf_chars);
-   if (bake_ret <= 0) {
-      free(bitmap);
-      free(data);
-      return -1;
-   }
-   scale = stbtt_ScaleForPixelHeight(&info, TTF_PIXEL_HEIGHT);
-   stbtt_GetFontVMetrics(&info, &ascent, &descent, &line_gap);
-   (void)descent;
-   (void)line_gap;
+   ttf_font_count++;
+   return 0;
+}
 
+static int load_ttf_file(const char *path)
+{
+   char paths[TTF_PATH_LIST_MAX];
+   char part[TTF_PATH_MAX];
+   unsigned loaded = 0;
+   size_t start = 0;
+   size_t len;
+
+   unifrog_text_copy(paths, sizeof(paths), path);
    ttf_clear();
-   ttf_data = data;
-   ttf_bitmap = bitmap;
-   ttf_baseline_offset = (int)((float)ascent * scale + 0.5f);
-   if (ttf_baseline_offset < 1)
-      ttf_baseline_offset = (int)TTF_PIXEL_HEIGHT;
+   len = strlen(paths);
+   for (size_t i = 0; i <= len; i++) {
+      if (paths[i] == ';' || paths[i] == '|' || paths[i] == '\0') {
+         size_t end = i;
+         size_t count;
+
+         while (start < end && (paths[start] == ' ' || paths[start] == '\t'))
+            start++;
+         while (end > start && (paths[end - 1u] == ' ' ||
+             paths[end - 1u] == '\t'))
+            end--;
+         count = end - start;
+         if (count > 0 && count < sizeof(part)) {
+            memcpy(part, paths + start, count);
+            part[count] = '\0';
+            if (ttf_add_font_file(part) == 0)
+               loaded++;
+         }
+         start = i + 1u;
+      }
+   }
+   if (!loaded) {
+      ttf_clear();
+      return -1;
+   }
    ttf_active = 1;
-   return TTF_CHAR_COUNT;
+   return (int)loaded;
 }
 
 int unifrog_gfx_load_font5x7_file(const char *path)

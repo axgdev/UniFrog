@@ -129,6 +129,7 @@ function loadThemeFile() {
   theme.icons.pcengine = readKey(text, "icon_pcengine") || theme.icons.pcengine;
   theme.icons.psx = readKey(text, "icon_psx") || theme.icons.psx;
   theme.icons.media = readKey(text, "icon_media") || theme.icons.media;
+  theme.icons.games = readKey(text, "icon_games") || theme.icons.games;
   theme.icons.firmware = readKey(text, "icon_firmware") || theme.icons.firmware;
   theme.icons.last = readKey(text, "icon_last") || theme.icons.last;
   theme.icons.settings = readKey(text, "icon_settings") || theme.icons.settings;

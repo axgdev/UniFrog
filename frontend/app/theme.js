@@ -28,6 +28,7 @@ var theme = {
     pcengine: "icons/pcengine.png",
     psx: "icons/psx.png",
     media: "icons/media.png",
+    games: "icons/files.png",
     firmware: "icons/firmware.png",
     last: "icons/continue.png",
     settings: "icons/settings.png",

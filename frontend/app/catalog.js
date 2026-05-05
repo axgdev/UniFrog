@@ -1,12 +1,6 @@
 var homeItems = [
   { id: "firmware", label: "Firmware", detail: "Boot firmware" },
-  { id: "system:Game Boy Advance", label: "Game Boy Advance", detail: "GBA", icon: "gba" },
-  { id: "system:Game Boy / Color", label: "Game Boy", detail: "GB GBC", icon: "gb" },
-  { id: "system:Nintendo (NES)", label: "Nintendo", detail: "NES FDS", icon: "nes" },
-  { id: "system:Super Nintendo", label: "Super Nintendo", detail: "SNES", icon: "snes" },
-  { id: "system:Sega Genesis", label: "Sega Genesis", detail: "MD SMS GG", icon: "genesis" },
-  { id: "system:PC Engine", label: "PC Engine", detail: "PCE SGX", icon: "pcengine" },
-  { id: "system:PlayStation", label: "PlayStation", detail: "PS1", icon: "psx" },
+  { id: "games", label: "Games", detail: "Indexed systems", icon: "games" },
   { id: "media", label: "Media", detail: "Videos music images", icon: "media" },
   { id: "last", label: "Continue", detail: "Last game" },
   { id: "index", label: "Index Library", detail: "Scan SD card" },

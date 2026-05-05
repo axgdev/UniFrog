@@ -77,13 +77,20 @@ when they are inside a PlayStation folder.
 Translation files under `/unifrog/locales` are packaged as key/value `.ini`
 files for English, Simplified Chinese, Hindi, Spanish, French, Arabic,
 Bengali, Portuguese, Russian, Urdu, Indonesian, German, Japanese, Swahili,
-Marathi, Telugu, Turkish, Tamil, Vietnamese, and Korean. The current renderer
-still bakes ASCII glyphs for active UI text, so the locale files are shipped as
-the data contract for the upcoming Unicode renderer pass.
+Marathi, Telugu, Turkish, Tamil, Vietnamese, and Korean.
 
-Themes may set `font=/media/mmcblk0/unifrog/font.ufnt` for a fixed 5x7 bitmap
-font, or a `.ttf`/`.otf` path for the current ASCII TTF renderer. Font files
-with `.ufnt` are text files with one printable ASCII glyph per line:
+Themes use `font=/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf` by
+default. The native renderer reads UTF-8 text and renders glyphs on demand from
+TTF/OTF files through a small cache. A theme may provide a semicolon-separated
+fallback list, for example:
+
+```text
+font=/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf;/media/mmcblk0/unifrog/fonts/NotoSansArabic-Regular.ttf
+```
+
+Themes may still set `font=/media/mmcblk0/unifrog/font.ufnt` for a fixed 5x7
+bitmap font. Font files with `.ufnt` are text files with one printable ASCII
+glyph per line:
 
 ```text
 A=7e 11 11 11 7e
@@ -93,9 +100,11 @@ Icon keys such as `icon_gba`, `icon_snes`, `icon_media`, and `icon_settings`
 accept absolute paths or paths relative to `icon_root`.
 
 `make deps-fonts` fetches permissively licensed Noto fonts into `.deps/fonts`;
-`make -C frontend package` includes them as `/unifrog/fonts` when present.
-These files are packaged for future multilingual rendering and for downstream
-themes that explicitly select a supported font path.
+`make -C frontend package` includes them as `/unifrog/fonts` when present. The
+default theme loads the Latin/Greek/Cyrillic Noto Sans file only to keep normal
+startup memory low. Users and language-specific themes can add Arabic,
+Devanagari, Bengali, Tamil, Telugu, or CJK fallback files when they need those
+scripts.
 
 `quick-menu.js` is the in-game JavaScript pause menu opened with
 `SELECT+START`. Its shortcuts are `B` resume, `X` return to the frontend,

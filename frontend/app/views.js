@@ -36,6 +36,7 @@ function iconForItem(item) {
   if (key === "index") return iconFile(theme.icons.index);
   if (key === "developer") return iconFile(theme.icons.developer);
   if (key === "media") return iconFile(theme.icons.media);
+  if (key === "games") return iconFile(theme.icons.games);
   if (key === "gba") return iconFile(theme.icons.gba);
   if (key === "gb") return iconFile(theme.icons.gb);
   if (key === "nes") return iconFile(theme.icons.nes);
