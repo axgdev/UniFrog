@@ -12,11 +12,11 @@
 
 #define printf unifrog_log
 
-#define BOOT_LOGO_WIDTH 256u
-#define BOOT_LOGO_HEIGHT 100u
+#define BOOT_LOGO_WIDTH 320u
+#define BOOT_LOGO_HEIGHT 240u
 #define BOOT_LOGO_BACKLIGHT 50u
 
-#include "../assets/boot/unifrog-logo-rgb565.inc"
+#include "boot/unifrog-logo-rgb565.inc"
 
 static struct unifrog_fb early_logo_fb;
 static int early_logo_fb_open;

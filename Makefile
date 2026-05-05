@@ -156,6 +156,7 @@ GCC_LIBDIR ?= $(firstword $(wildcard $(TOOLCHAIN)/lib/gcc/mipsel-mti-elf/*))
 SYS_LIBDIR := $(TOOLCHAIN)/mipsel-mti-elf/lib
 Q := $(if $(V),,@)
 UNIFROG_GIT_COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+UNIFROG_BOOT_VERSION := $(shell tag=$$(git describe --tags --exact-match 2>/dev/null); if test -n "$$tag"; then printf '%s\n' "$$tag"; else commit=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown); printf 'revision %s\n' "$$commit"; fi)
 UNIFROG_GIT_DIRTY := $(shell test -z "$$(git status --porcelain --untracked-files=no 2>/dev/null)" && echo 0 || echo 1)
 UNIFROG_SDK_GIT_COMMIT := $(shell git -C $(SDK) rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 UNIFROG_CORES_GIT_COMMIT := $(shell git -C $(CORE_SOURCE_ROOT)/libretro-common rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
@@ -164,7 +165,7 @@ UNIFROG_FRONTEND_GIT_COMMIT := $(shell git -C $(FRONTEND) rev-parse --short=12 H
 
 # Treat SDK headers as system headers so third-party/newlib warnings do not
 # obscure warnings from the UniFrog source itself.
-PROJECT_INCLUDES := -Iinclude -Isrc -I$(CORE_SOURCE_ROOT)/libretro-common/include -I$(JS2300)/include
+PROJECT_INCLUDES := -Iinclude -Isrc -I$(BUILD) -I$(CORE_SOURCE_ROOT)/libretro-common/include -I$(JS2300)/include
 SDK_INCLUDES := \
 	-isystem $(SDK)/include \
 	-isystem $(SDK)/include/hcrtos \
@@ -424,6 +425,13 @@ FASTBOOT_STUB_BIN := $(BUILD)/fastboot/stub.bin
 FASTBOOT_STAGE_OBJ := $(BUILD)/fastboot/stage1.o
 FASTBOOT_STAGE_ENTRY_OBJ := $(BUILD)/fastboot/stage_entry.o
 FASTBOOT_STUB_OBJ := $(BUILD)/fastboot/stub.o
+BOOT_LOGO_TOOL := $(BUILD)/bootlogo-tool
+BOOT_LOGO_SRC := assets/boot/unifrog-logo.png
+BOOT_LOGO_PPM := $(BUILD)/boot/unifrog-logo.ppm
+BOOT_LOGO_STAMPED_PPM := $(BUILD)/boot/unifrog-logo-stamped.ppm
+BOOT_LOGO_STAMPED_PNG := $(BUILD)/boot/unifrog-logo-stamped.png
+BOOT_LOGO_RGB565_INC := $(BUILD)/boot/unifrog-logo-rgb565.inc
+BOOT_LOGO_STAMP := $(BUILD)/boot/unifrog-logo.stamp
 GAMBATTE_CORE_LIB := $(CORES)/output/gambatte_libretro_sf2000.a
 GPSP_CORE_LIB := $(CORES)/output/gpsp_libretro_sf2000.a
 PICODRIVE_CORE_LIB := $(CORES)/output/picodrive_libretro_sf2000.a
@@ -579,6 +587,7 @@ BUILD_CONFIG_TOKEN := $(shell printf '%s\n' \
 	'EMBED_DTB=$(EMBED_DTB)' | cksum | awk '{print $$1}')
 BUILD_IDENTITY_TOKEN := $(shell printf '%s\n' \
 	'UNIFROG_GIT_COMMIT=$(UNIFROG_GIT_COMMIT)' \
+	'UNIFROG_BOOT_VERSION=$(UNIFROG_BOOT_VERSION)' \
 	'UNIFROG_GIT_DIRTY=$(UNIFROG_GIT_DIRTY)' \
 	'UNIFROG_SDK_GIT_COMMIT=$(UNIFROG_SDK_GIT_COMMIT)' \
 	'UNIFROG_CORES_GIT_COMMIT=$(UNIFROG_CORES_GIT_COMMIT)' \
@@ -668,7 +677,7 @@ $(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild
 SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores
 PACKAGE_TARGETS := frontend-package core-package module-package sdcard-package sd-zip install refresh-sd refresh-sd-clean
-VERIFY_TARGETS := asdcheck fastboot-check fastboot-only-check layout-check js2300-check frontend-check core-smoke-check
+VERIFY_TARGETS := asdcheck fastboot-check fastboot-only-check layout-check boot-logo-check js2300-check frontend-check core-smoke-check
 ADVANCED_TARGETS := sdk dtb lib fastboot fastboot-only size ci-deps ci-toolchain ci-commit-check ci-sd-zip print-config
 .PHONY: $(COMMON_TARGETS) $(SETUP_TARGETS) $(PACKAGE_TARGETS) $(VERIFY_TARGETS) $(ADVANCED_TARGETS)
 
@@ -706,6 +715,7 @@ help:
 	@echo ""
 	@echo "Focused checks:"
 	@echo "  make repo-check core-smoke-check js2300-check frontend-check"
+	@echo "  make boot-logo-check"
 	@echo "  make fastboot-only-check"
 	@echo "  make layout-check asdcheck fastboot-check"
 	@echo "  make -C cores help"
@@ -764,7 +774,7 @@ print-config:
 deps: deps-sdk deps-mquickjs deps-cores
 
 deps-alpine:
-	apk add git make dtc tcc tcc-libs-static musl-dev ccache curl tar xz zip patch
+	apk add git make dtc tcc tcc-libs-static musl-dev ccache curl tar xz zip patch imagemagick
 
 deps-ubuntu:
 	@echo "sudo apt-get update && sudo apt-get install -y git make device-tree-compiler tcc ccache curl xz-utils zip patch"
@@ -873,6 +883,7 @@ doctor:
 	@command -v $(OBJCOPY) >/dev/null || { echo "missing: $(OBJCOPY)"; exit 1; }
 	@command -v $(HOSTCC) >/dev/null || { echo "missing: $(HOSTCC)"; exit 1; }
 	@command -v $(DTC) >/dev/null || { echo "missing: $(DTC)"; exit 1; }
+	@command -v magick >/dev/null || { echo "missing: magick"; exit 1; }
 	@test -n "$(GCC_LIBDIR)" || { echo "missing: GCC libdir under $(TOOLCHAIN)/lib/gcc/mipsel-mti-elf"; exit 1; }
 	@test -d "$(SYS_LIBDIR)" || { echo "missing: $(SYS_LIBDIR)"; exit 1; }
 	@test -d "$(SDK)/include" || { echo "missing: $(SDK)/include"; exit 1; }
@@ -911,6 +922,8 @@ quick-check:
 	$(Q)$(MAKE) --no-print-directory js2300-check
 	@echo "  CHECK   frontend"
 	$(Q)$(MAKE) --no-print-directory frontend-check
+	@echo "  CHECK   boot logo"
+	$(Q)$(MAKE) --no-print-directory boot-logo-check
 	@echo "OK"
 
 core-smoke-check:
@@ -1076,6 +1089,7 @@ $(BUILD)/%.o: src/%.c | $(BUILD)
 	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) $(CFLAGS) -MD -MP -c $< -o $@
 
+$(BUILD)/unifrog_boot_logo.o: $(BOOT_LOGO_RGB565_INC)
 $(BUILD)/unifrog_fb.o $(BUILD)/unifrog_ge.o $(BUILD)/unifrog_presenter.o: CFLAGS := $(CFLAGS_VIDEO)
 $(BUILD)/unifrog_gfx.o $(BUILD)/unifrog_perf.o $(BUILD)/unifrog_scpu.o: CFLAGS := $(CFLAGS_FAST)
 $(BUILD)/unifrog_audio.o: CFLAGS := $(CFLAGS_AUDIO)
@@ -1121,6 +1135,32 @@ $(FASTBOOT_STUB_OUT): $(FASTBOOT_STUB_OBJ) linker/fastboot/stub.ld \
 $(FASTBOOT_STUB_BIN): $(FASTBOOT_STUB_OUT)
 	@echo "  OBJCOPY $@"
 	$(Q)$(OBJCOPY) -O binary $< $@
+
+$(BOOT_LOGO_TOOL): tools/bootlogo.c $(BUILD_CONFIG_STAMP) | $(BUILD)
+	@echo "  HOSTCC  $@"
+	$(Q)mkdir -p $(dir $@)
+	$(Q)$(HOSTCC) $(HOSTCFLAGS) $< -o $@
+
+$(BOOT_LOGO_PPM): $(BOOT_LOGO_SRC) | $(BUILD)
+	@echo "  IMAGE   $@"
+	$(Q)mkdir -p $(dir $@)
+	$(Q)magick $< -resize 320x240! ppm:$@
+
+$(BOOT_LOGO_STAMP): $(BOOT_LOGO_PPM) $(BOOT_LOGO_TOOL) $(BUILD_IDENTITY_STAMP)
+	@echo "  BOOTLOGO $(UNIFROG_BOOT_VERSION)"
+	$(Q)$(BOOT_LOGO_TOOL) $(BOOT_LOGO_PPM) "$(UNIFROG_BOOT_VERSION)" $(BOOT_LOGO_STAMPED_PPM) $(BOOT_LOGO_RGB565_INC)
+	$(Q)touch $@
+
+$(BOOT_LOGO_STAMPED_PPM) $(BOOT_LOGO_RGB565_INC): $(BOOT_LOGO_STAMP)
+
+$(BOOT_LOGO_STAMPED_PNG): $(BOOT_LOGO_STAMPED_PPM)
+	@echo "  PNG     $@"
+	$(Q)magick $< -strip -define png:compression-level=9 -define png:compression-strategy=0 PNG8:$@
+
+boot-logo-check: $(BOOT_LOGO_STAMPED_PNG) $(BOOT_LOGO_RGB565_INC)
+	@test -s $(BOOT_LOGO_STAMPED_PNG)
+	@test -s $(BOOT_LOGO_RGB565_INC)
+	@echo "  OK      boot logo"
 
 $(DTS_PRE): $(DTS_INPUTS) $(DTS_MODE_STAMP) $(BUILD_CONFIG_STAMP) | $(BUILD)
 	@echo "  CPP     $<"

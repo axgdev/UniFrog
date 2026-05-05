@@ -57,6 +57,7 @@ make                  Build firmware, modules, and core package
 make verify           Build and verify firmware, fastboot, JS, and layout
 make fastboot-only-check
                       Build and verify only the fastboot ASD
+make boot-logo-check  Generate the stamped full-screen boot logo assets
 make sd-zip           Build output/UniFrog-sdcard.zip
 make clean            Remove generated build/output files
 make distclean        Also clean sub-build outputs
@@ -72,6 +73,11 @@ change, run `make clean && make verify`.
 
 If `ccache` is installed, the build uses it automatically. Set `CCACHE=` in
 `config.mk` or on the command line to disable it.
+
+The boot logo source lives at `assets/boot/unifrog-logo.png` and is converted
+to a full-screen 320x240 RGB565 RLE include during the build. The version text
+at the bottom is stamped from an exact git tag when available, otherwise from
+the current commit hash with a `revision` label.
 
 The default `HCRTOS_MEDIA=module` keeps the SDK FFmpeg/HCRTOS media player out
 of the boot image and packages it as `/unifrog/modules/hcrtos-media.bin`; video
