@@ -14,7 +14,9 @@
 
 #define TTF_MAX_FONTS 8
 #define TTF_GLYPH_CACHE 160
-#define TTF_PIXEL_HEIGHT 10.0f
+#define TTF_PIXEL_HEIGHT 12.0f
+#define TTF_ALPHA_CUTOFF 40u
+#define TTF_ALPHA_SOLID 176u
 #define TTF_MAX_BYTES (24u * 1024u * 1024u)
 #define TTF_PATH_LIST_MAX 1024
 #define TTF_PATH_MAX 512
@@ -331,8 +333,14 @@ static void ttf_blit_glyph(const struct unifrog_surface *surface,
          if (dx < 0 || dx >= (int)surface->width)
             continue;
          alpha = src_row[xx];
-         if (alpha)
+         if (alpha >= TTF_ALPHA_CUTOFF) {
+            if (alpha >= TTF_ALPHA_SOLID)
+               alpha = 255u;
+            else
+               alpha = ((alpha - TTF_ALPHA_CUTOFF) * 255u) /
+                  (TTF_ALPHA_SOLID - TTF_ALPHA_CUTOFF);
             dst_row[dx] = blend_rgb565(dst_row[dx], color, alpha);
+         }
       }
    }
 }
