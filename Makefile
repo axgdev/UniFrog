@@ -274,16 +274,19 @@ WRAPS := \
 
 LDFLAGS := -EL $(OPT_SIZE) --static $(LIBDIRS) $(LDSCRIPTS) --gc-sections -n $(WRAPS) --allow-multiple-definition
 
+HCRTOS_DISPLAY_LDLIBS := \
+	-lviddrv
+
 HCRTOS_MEDIA_LDLIBS := \
 	-lavformat \
 	-lavcodec \
 	-lavutil \
-	-lswscale \
-	-lviddrv
+	-lswscale
 
 # Normal archives are pulled as needed by the linker.
 LDLIBS := \
 	$(if $(filter firmware,$(HCRTOS_MEDIA)),$(HCRTOS_MEDIA_LDLIBS)) \
+	$(HCRTOS_DISPLAY_LDLIBS) \
 	-lge \
 	-lz \
 	-lkernel \
@@ -485,6 +488,7 @@ HCRTOS_MEDIA_MODULE_OBJECTS := \
 	$(BUILD)/native_modules/unifrog_media.o
 HCRTOS_MEDIA_MODULE_LDLIBS = \
 	$(HCRTOS_MEDIA_LDLIBS) \
+	$(HCRTOS_DISPLAY_LDLIBS) \
 	-lauddrv \
 	-lauddsp \
 	-lge \
