@@ -244,7 +244,6 @@ hcrtos {
 	};
 
 	pwm@2 {
-		pinmux-active = <PINPAD_R05 PINMUX_R05_PWM_2>;
 		devpath = "/dev/pwm2";
 		polarity = <1>;
 		status = "okay";

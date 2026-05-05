@@ -15,6 +15,7 @@
 
 #include <cpu_func.h>
 #include <fastboot/handoff.h>
+#include <unifrog/boot_trace.h>
 #include <unifrog/log.h>
 #include <unifrog/perf.h>
 #include <unifrog/runtime.h>
@@ -676,6 +677,7 @@ static void log_fastboot_diag(void)
 void unifrog_platform_init_board(void)
 {
    log_fastboot_diag();
+   unifrog_boot_trace_log("platform.init_board");
    init_board_gpios();
    log_storage_config();
    apply_clock_defaults();

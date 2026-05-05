@@ -45,6 +45,9 @@ static void frontend_present_boot_logo(struct js2300_frontend *frontend)
    frontend->frame_open = 0;
    (void)unifrog_av_set_mode(0);
    ret = unifrog_backlight_set(BOOT_LOGO_BACKLIGHT);
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_BOOT_LOGO_DONE,
+      unifrog_perf_time_ms(), BOOT_LOGO_BACKLIGHT, (uint32_t)ret);
+   unifrog_boot_trace_log("boot.logo_done");
    printf("unifrog boot_logo shown %ux%u backlight=%u ret=%d\n",
       BOOT_LOGO_WIDTH, BOOT_LOGO_HEIGHT, BOOT_LOGO_BACKLIGHT, ret);
 }
@@ -53,6 +56,8 @@ int frontend_fb_open(struct js2300_frontend *frontend)
 {
    unsigned i;
 
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_FB_OPEN_BEGIN,
+      unifrog_perf_time_ms(), 0, 0);
    if (unifrog_fb_open(&frontend->fb, UNIFROG_FB_OPEN_DEFAULT) != 0) {
       printf("unifrog js fb open failed\n");
       return -1;
@@ -66,6 +71,9 @@ int frontend_fb_open(struct js2300_frontend *frontend)
       unifrog_fb_flush_buffer(&frontend->fb, i);
    }
    (void)unifrog_fb_pan(&frontend->fb, frontend->fb.current_buffer);
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_FB_CLEAR_DONE,
+      unifrog_perf_time_ms(), frontend->fb.width, frontend->fb.height);
+   unifrog_boot_trace_log("boot.fb_clear_done");
    frontend->draw_buffer = frontend->fb.current_buffer;
    frontend->frame_open = 0;
    frontend_present_boot_logo(frontend);

@@ -12,6 +12,7 @@
 #include <pthread.h>
 
 #include <frontend/js2300_frontend.h>
+#include <unifrog/boot_trace.h>
 #include <unifrog/diag.h>
 #include <unifrog/log.h>
 #include <unifrog/perf.h>
@@ -84,9 +85,17 @@ static void *frontend_thread(void *arg)
    (void)arg;
 
    thread_start_ms = unifrog_perf_time_ms();
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_FRONTEND_THREAD_START,
+      thread_start_ms, 0, 0);
+   unifrog_boot_trace_log("boot.thread_start");
    unifrog_diag_memory_snapshot("boot.thread_start");
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_BOARD_INIT_BEGIN,
+      unifrog_perf_time_ms(), 0, 0);
    unifrog_platform_init_board();
    board_ready_ms = unifrog_perf_time_ms();
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_BOARD_INIT_DONE,
+      board_ready_ms, board_ready_ms - thread_start_ms, 0);
+   unifrog_boot_trace_log("boot.board_ready");
    unifrog_log("unifrog boot_time stage=board_ready total_ms=%lu board_ms=%lu\n",
       (unsigned long)(board_ready_ms - thread_start_ms),
       (unsigned long)(board_ready_ms - thread_start_ms));
@@ -98,11 +107,17 @@ static void *frontend_thread(void *arg)
       (unsigned long)(board_ready_ms - thread_start_ms),
       (unsigned long)(storage_done_ms - board_ready_ms),
       storage_ready);
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_STORAGE_DONE,
+      storage_done_ms, storage_done_ms - board_ready_ms, (uint32_t)storage_ready);
+   unifrog_boot_trace_log("boot.storage_wait_done");
    unifrog_diag_memory_snapshot("boot.storage_wait_done");
 
    if (storage_ready == 0) {
       log_reset_ret = unifrog_log_reset();
       log_reset_path = unifrog_log_last_path();
+      unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_LOG_RESET_DONE,
+         unifrog_perf_time_ms(), (uint32_t)log_reset_ret, 0);
+      unifrog_boot_trace_log("boot.after_log_reset");
       unifrog_log("unifrog log reset ret=%d path=%s\n",
          log_reset_ret, log_reset_path ? log_reset_path : "?");
       unifrog_log("unifrog boot_time stage=storage_ready total_ms=%lu board_ms=%lu storage_ms=%lu\n",
@@ -126,6 +141,9 @@ static void *frontend_thread(void *arg)
       UNIFROG_SDK_GIT_COMMIT, UNIFROG_CORES_GIT_COMMIT,
       UNIFROG_JS2300_GIT_COMMIT, UNIFROG_FRONTEND_GIT_COMMIT,
       UNIFROG_HCRTOS_MEDIA);
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_JS_BEGIN,
+      unifrog_perf_time_ms(), 0, 0);
+   unifrog_boot_trace_log("boot.before_js");
    js2300_frontend_main();
 
    unifrog_platform_idle_forever();
@@ -134,6 +152,7 @@ static void *frontend_thread(void *arg)
 
 int main(void)
 {
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_MAIN_START, 0, 0, 0);
    xTaskCreate(app_main, (const char *)"app_main", configTASK_STACK_DEPTH,
       NULL, portPRI_TASK_NORMAL, NULL);
 
@@ -174,11 +193,19 @@ static void app_main(void *pvParameters)
 
    (void)pvParameters;
 
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_APP_MAIN_START,
+      unifrog_perf_time_ms(), 0, 0);
    module_start_ms = unifrog_perf_time_ms();
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_MODULE_INIT_BEGIN,
+      module_start_ms,
+      (uint32_t)(sizeof(fast_ui_boot_excludes) / sizeof(fast_ui_boot_excludes[0])),
+      0);
    module_ret = module_init2("all",
       (int)(sizeof(fast_ui_boot_excludes) / sizeof(fast_ui_boot_excludes[0])),
       fast_ui_boot_excludes);
    module_done_ms = unifrog_perf_time_ms();
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_MODULE_INIT_DONE,
+      module_done_ms, module_done_ms - module_start_ms, (uint32_t)module_ret);
    printf("unifrog fast_ui_boot module_init ret=%d ms=%lu excludes=%lu\n",
       module_ret, (unsigned long)(module_done_ms - module_start_ms),
       (unsigned long)(sizeof(fast_ui_boot_excludes) /

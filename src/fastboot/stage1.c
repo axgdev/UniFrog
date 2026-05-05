@@ -149,6 +149,63 @@ static void fastboot_backlight_report(const char *tag)
 		(unsigned int)((state >> 9) & 1u));
 }
 
+static unsigned int trace_path_hash(const char *path)
+{
+	unsigned int hash = 2166136261u;
+
+	if (!path)
+		return 0;
+	while (*path) {
+		hash ^= (unsigned char)*path++;
+		hash *= 16777619u;
+	}
+	return hash;
+}
+
+static void boot_trace_reset(volatile struct fastboot_trace *trace)
+{
+	unsigned int i;
+
+	trace->magic = FASTBOOT_TRACE_MAGIC;
+	trace->version = FASTBOOT_TRACE_VERSION;
+	trace->count = 0;
+	trace->dropped = 0;
+	for (i = 0; i < FASTBOOT_TRACE_ENTRIES; i++) {
+		trace->entries[i].seq = 0;
+		trace->entries[i].event = 0;
+		trace->entries[i].arg0 = 0;
+		trace->entries[i].arg1 = 0;
+		trace->entries[i].arg2 = 0;
+		trace->entries[i].r05_state = 0;
+	}
+}
+
+static void boot_trace_note(unsigned int event, unsigned int arg0,
+		unsigned int arg1, unsigned int arg2)
+{
+	volatile struct fastboot_trace *trace = FASTBOOT_TRACE_ADDR;
+	unsigned int index;
+
+	if (trace->magic != FASTBOOT_TRACE_MAGIC ||
+			trace->version != FASTBOOT_TRACE_VERSION)
+		boot_trace_reset(trace);
+
+	if (trace->count >= FASTBOOT_TRACE_ENTRIES) {
+		trace->dropped++;
+		rom_cache_flush((void *)trace, sizeof(*trace));
+		return;
+	}
+
+	index = trace->count++;
+	trace->entries[index].seq = index;
+	trace->entries[index].event = event;
+	trace->entries[index].arg0 = arg0;
+	trace->entries[index].arg1 = arg1;
+	trace->entries[index].arg2 = arg2;
+	trace->entries[index].r05_state = (uint32_t)fastboot_backlight_state();
+	rom_cache_flush((void *)trace, sizeof(*trace));
+}
+
 static void disable_interrupts(void)
 {
 	unsigned int status;
@@ -255,11 +312,15 @@ static int load_asd_staged(const char *path)
 	unsigned int payload_size;
 	int rc;
 
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_ASD_START,
+		trace_path_hash(path), (unsigned int)(uintptr_t)ASD_LOAD_ADDR, 0);
 	write_diag(20, 0, path);
 	rom_printf("fastboot: open %s staged\n", path);
 	rc = rom_f_open(&file, path, FA_READ);
 	if (rc != 0) {
 		rom_printf("fastboot: open failed %d\n", rc);
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_ASD_DONE,
+			trace_path_hash(path), (unsigned int)rc, 0);
 		write_diag(21, rc, path);
 		return -1;
 	}
@@ -270,6 +331,8 @@ static int load_asd_staged(const char *path)
 		rom_printf("fastboot: asd size invalid %u\n",
 			(unsigned int)file.obj.objsize);
 		rom_f_close(&file);
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_ASD_DONE,
+			trace_path_hash(path), 22, (unsigned int)file.obj.objsize);
 		write_diag(22, (int)file.obj.objsize, path);
 		return -1;
 	}
@@ -278,6 +341,8 @@ static int load_asd_staged(const char *path)
 	if (skip_bytes(&file, ASD_SKIP) != 0) {
 		rom_printf("fastboot: skip failed\n");
 		rom_f_close(&file);
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_ASD_DONE,
+			trace_path_hash(path), 23, 0);
 		write_diag(23, -1, path);
 		return -1;
 	}
@@ -285,6 +350,8 @@ static int load_asd_staged(const char *path)
 	rc = load_stream(&file, ASD_STAGE_ADDR);
 	rom_f_close(&file);
 	if (rc != 0) {
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_ASD_DONE,
+			trace_path_hash(path), 24, (unsigned int)rc);
 		write_diag(24, rc, path);
 		return -1;
 	}
@@ -292,6 +359,8 @@ static int load_asd_staged(const char *path)
 	copy_bytes(ASD_LOAD_ADDR, ASD_STAGE_ADDR, payload_size);
 	rom_cache_flush(ASD_LOAD_ADDR, payload_size);
 	rom_printf("fastboot: staged copy %u bytes\n", payload_size);
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_ASD_DONE,
+		trace_path_hash(path), 0, payload_size);
 	write_diag(25, (int)payload_size, path);
 	return 0;
 }
@@ -300,11 +369,15 @@ static int load_file(const char *path, unsigned int skip, uint8_t *load_addr)
 {
 	int rc;
 
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_LOAD_START,
+		trace_path_hash(path), skip, (unsigned int)(uintptr_t)load_addr);
 	write_diag(10, 0, path);
 	rom_printf("fastboot: open %s\n", path);
 	rc = rom_f_open(&file, path, FA_READ);
 	if (rc != 0) {
 		rom_printf("fastboot: open failed %d\n", rc);
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_LOAD_DONE,
+			trace_path_hash(path), (unsigned int)rc, 0);
 		write_diag(11, rc, path);
 		return -1;
 	}
@@ -312,12 +385,16 @@ static int load_file(const char *path, unsigned int skip, uint8_t *load_addr)
 	if (skip != 0 && skip_bytes(&file, skip) != 0) {
 		rom_printf("fastboot: skip failed\n");
 		rom_f_close(&file);
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_LOAD_DONE,
+			trace_path_hash(path), 12, 0);
 		write_diag(12, -1, path);
 		return -1;
 	}
 
 	rc = load_stream(&file, load_addr);
 	rom_f_close(&file);
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_LOAD_DONE,
+		trace_path_hash(path), (unsigned int)rc, 0);
 	write_diag(rc == 0 ? 13 : 14, rc, path);
 	return rc;
 }
@@ -366,6 +443,8 @@ static void jump_to_payload(const char *path)
 
 	fastboot_backlight_off();
 	backlight_state = fastboot_backlight_state();
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_JUMP, trace_path_hash(path),
+		(unsigned int)(uintptr_t)ENTRY_ADDR, (unsigned int)backlight_state);
 	write_diag(30, backlight_state, path);
 	rom_printf("fastboot: jump %p backlight_state=0x%03x\n",
 		ENTRY_ADDR, backlight_state);
@@ -379,18 +458,25 @@ void stage1_main(void)
 
 	clear_bss();
 	disable_interrupts();
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_START,
+		(unsigned int)(uintptr_t)FASTBOOT_STAGE1_ADDR, 0, 0);
 	fastboot_backlight_off();
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_BACKLIGHT_OFF,
+		(unsigned int)fastboot_backlight_state(), 0, 0);
 	write_diag(1, 0, "");
 	rom_printf("\nfastboot: stage1 @ 0x%08x\n", FASTBOOT_STAGE1_ADDR);
 	fastboot_backlight_report("stage1_start");
 
 	rc = rom_f_mount(&fatfs, "", 1);
 	rom_printf("fastboot: mount %d\n", rc);
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_MOUNT_RESULT, (unsigned int)rc, 0, 0);
 	write_diag(2, rc, "");
 	if (rc != 0)
 		goto fail;
 
 	if (read_handoff_path(handoff_path, sizeof(handoff_path)) == 0) {
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_HANDOFF_RESULT,
+			0, trace_path_hash(handoff_path), 0);
 		write_diag(3, 0, handoff_path);
 		rom_printf("fastboot: handoff %s\n", handoff_path);
 		if (load_asd_staged(handoff_path) == 0) {
@@ -398,6 +484,8 @@ void stage1_main(void)
 			jump_to_payload(handoff_path);
 		}
 	} else {
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_HANDOFF_RESULT,
+			(unsigned int)-1, 0, 0);
 		write_diag(5, -1, "");
 	}
 
@@ -414,6 +502,7 @@ void stage1_main(void)
 		jump_to_payload("stock/bisrv.asd");
 
 fail:
+	boot_trace_note(FASTBOOT_TRACE_STAGE1_FAIL, 0, 0, 0);
 	write_diag(99, -1, "");
 	rom_printf("fastboot: no bootable payload\n");
 	for (;;)
