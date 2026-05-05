@@ -261,21 +261,26 @@ function drawIndexList(now) {
 
 function drawDeveloper(now) {
   var i;
+  var idx;
   var y;
   var active;
   JS2300.video.clear(theme.colors.background);
   topBar("Developer");
-  drawRows(developerItems.length, 44, 28, 22);
-  for (i = 0; i < developerItems.length; i++) {
-    y = 50 + i * 28;
-    active = i === selected;
-    JS2300.video.text(16, y, developerItems[i].label,
+  drawRows(developerItems.length, 36, 22, 19);
+  for (i = 0; i < 8; i++) {
+    idx = scroll + i;
+    if (idx >= developerItems.length) break;
+    y = 41 + i * 22;
+    active = idx === selected;
+    JS2300.video.text(16, y, developerItems[idx].label,
       active ? theme.text.selected : theme.text.primary);
-    JS2300.video.text(154, y, developerItems[i].detail,
+    JS2300.video.text(154, y, developerItems[idx].detail,
       active ? theme.text.selectedMuted : theme.text.muted);
   }
   drawToast(now);
-  footer("A open   B back   Y log");
+  footer("A open   B back   Y log   " +
+    String(developerItems.length ? selected + 1 : 0) + "/" +
+    String(developerItems.length));
   JS2300.video.present();
 }
 

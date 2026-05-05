@@ -14,8 +14,9 @@ Keep this repository small and direct.
   `MODE=head|tag` only to override repository policy.
 - Defaults: `TOOLCHAIN=/opt/mipsel-mti-elf`, `SDK=unifrog-hcrtos-sdk`,
   `DEPS=.deps`, `SD_MODE=safe`
-- SD diagnostics: `SD_MODE=wide|uhs` are experimental; they defer launch-time
-  log writes and retry storage recovery, but `safe` remains the default.
+- SD diagnostics: `SD_MODE=hs1|wide50|wide|uhs12|uhs25|uhs` are
+  experimental; `safe` remains the default. Run Developer -> Storage test on
+  device for read-only SD timing and reliability data.
 - Local overrides belong in untracked `config.mk`.
 
 ## Scope

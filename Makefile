@@ -80,31 +80,64 @@ OPT_SIZE ?= -Os
 OPT_FAST ?= -O2
 OPT_AUDIO ?= -Os
 OPT_FLAGS := -O0 -O1 -O2 -O3 -Os -Og -Ofast
-SD_MODES := safe wide uhs
+SD_MODES := safe hs1 wide50 wide uhs12 uhs25 uhs
 
 ifneq ($(filter $(SD_MODE),$(SD_MODES)),$(SD_MODE))
 $(error SD_MODE must be one of: $(SD_MODES))
 endif
 
+SD_CLOCK_FREQUENCY := 198000000
+SD_UHS_SDR12 := 0
+SD_UHS_SDR25 := 0
+SD_UHS_SDR50 := 0
+
 ifeq ($(SD_MODE),safe)
 SD_BUS_WIDTH := 1
 SD_CAP_HIGHSPEED := 0
-SD_CAP_UHS := 0
 SD_NO_1V8 := 1
 SD_EXPERIMENTAL := 0
+else ifeq ($(SD_MODE),hs1)
+SD_BUS_WIDTH := 1
+SD_CAP_HIGHSPEED := 1
+SD_NO_1V8 := 1
+SD_EXPERIMENTAL := 1
+else ifeq ($(SD_MODE),wide50)
+SD_BUS_WIDTH := 4
+SD_CAP_HIGHSPEED := 1
+SD_CLOCK_FREQUENCY := 50000000
+SD_NO_1V8 := 1
+SD_EXPERIMENTAL := 1
 else ifeq ($(SD_MODE),wide)
 SD_BUS_WIDTH := 4
 SD_CAP_HIGHSPEED := 1
-SD_CAP_UHS := 0
 SD_NO_1V8 := 1
+SD_EXPERIMENTAL := 1
+else ifeq ($(SD_MODE),uhs12)
+SD_BUS_WIDTH := 4
+SD_CAP_HIGHSPEED := 1
+SD_UHS_SDR12 := 1
+SD_CLOCK_FREQUENCY := 50000000
+SD_NO_1V8 := 0
+SD_EXPERIMENTAL := 1
+else ifeq ($(SD_MODE),uhs25)
+SD_BUS_WIDTH := 4
+SD_CAP_HIGHSPEED := 1
+SD_UHS_SDR12 := 1
+SD_UHS_SDR25 := 1
+SD_CLOCK_FREQUENCY := 99000000
+SD_NO_1V8 := 0
 SD_EXPERIMENTAL := 1
 else
 SD_BUS_WIDTH := 4
 SD_CAP_HIGHSPEED := 1
-SD_CAP_UHS := 1
+SD_UHS_SDR12 := 1
+SD_UHS_SDR25 := 1
+SD_UHS_SDR50 := 1
 SD_NO_1V8 := 0
 SD_EXPERIMENTAL := 1
 endif
+
+SD_CAP_UHS := $(if $(filter 1,$(SD_UHS_SDR12) $(SD_UHS_SDR25) $(SD_UHS_SDR50)),1,0)
 
 GCC_LIBDIR ?= $(firstword $(wildcard $(TOOLCHAIN)/lib/gcc/mipsel-mti-elf/*))
 SYS_LIBDIR := $(TOOLCHAIN)/mipsel-mti-elf/lib
@@ -128,9 +161,13 @@ SDK_INCLUDES := \
 DTS_CPPFLAGS := \
 	-Idts/include \
 	-I$(SDK)/include/hcrtos \
+	-DUNIFROG_SD_CLOCK_FREQUENCY=$(SD_CLOCK_FREQUENCY) \
 	-DUNIFROG_SD_BUS_WIDTH=$(SD_BUS_WIDTH) \
 	-DUNIFROG_SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED) \
 	-DUNIFROG_SD_CAP_UHS=$(SD_CAP_UHS) \
+	-DUNIFROG_SD_UHS_SDR12=$(SD_UHS_SDR12) \
+	-DUNIFROG_SD_UHS_SDR25=$(SD_UHS_SDR25) \
+	-DUNIFROG_SD_UHS_SDR50=$(SD_UHS_SDR50) \
 	-DUNIFROG_SD_NO_1V8=$(SD_NO_1V8) \
 	-nostdinc \
 	-undef \
@@ -509,8 +546,12 @@ help:
 	@echo "  make print-config  Show current paths and tools"
 	@echo "  make V=1           Show full compiler/linker commands"
 	@echo "  make SD_MODE=safe  Use the default reliable 1-bit SD profile"
+	@echo "  make SD_MODE=hs1   Diagnostic 1-bit high-speed SD build"
+	@echo "  make SD_MODE=wide50 Diagnostic 4-bit high-speed, lower-clock SD build"
 	@echo "  make SD_MODE=wide  Diagnostic 4-bit high-speed SD build"
-	@echo "  make SD_MODE=uhs   Diagnostic UHS/1.8V SD build"
+	@echo "  make SD_MODE=uhs12 Diagnostic UHS SDR12-only SD build"
+	@echo "  make SD_MODE=uhs25 Diagnostic UHS SDR25 SD build"
+	@echo "  make SD_MODE=uhs   Diagnostic UHS SDR50 SD build"
 	@echo "  Override paths in untracked config.mk, or on the command line."
 
 print-config:
@@ -526,6 +567,13 @@ print-config:
 	@echo "HOSTCC=$(HOSTCC)"
 	@echo "DTC=$(DTC)"
 	@echo "SD_MODE=$(SD_MODE)"
+	@echo "SD_CLOCK_FREQUENCY=$(SD_CLOCK_FREQUENCY)"
+	@echo "SD_BUS_WIDTH=$(SD_BUS_WIDTH)"
+	@echo "SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED)"
+	@echo "SD_CAP_UHS=$(SD_CAP_UHS)"
+	@echo "SD_UHS_SDR12=$(SD_UHS_SDR12)"
+	@echo "SD_UHS_SDR25=$(SD_UHS_SDR25)"
+	@echo "SD_UHS_SDR50=$(SD_UHS_SDR50)"
 	@echo "SD_EXPERIMENTAL=$(SD_EXPERIMENTAL)"
 	@echo "CCACHE=$(if $(CCACHE),$(CCACHE),disabled)"
 	@echo "ARCH_CFLAGS=$(ARCH_CFLAGS)"
@@ -844,9 +892,13 @@ $(FASTBOOT_STUB_BIN): $(FASTBOOT_STUB_OUT)
 $(DTS_MODE_STAMP): FORCE | $(BUILD)
 	$(Q)value=$$(printf '%s\n' \
 		"SD_MODE=$(SD_MODE)" \
+		"SD_CLOCK_FREQUENCY=$(SD_CLOCK_FREQUENCY)" \
 		"SD_BUS_WIDTH=$(SD_BUS_WIDTH)" \
 		"SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED)" \
 		"SD_CAP_UHS=$(SD_CAP_UHS)" \
+		"SD_UHS_SDR12=$(SD_UHS_SDR12)" \
+		"SD_UHS_SDR25=$(SD_UHS_SDR25)" \
+		"SD_UHS_SDR50=$(SD_UHS_SDR50)" \
 		"SD_NO_1V8=$(SD_NO_1V8)" \
 		"SD_EXPERIMENTAL=$(SD_EXPERIMENTAL)"); \
 	old=$$(cat $@ 2>/dev/null || true); \

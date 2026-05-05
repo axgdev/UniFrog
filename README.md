@@ -67,10 +67,14 @@ Dependency status and upgrades follow the policy declared beside each pin; use
 verification before handing off changes. If linker scripts or link libraries
 change, run `make clean && make verify`.
 
-SD builds default to the reliable 1-bit profile. Use `SD_MODE=wide` or
-`SD_MODE=uhs` only as diagnostics; those builds reduce launch-time log writes
-and retry storage recovery around frontend and ROM reads. Device logs rotate to
-`log-prev.txt` when `log.txt` grows past 1 MiB. The board DTS in
+SD builds default to the reliable 1-bit profile. Diagnostic profiles are
+`SD_MODE=hs1` for 1-bit high-speed, `wide50` for lower-clock 4-bit
+high-speed, `wide` for full 4-bit high-speed, and `uhs12`, `uhs25`, or `uhs`
+for increasing 1.8V UHS capability levels. These modes are experimental.
+Run Developer -> Storage test on-device to measure read-only SD behavior; it
+writes `/unifrog/storage-test-result.txt` and mirrors the result into the
+frontend report screen. Device logs rotate to `log-prev.txt` when `log.txt`
+grows past 1 MiB. The board DTS in
 `board/hc15xx/common/dts/sf2000_min.dts` is the single source used by both the
 firmware and SDK kernel rebuild.
 

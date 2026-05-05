@@ -9,6 +9,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
@@ -69,6 +70,8 @@
 #define JS2300_FRONTEND_MANIFEST JS2300_FRONTEND_APP_ROOT "/manifest.ini"
 #define JS2300_FRONTEND_SYSTEM_CHECK_REPORT \
    JS2300_FRONTEND_APP_ROOT "/system-check.txt"
+#define JS2300_FRONTEND_STORAGE_TEST_REPORT \
+   JS2300_FRONTEND_APP_ROOT "/storage-test-result.txt"
 #define JS2300_FRONTEND_ICON_CACHE 24u
 #define JS2300_FRONTEND_INDEX_MAX_DEPTH 12u
 #define JS2300_FRONTEND_INDEX_MAX_FILES 65535u
