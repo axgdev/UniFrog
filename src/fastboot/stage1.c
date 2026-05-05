@@ -98,6 +98,57 @@ static FIL file;
 extern uint8_t __bss_start;
 extern uint8_t __bss_end;
 
+static void write_reg8(uint32_t addr, uint8_t value)
+{
+	*(volatile uint8_t *)(uintptr_t)addr = value;
+}
+
+static uint8_t read_reg8(uint32_t addr)
+{
+	return *(volatile uint8_t *)(uintptr_t)addr;
+}
+
+static uint32_t read_reg32(uint32_t addr)
+{
+	return *(volatile uint32_t *)(uintptr_t)addr;
+}
+
+static void set_reg32_bits(uint32_t addr, uint32_t mask)
+{
+	*(volatile uint32_t *)(uintptr_t)addr = read_reg32(addr) | mask;
+}
+
+static void fastboot_backlight_off(void)
+{
+	/* Latch high before GPIO mux: R05 is an active-low backlight gate. */
+	set_reg32_bits(FASTBOOT_GPIOR_OUTPUT_REG, FASTBOOT_BACKLIGHT_R05_MASK);
+	set_reg32_bits(FASTBOOT_GPIOR_DIR_REG, FASTBOOT_BACKLIGHT_R05_MASK);
+	write_reg8(FASTBOOT_PINMUX_R05_ADDR, 0);
+}
+
+static int fastboot_backlight_state(void)
+{
+	uint32_t state = read_reg8(FASTBOOT_PINMUX_R05_ADDR);
+
+	if (read_reg32(FASTBOOT_GPIOR_DIR_REG) & FASTBOOT_BACKLIGHT_R05_MASK)
+		state |= 0x100u;
+	if (read_reg32(FASTBOOT_GPIOR_OUTPUT_REG) & FASTBOOT_BACKLIGHT_R05_MASK)
+		state |= 0x200u;
+	return (int)state;
+}
+
+static void fastboot_backlight_report(const char *tag)
+{
+	uint32_t state = (uint32_t)fastboot_backlight_state();
+
+	rom_printf("fastboot: backlight %s state=0x%03x mux=%u dir=%u out=%u\n",
+		tag ? tag : "",
+		(unsigned int)state,
+		(unsigned int)(state & 0xffu),
+		(unsigned int)((state >> 8) & 1u),
+		(unsigned int)((state >> 9) & 1u));
+}
+
 static void disable_interrupts(void)
 {
 	unsigned int status;
@@ -308,11 +359,16 @@ static int read_handoff_path(char *path, unsigned int path_size)
 	return 0;
 }
 
-static void jump_to_payload(void)
+static void jump_to_payload(const char *path)
 {
 	entry_fn entry = (entry_fn)ENTRY_ADDR;
+	int backlight_state;
 
-	rom_printf("fastboot: jump %p\n", ENTRY_ADDR);
+	fastboot_backlight_off();
+	backlight_state = fastboot_backlight_state();
+	write_diag(30, backlight_state, path);
+	rom_printf("fastboot: jump %p backlight_state=0x%03x\n",
+		ENTRY_ADDR, backlight_state);
 	entry();
 }
 
@@ -323,8 +379,10 @@ void stage1_main(void)
 
 	clear_bss();
 	disable_interrupts();
+	fastboot_backlight_off();
 	write_diag(1, 0, "");
 	rom_printf("\nfastboot: stage1 @ 0x%08x\n", FASTBOOT_STAGE1_ADDR);
+	fastboot_backlight_report("stage1_start");
 
 	rc = rom_f_mount(&fatfs, "", 1);
 	rom_printf("fastboot: mount %d\n", rc);
@@ -337,23 +395,23 @@ void stage1_main(void)
 		rom_printf("fastboot: handoff %s\n", handoff_path);
 		if (load_asd_staged(handoff_path) == 0) {
 			write_diag(4, 0, handoff_path);
-			jump_to_payload();
+			jump_to_payload(handoff_path);
 		}
 	} else {
 		write_diag(5, -1, "");
 	}
 
 	if (load_file("firmware/unifrog.bin", 0, RAW_LOAD_ADDR) == 0)
-		jump_to_payload();
+		jump_to_payload("firmware/unifrog.bin");
 	if (load_file("unifrog.bin", 0, RAW_LOAD_ADDR) == 0)
-		jump_to_payload();
+		jump_to_payload("unifrog.bin");
 
 	if (load_asd_staged("stock.asd") == 0)
-		jump_to_payload();
+		jump_to_payload("stock.asd");
 	if (load_asd_staged("bisrv_stock.asd") == 0)
-		jump_to_payload();
+		jump_to_payload("bisrv_stock.asd");
 	if (load_asd_staged("stock/bisrv.asd") == 0)
-		jump_to_payload();
+		jump_to_payload("stock/bisrv.asd");
 
 fail:
 	write_diag(99, -1, "");
