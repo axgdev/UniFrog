@@ -80,14 +80,15 @@ In-game saves are libretro memory blocks and should use
 `retro_get_memory_data()` plus `retro_get_memory_size()`.
 
 UniFrog auto-loads and auto-saves `RETRO_MEMORY_SAVE_RAM` and
-`RETRO_MEMORY_RTC` under `/media/mmcblk0/unifrog/saves`. These files are the
-normal in-game/battery saves (`.srm` and `.rtc`), not save states. The runtime
-loads them right after `retro_load_game()`, periodically hashes the exposed
-memory while the core runs, writes changed save memory in the background, and
-writes again on clean core exit.
+`RETRO_MEMORY_RTC` under `/media/mmcblk0/unifrog/saves`. The runtime loads
+them right after `retro_load_game()`, periodically hashes the exposed memory
+while the core runs, writes changed save memory in the background, and writes
+again on clean core exit.
 
-Do not add native pause-menu entries for save states or cheats. Those are UI
-features and should be exposed through JavaScript bindings when needed.
+The JavaScript quick menu uses native bindings for libretro save states.
+State slots are stored next to battery saves as `.state0` through `.state9`.
+Keep pause-menu UI in JavaScript; native code should expose only the fast
+operations needed by that UI.
 
 ## Compressed ROM loading
 

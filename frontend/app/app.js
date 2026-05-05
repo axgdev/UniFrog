@@ -59,9 +59,15 @@ var systemCheckDetail = "";
 var pendingDeveloperCore = "";
 var pendingDeveloperCorePath = "";
 var frontendReadyLogged = false;
+var deferImageLoads = true;
+var imageLoadsThisFrame = 0;
+var imageLoadPending = false;
+var imageAttemptPaths = [];
+var imageBadPaths = [];
 var motionStartMs = 0;
 var motionUntilMs = 0;
 var nextMarqueeMs = 0;
+var IMAGE_LOADS_PER_FRAME = 2;
 var NAV_STACK_MAX = 16;
 
 function makeNavState() {
@@ -997,12 +1003,41 @@ function drawIconFallback(x, y, active) {
   ]);
 }
 
+function imagePathSeen(paths, path) {
+  var i;
+  for (i = 0; i < paths.length; i++) {
+    if (paths[i] === path) return true;
+  }
+  return false;
+}
+
+function rememberImagePath(paths, path) {
+  if (!imagePathSeen(paths, path))
+    paths[paths.length] = path;
+}
+
 function drawItemIcon(item, x, y, active) {
   var path = iconForItem(item);
   var ret = -1;
+  var attempted;
 
-  if (path && JS2300.video.image)
+  if (path && imagePathSeen(imageBadPaths, path)) {
+    drawIconFallback(x, y, active);
+    return;
+  }
+  attempted = path && imagePathSeen(imageAttemptPaths, path);
+  if (path && JS2300.video.image && !deferImageLoads &&
+      (attempted || imageLoadsThisFrame < IMAGE_LOADS_PER_FRAME)) {
+    if (!attempted) {
+      rememberImagePath(imageAttemptPaths, path);
+      imageLoadsThisFrame++;
+    }
     ret = JS2300.video.image(path, x, y, 36, 36);
+    if (ret !== 0)
+      rememberImagePath(imageBadPaths, path);
+  } else if (path && JS2300.video.image && !deferImageLoads) {
+    imageLoadPending = true;
+  }
   if (ret !== 0)
     drawIconFallback(x, y, active);
 }
@@ -1441,6 +1476,8 @@ function drawLaunch(now) {
 }
 
 function draw(now) {
+  imageLoadsThisFrame = 0;
+  imageLoadPending = false;
   if (view === BROWSER) drawBrowser(now);
   else if (view === INPUT) drawInput(now);
   else if (view === ABOUT) drawAbout(now);
@@ -2003,6 +2040,12 @@ while (running) {
   if (dirty) {
     draw(now);
     dirty = false;
+    if (deferImageLoads) {
+      deferImageLoads = false;
+      dirty = true;
+    } else if (imageLoadPending) {
+      dirty = true;
+    }
     if (!frontendReadyLogged) {
       JS2300.log("frontend ready input_ms=" + String(now) + " view=" + String(view));
       frontendReadyLogged = true;

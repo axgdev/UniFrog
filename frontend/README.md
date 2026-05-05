@@ -48,6 +48,10 @@ A=7e 11 11 11 7e
 Icon keys such as `icon_gba`, `icon_snes`, `icon_media`, and `icon_settings`
 accept absolute paths or paths relative to `icon_root`.
 
+`quick-menu.js` is the in-game JavaScript pause menu opened with
+`SELECT+START`. Its shortcuts are `B` resume, `X` return to the frontend,
+`L` load state, and `R` save state.
+
 ## Development
 
 Normal UI edits do not use transpilation or bundling. JS2300 supports

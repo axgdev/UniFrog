@@ -2,14 +2,20 @@ var BTN_SELECT = 1 << 10;
 var BTN_START = 1 << 11;
 var quickSelected = 0;
 var quickStatus = JS2300.system.action("quick:status");
+var quickSlot = JS2300.system.action("quick:state-slot");
+var quickCpu = JS2300.system.action("quick:cpu");
 var quickToastText = "";
 var quickToastUntil = 0;
 var quickItems = [
   "Resume",
-  "Return to menu",
+  "Save state",
+  "Load state",
+  "Save slot",
+  "CPU",
   "Audio",
   "Display",
-  "Backlight"
+  "Backlight",
+  "Return to menu"
 ];
 
 function quickAudio() {
@@ -31,12 +37,21 @@ function quickDisplayLabel() {
   return "Fit";
 }
 
+function quickCpuLabel() {
+  if (quickCpu > 0) return String(quickCpu) + " MHz";
+  return "Default";
+}
+
 function quickDetail(index) {
-  if (index === 0) return "Continue playing";
-  if (index === 1) return "Close core";
-  if (index === 2) return quickAudio() ? "On" : "Off";
-  if (index === 3) return quickDisplayLabel();
-  if (index === 4) return String(quickBacklight()) + "%";
+  if (index === 0) return "B";
+  if (index === 1) return "R slot " + String(quickSlot);
+  if (index === 2) return "L slot " + String(quickSlot);
+  if (index === 3) return String(quickSlot);
+  if (index === 4) return quickCpuLabel();
+  if (index === 5) return quickAudio() ? "On" : "Off";
+  if (index === 6) return quickDisplayLabel();
+  if (index === 7) return String(quickBacklight()) + "%";
+  if (index === 8) return "X";
   return "";
 }
 
@@ -54,10 +69,10 @@ function quickDraw() {
   var rects = [
     [0, 0, 320, 240, 0x0841],
     [0, 0, 320, 28, 0x1084],
-    [0, 212, 320, 28, 0x1084],
-    [26, 44, 268, 132, 0x1084],
-    [26, 44, 268, 1, 0x39c7],
-    [26, 175, 268, 1, 0x39c7]
+    [0, 216, 320, 24, 0x1084],
+    [22, 35, 276, 166, 0x1084],
+    [22, 35, 276, 1, 0x39c7],
+    [22, 200, 276, 1, 0x39c7]
   ];
 
   JS2300.video.clear(0x0841);
@@ -66,24 +81,23 @@ function quickDraw() {
   JS2300.video.text(184, 10, "SELECT+START", 0xbdf7);
 
   for (i = 0; i < quickItems.length; i++) {
-    y = 54 + i * 23;
+    y = 44 + i * 17;
     if (i === quickSelected) {
       rowColor = 0xfda0;
       textColor = 0x0841;
       detailColor = 0x2945;
-      JS2300.video.rects([[34, y - 5, 252, 19, rowColor]]);
+      JS2300.video.rects([[32, y - 4, 256, 16, rowColor]]);
     } else {
       textColor = 0xffff;
       detailColor = 0xad55;
     }
-    JS2300.video.text(44, y, quickItems[i], textColor);
-    JS2300.video.text(198, y, quickDetail(i), detailColor);
+    JS2300.video.text(42, y, quickItems[i], textColor);
+    JS2300.video.text(202, y, quickDetail(i), detailColor);
   }
 
-  if (quickToastText && JS2300.now() < quickToastUntil) {
-    JS2300.video.text(22, 194, quickToastText, 0xfda0);
-  }
-  JS2300.video.text(14, 222, "A select  B resume  X menu", 0xbdf7);
+  if (quickToastText && JS2300.now() < quickToastUntil)
+    JS2300.video.text(22, 205, quickToastText, 0xfda0);
+  JS2300.video.text(12, 224, "L load  R save  X menu  B resume", 0xbdf7);
   JS2300.video.present();
 }
 
@@ -97,31 +111,96 @@ function quickReturnToMenu() {
   JS2300.exit("quick return");
 }
 
+function quickCycleSlot(delta) {
+  var ret;
+  if (delta < 0) ret = JS2300.system.action("quick:state-slot-prev");
+  else ret = JS2300.system.action("quick:state-slot-next");
+  if (ret >= 0) {
+    quickSlot = ret;
+    quickToast("Slot " + String(quickSlot));
+  } else {
+    quickToast("Slot failed");
+  }
+}
+
+function quickSaveState() {
+  var ret = JS2300.system.action("quick:save-state");
+  if (ret >= 0) {
+    quickSlot = ret;
+    quickToast("Saved slot " + String(quickSlot));
+  } else {
+    quickToast("Save failed");
+  }
+}
+
+function quickLoadState() {
+  var ret = JS2300.system.action("quick:load-state");
+  if (ret >= 0) {
+    quickSlot = ret;
+    quickToast("Loaded slot " + String(quickSlot));
+  } else {
+    quickToast("Load failed");
+  }
+}
+
+function quickCycleCpu(delta) {
+  var ret;
+  if (delta < 0) ret = JS2300.system.action("quick:cpu-prev");
+  else ret = JS2300.system.action("quick:cpu-next");
+  if (ret > 0) {
+    quickCpu = ret;
+    quickToast("CPU " + quickCpuLabel());
+  } else {
+    quickToast("CPU failed");
+  }
+}
+
 function quickActivate() {
   if (quickSelected === 0) {
     quickResume();
     return 1;
   }
   if (quickSelected === 1) {
-    quickReturnToMenu();
-    return 1;
+    quickSaveState();
+    return 0;
   }
   if (quickSelected === 2) {
+    quickLoadState();
+    return 0;
+  }
+  if (quickSelected === 3) {
+    quickCycleSlot(1);
+    return 0;
+  }
+  if (quickSelected === 4) {
+    quickCycleCpu(1);
+    return 0;
+  }
+  if (quickSelected === 5) {
     quickStatus = JS2300.system.action("quick:audio");
     quickToast(quickAudio() ? "Audio on" : "Audio off");
     return 0;
   }
-  if (quickSelected === 3) {
+  if (quickSelected === 6) {
     quickStatus = JS2300.system.action("quick:display");
     quickToast("Display " + quickDisplayLabel());
     return 0;
   }
-  if (quickSelected === 4) {
+  if (quickSelected === 7) {
     quickStatus = JS2300.system.action("quick:backlight");
     quickToast("Backlight " + String(quickBacklight()) + "%");
     return 0;
   }
+  if (quickSelected === 8) {
+    quickReturnToMenu();
+    return 1;
+  }
   return 0;
+}
+
+function quickAdjust(delta) {
+  if (quickSelected === 3) quickCycleSlot(delta);
+  else if (quickSelected === 4) quickCycleCpu(delta);
 }
 
 function quickWaitRelease() {
@@ -148,9 +227,13 @@ for (;;) {
     quickSelected++;
     if (quickSelected >= quickItems.length) quickSelected = 0;
   }
+  if (JS2300.input.pressed("LEFT")) quickAdjust(-1);
+  if (JS2300.input.pressed("RIGHT")) quickAdjust(1);
   if (JS2300.input.pressed("A") || JS2300.input.pressed("START")) {
     if (quickActivate()) break;
   }
+  if (JS2300.input.pressed("L")) quickLoadState();
+  if (JS2300.input.pressed("R")) quickSaveState();
   if (JS2300.input.pressed("B")) {
     quickResume();
     break;

@@ -78,6 +78,8 @@
 #define LIBRETRO_QUICK_JS_BYTECODE_BYTES (512u * 1024u)
 #define LIBRETRO_MEMORY_AUTOSAVE_FRAMES 600u
 #define LIBRETRO_MEMORY_FILE_MAX (16u * 1024u * 1024u)
+#define LIBRETRO_STATE_FILE_MAX (16u * 1024u * 1024u)
+#define LIBRETRO_STATE_SLOT_COUNT 10u
 #define LIBRETRO_ZIP_MAX_UNCOMPRESSED (64u * 1024u * 1024u)
 #define LIBRETRO_COMPRESSED_MAX_INPUT (64u * 1024u * 1024u)
 #define LIBRETRO_COMPRESSED_MAX_UNCOMPRESSED LIBRETRO_ZIP_MAX_UNCOMPRESSED
@@ -440,6 +442,9 @@ struct libretro_host {
    unsigned memory_autosaves;
    int fast_forward;
    int content_alloc_appmem;
+   const struct libretro_core_api *quick_core;
+   const char *quick_rom_path;
+   unsigned quick_state_slot;
    int quick_js_action;
    int quick_js_frame_open;
    unsigned quick_js_draw_buffer;
@@ -459,8 +464,11 @@ static void loading_draw(const char *title, const char *detail,
    unsigned percent);
 static uint64_t host_time_us(void);
 static unsigned host_elapsed_ms(uint64_t start_us, uint64_t end_us);
+static unsigned host_compute_frame_budget(unsigned fps, unsigned *scpu_mhz,
+   unsigned *count_hz, unsigned *count_hz_calibrated);
 static int exit_combo_down(void);
-static int quick_js_run(void);
+static int quick_js_run(const struct libretro_core_api *core,
+   const char *rom_path);
 static void host_pace_begin(void);
 
 static const struct quick_memory_file quick_memory_files[] = {
@@ -470,6 +478,10 @@ static const struct quick_memory_file quick_memory_files[] = {
 
 static const unsigned quick_backlight_levels[] = {
    1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
+};
+
+static const unsigned quick_scpu_mhz_options[] = {
+   198, 297, 396, 594, 702, 756, 810, 864, 918,
 };
 
 void unifrog_libretro_run_options_init(
@@ -752,6 +764,17 @@ static void quick_memory_path(const struct libretro_core_api *core,
       extension && extension[0] ? extension : "sav");
 }
 
+static void quick_state_path(const struct libretro_core_api *core,
+   const char *rom_path, unsigned slot, char *out, size_t out_size)
+{
+   char extension[16];
+
+   if (slot >= LIBRETRO_STATE_SLOT_COUNT)
+      slot = LIBRETRO_STATE_SLOT_COUNT - 1u;
+   snprintf(extension, sizeof(extension), "state%u", slot);
+   quick_memory_path(core, rom_path, extension, out, out_size);
+}
+
 static int quick_memory_data(const struct libretro_core_api *core,
    unsigned id, void **data, size_t *size)
 {
@@ -931,6 +954,158 @@ static void quick_autosave_memory_files(const struct libretro_core_api *core,
             host.memory_autosaves);
       }
    }
+}
+
+static int quick_save_state_file(void)
+{
+   const struct libretro_core_api *core = host.quick_core;
+   const char *rom_path = host.quick_rom_path;
+   unsigned slot = host.quick_state_slot;
+   char path[160];
+   FILE *file = NULL;
+   void *data = NULL;
+   size_t size;
+   int ok;
+   int ret = -1;
+
+   if (!core || !core->serialize_size || !core->serialize) {
+      snprintf(host.quick_status, sizeof(host.quick_status),
+         "STATE UNSUPPORTED");
+      return -1;
+   }
+
+   size = CORE_CALL0_RET(core, core->serialize_size);
+   if (size == 0 || size > LIBRETRO_STATE_FILE_MAX) {
+      snprintf(host.quick_status, sizeof(host.quick_status),
+         size == 0 ? "STATE UNSUPPORTED" : "STATE TOO LARGE");
+      printf("unifrog quick save_state unsupported core=%s size=%u slot=%u\n",
+         core->id, (unsigned)size, slot);
+      (void)unifrog_log_flush_force();
+      return -1;
+   }
+
+   data = malloc(size);
+   if (!data) {
+      snprintf(host.quick_status, sizeof(host.quick_status),
+         "STATE OUT OF MEMORY");
+      printf("unifrog quick save_state oom core=%s size=%u slot=%u\n",
+         core->id, (unsigned)size, slot);
+      (void)unifrog_log_flush_force();
+      return -1;
+   }
+
+   ok = CORE_CALL2_RET(core, core->serialize, data, size);
+   if (!ok) {
+      snprintf(host.quick_status, sizeof(host.quick_status),
+         "STATE SERIALIZE FAILED");
+      goto out;
+   }
+
+   (void)mkdir("/media/mmcblk0/unifrog", 0777);
+   (void)mkdir(LIBRETRO_SAVE_DIR, 0777);
+   quick_state_path(core, rom_path, slot, path, sizeof(path));
+   file = fopen(path, "wb");
+   if (!file) {
+      snprintf(host.quick_status, sizeof(host.quick_status),
+         "STATE OPEN FAILED");
+      goto out;
+   }
+
+   ok = fwrite(data, 1, size, file) == size && fflush(file) == 0;
+   fclose(file);
+   file = NULL;
+   snprintf(host.quick_status, sizeof(host.quick_status),
+      ok ? "STATE SAVED" : "STATE WRITE FAILED");
+   ret = ok ? (int)slot : -1;
+   printf("unifrog quick save_state core=%s path=%s size=%u slot=%u ok=%d\n",
+      core->id, path, (unsigned)size, slot, ok);
+
+out:
+   if (file)
+      fclose(file);
+   free(data);
+   (void)unifrog_log_flush_force();
+   return ret;
+}
+
+static int quick_load_state_file(void)
+{
+   const struct libretro_core_api *core = host.quick_core;
+   const char *rom_path = host.quick_rom_path;
+   unsigned slot = host.quick_state_slot;
+   char path[160];
+   FILE *file = NULL;
+   void *data = NULL;
+   size_t size;
+   size_t read_size;
+   int extra;
+   int ok;
+   int ret = -1;
+
+   if (!core || !core->serialize_size || !core->unserialize) {
+      snprintf(host.quick_status, sizeof(host.quick_status),
+         "STATE UNSUPPORTED");
+      return -1;
+   }
+
+   size = CORE_CALL0_RET(core, core->serialize_size);
+   if (size == 0 || size > LIBRETRO_STATE_FILE_MAX) {
+      snprintf(host.quick_status, sizeof(host.quick_status),
+         size == 0 ? "STATE UNSUPPORTED" : "STATE TOO LARGE");
+      printf("unifrog quick load_state unsupported core=%s size=%u slot=%u\n",
+         core->id, (unsigned)size, slot);
+      (void)unifrog_log_flush_force();
+      return -1;
+   }
+
+   data = malloc(size);
+   if (!data) {
+      snprintf(host.quick_status, sizeof(host.quick_status),
+         "STATE OUT OF MEMORY");
+      printf("unifrog quick load_state oom core=%s size=%u slot=%u\n",
+         core->id, (unsigned)size, slot);
+      (void)unifrog_log_flush_force();
+      return -1;
+   }
+
+   quick_state_path(core, rom_path, slot, path, sizeof(path));
+   file = fopen(path, "rb");
+   if (!file) {
+      snprintf(host.quick_status, sizeof(host.quick_status),
+         "NO STATE FILE");
+      goto out;
+   }
+
+   read_size = fread(data, 1, size, file);
+   extra = fgetc(file);
+   ok = read_size == size && extra == EOF && ferror(file) == 0;
+   fclose(file);
+   file = NULL;
+   if (!ok) {
+      snprintf(host.quick_status, sizeof(host.quick_status),
+         "STATE SIZE MISMATCH");
+      printf("unifrog quick load_state read_failed core=%s path=%s size=%u read=%u slot=%u extra=%d\n",
+         core->id, path, (unsigned)size, (unsigned)read_size, slot, extra);
+      goto out;
+   }
+
+   ok = CORE_CALL2_RET(core, core->unserialize, data, size);
+   snprintf(host.quick_status, sizeof(host.quick_status),
+      ok ? "STATE LOADED" : "STATE LOAD FAILED");
+   if (ok) {
+      for (unsigned i = 0; i < ARRAY_SIZE(quick_memory_files); i++)
+         (void)quick_note_memory_hash(core, quick_memory_files[i].id);
+      ret = (int)slot;
+   }
+   printf("unifrog quick load_state core=%s path=%s size=%u slot=%u ok=%d\n",
+      core->id, path, (unsigned)size, slot, ok);
+
+out:
+   if (file)
+      fclose(file);
+   free(data);
+   (void)unifrog_log_flush_force();
+   return ret;
 }
 
 static void libretro_watchdog_task(void *arg)
@@ -1764,6 +1939,81 @@ static int quick_js_cycle_backlight(void)
    return quick_js_status_value();
 }
 
+static int quick_js_state_slot(void)
+{
+   if (host.quick_state_slot >= LIBRETRO_STATE_SLOT_COUNT)
+      host.quick_state_slot = 0;
+   return (int)host.quick_state_slot;
+}
+
+static int quick_js_cycle_state_slot(int delta)
+{
+   if (host.quick_state_slot >= LIBRETRO_STATE_SLOT_COUNT)
+      host.quick_state_slot = 0;
+   if (delta < 0) {
+      if (host.quick_state_slot == 0)
+         host.quick_state_slot = LIBRETRO_STATE_SLOT_COUNT - 1u;
+      else
+         host.quick_state_slot--;
+   } else {
+      host.quick_state_slot++;
+      if (host.quick_state_slot >= LIBRETRO_STATE_SLOT_COUNT)
+         host.quick_state_slot = 0;
+   }
+   printf("unifrog quick_js state_slot=%u\n", host.quick_state_slot);
+   return (int)host.quick_state_slot;
+}
+
+static unsigned quick_js_current_scpu_mhz(void)
+{
+   if (host.scpu_target_mhz)
+      return host.scpu_target_mhz;
+   return unifrog_scpu_current_mhz();
+}
+
+static int quick_js_cycle_scpu(int delta)
+{
+   unsigned current = quick_js_current_scpu_mhz();
+   unsigned next = delta < 0 ?
+      quick_scpu_mhz_options[ARRAY_SIZE(quick_scpu_mhz_options) - 1u] :
+      quick_scpu_mhz_options[0];
+
+   if (delta < 0) {
+      for (unsigned i = ARRAY_SIZE(quick_scpu_mhz_options); i > 0; i--) {
+         if (quick_scpu_mhz_options[i - 1u] < current) {
+            next = quick_scpu_mhz_options[i - 1u];
+            break;
+         }
+      }
+   } else {
+      for (unsigned i = 0; i < ARRAY_SIZE(quick_scpu_mhz_options); i++) {
+         if (quick_scpu_mhz_options[i] > current) {
+            next = quick_scpu_mhz_options[i];
+            break;
+         }
+      }
+   }
+
+   if (!host.scpu_restore_valid)
+      host.scpu_restore_valid =
+         unifrog_scpu_capture(&host.scpu_restore) == 0 &&
+         host.scpu_restore.valid;
+   host.scpu_apply_ret = unifrog_scpu_apply_mhz(next);
+   if (host.scpu_apply_ret == 0) {
+      host.scpu_target_mhz = next;
+      host.options.scpu_mhz = next;
+      if (host.fps)
+         host.frame_budget_count = host_compute_frame_budget(host.fps,
+            &host.scpu_mhz_est, &host.count_hz_est,
+            &host.count_hz_calibrated);
+   }
+   printf("unifrog quick_js scpu current=%u target=%u ret=%d now=%u restore_valid=%d budget=%u\n",
+      current, next, host.scpu_apply_ret, unifrog_scpu_current_mhz(),
+      host.scpu_restore_valid, host.frame_budget_count);
+   (void)unifrog_log_flush_force();
+   return host.scpu_apply_ret == 0 ? (int)next : -1;
+}
+
 static struct unifrog_surface quick_js_surface(void)
 {
    return unifrog_fb_surface_for_buffer(&host.presenter.fb,
@@ -1951,6 +2201,22 @@ static int quick_js_action(void *opaque, const char *id)
       return quick_js_cycle_display();
    if (strcmp(id, "quick:backlight") == 0)
       return quick_js_cycle_backlight();
+   if (strcmp(id, "quick:state-slot") == 0)
+      return quick_js_state_slot();
+   if (strcmp(id, "quick:state-slot-next") == 0)
+      return quick_js_cycle_state_slot(1);
+   if (strcmp(id, "quick:state-slot-prev") == 0)
+      return quick_js_cycle_state_slot(-1);
+   if (strcmp(id, "quick:save-state") == 0)
+      return quick_save_state_file();
+   if (strcmp(id, "quick:load-state") == 0)
+      return quick_load_state_file();
+   if (strcmp(id, "quick:cpu") == 0)
+      return (int)quick_js_current_scpu_mhz();
+   if (strcmp(id, "quick:cpu-next") == 0)
+      return quick_js_cycle_scpu(1);
+   if (strcmp(id, "quick:cpu-prev") == 0)
+      return quick_js_cycle_scpu(-1);
    return -1;
 }
 
@@ -1979,7 +2245,8 @@ static void quick_js_configure_host(struct js2300_host *js_host)
    js_host->backlight = quick_js_backlight;
 }
 
-static int quick_js_run(void)
+static int quick_js_run(const struct libretro_core_api *core,
+   const char *rom_path)
 {
    struct js2300_config config;
    struct js2300_host js_host;
@@ -1995,6 +2262,10 @@ static int quick_js_run(void)
    host.audio_gate_open = 0;
    host.quick_js_action = QUICK_JS_ACTION_RESUME;
    host.quick_js_frame_open = 0;
+   host.quick_core = core;
+   host.quick_rom_path = rom_path;
+   if (host.quick_state_slot >= LIBRETRO_STATE_SLOT_COUNT)
+      host.quick_state_slot = 0;
 
    if (js2300_config_init(&config) != 0)
       return 1;
@@ -5068,7 +5339,7 @@ static int run_core(const struct libretro_core_api *core, const char *path,
          printf("unifrog libretro quick_js core=%s frame=%u\n",
             core->id, host.run_frames);
          (void)unifrog_log_flush_force();
-         if (quick_js_run()) {
+         if (quick_js_run(core, path)) {
             printf("unifrog libretro return_to_js core=%s frame=%u\n",
                core->id, host.run_frames);
             (void)unifrog_log_flush_force();
