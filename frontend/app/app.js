@@ -9,6 +9,10 @@ var config = {
   av: 0,
   autoIndex: 0,
   romRoots: "/ROMS|/",
+  language: "en",
+  font: "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf",
+  fontSize: 12,
+  fastSd: "boot",
   lastPath: "",
   lastCore: ""
 };
@@ -62,6 +66,7 @@ var scriptItems = [];
 var systemCheckRows = [];
 var systemCheckTitle = "System Check";
 var systemCheckDetail = "";
+var settingsTitle = "Settings";
 var pendingDeveloperCore = "";
 var pendingDeveloperCorePath = "";
 var frontendReadyLogged = false;
@@ -119,6 +124,7 @@ JS2300.log("unifrog frontend start");
 loadSettings();
 frontendPhase("settings_loaded");
 loadThemeFile();
+applyConfiguredFont();
 frontendPhase("theme_loaded");
 if (config.autoIndex) {
   indexLoadPending = false;

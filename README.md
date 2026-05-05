@@ -97,10 +97,11 @@ extensions. Common retro-handheld folder aliases such as `gba`, `gb`, `gbc`,
 case-insensitively. Edit `/unifrog/user/frontend.opt` on the SD card to change
 ROM roots without modifying packaged defaults.
 
-SD builds boot with the reliable 1-bit profile. Frontend startup reads and ROM
-loads use a guarded `SD_READ_MODE=uhs25` read window by default, then restore
-the boot profile before normal UI writes or core init; use `SD_READ_MODE=boot`
-to disable it. In the safe build, Developer -> Storage test runs a quick
+SD builds boot with the reliable 1-bit profile. Frontend startup stays on that
+boot profile by default. Fast SD read windows are reserved for ROM and native
+module loading, and the frontend `fast_sd` option lets users choose `boot`,
+`hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, or `uhs` for their own card. In the
+safe build, Developer -> Storage test runs a quick
 guarded runtime sweep: it buffers logs, shows
 progress on screen, prefers `/ROMS/test.md` when present, verifies a safe
 remount first, switches profiles through the SD bus suspend/resume hooks, tries

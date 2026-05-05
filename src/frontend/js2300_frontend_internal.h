@@ -87,6 +87,7 @@ struct js2300_frontend {
    struct js2300_cached_icon icon_cache[JS2300_FRONTEND_ICON_CACHE];
    char action[32];
    char path[JS2300_FRONTEND_MAX_PATH];
+   char runtime_read_profile[16];
    int video_preset;
    int video_disable_audio;
    unsigned draw_buffer;

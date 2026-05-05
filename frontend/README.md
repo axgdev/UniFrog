@@ -59,10 +59,11 @@ rom_roots=/ROMS|/
 
 `/unifrog/defaults/frontend.opt` provides shipped defaults.
 `/unifrog/user/frontend.opt` overrides those defaults. Runtime `settings.ini`
-can still hold the current value after the on-device settings screen changes
-it. Frontend settings that have `.opt` keys are also written back to
-`/unifrog/user/frontend.opt`, so the settings screen is the first-pass on-device
-editor for the shipped frontend options.
+can still hold recent session state such as the last launched game, but every
+user-facing frontend setting is also read from and written back to
+`/unifrog/user/frontend.opt`. The on-device settings menu is split into
+Display, Launch, Library, System, and Tools sections so the `.opt` file can be
+edited either on device or on a computer.
 
 ROM discovery is based on folder structure, not extension guessing. The
 default `rom_roots=/ROMS|/` scans system folders directly under `/ROMS` and
@@ -105,6 +106,12 @@ default theme loads the Latin/Greek/Cyrillic Noto Sans file only to keep normal
 startup memory low. Users and language-specific themes can add Arabic,
 Devanagari, Bengali, Tamil, Telugu, or CJK fallback files when they need those
 scripts.
+
+System icons live under `/unifrog/themes/system-icons/icons`. The packaged
+library subdirectory contains optimized cropped console images from the source
+sheets under `assets/`, including systems UniFrog does not launch yet. The
+currently supported systems map to cropped art from that library and can still
+be overridden by changing the `icon_*` keys in a theme.
 
 `quick-menu.js` is the in-game JavaScript pause menu opened with
 `SELECT+START`. Its shortcuts are `B` resume, `X` return to the frontend,

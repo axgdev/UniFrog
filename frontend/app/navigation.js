@@ -17,7 +17,9 @@ function makeNavState() {
     scriptItems: scriptItems,
     systemCheckRows: systemCheckRows,
     systemCheckTitle: systemCheckTitle,
-    systemCheckDetail: systemCheckDetail
+    systemCheckDetail: systemCheckDetail,
+    settingRows: settingRows,
+    settingsTitle: settingsTitle
   };
 }
 
@@ -41,6 +43,8 @@ function restoreNavState(state) {
   systemCheckRows = state.systemCheckRows ? state.systemCheckRows : [];
   systemCheckTitle = state.systemCheckTitle ? state.systemCheckTitle : "System Check";
   systemCheckDetail = state.systemCheckDetail ? state.systemCheckDetail : "";
+  settingRows = state.settingRows ? state.settingRows : settingRootRows;
+  settingsTitle = state.settingsTitle ? state.settingsTitle : "Settings";
   startMotion(JS2300.now());
 }
 

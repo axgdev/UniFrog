@@ -81,6 +81,9 @@ static void parse_run_option_list(struct unifrog_libretro_run_options *options,
       } else if (action_key_equals(key_begin, key_end, "corefile")) {
          action_copy_text(options->core_path, sizeof(options->core_path),
             value_begin, value_end);
+      } else if (action_key_equals(key_begin, key_end, "fastsd")) {
+         action_copy_text(options->sd_read_profile,
+            sizeof(options->sd_read_profile), value_begin, value_end);
       } else if (action_parse_int(value_begin, value_end, &value) == 0) {
          if (action_key_equals(key_begin, key_end, "audio"))
             options->audio_enabled = value ? 1 : 0;
@@ -556,6 +559,56 @@ int host_action(void *opaque, const char *id)
       printf("js2300 action video preset=%d no_audio=%d path=%s\n",
          frontend->video_preset, frontend->video_disable_audio,
          frontend->path);
+      return 0;
+   }
+   if (strncmp(id, "video+", 6) == 0) {
+      const char *options_begin = id + 6;
+      const char *options_end = strchr(options_begin, ':');
+      const char *path;
+
+      if (!options_end)
+         return -1;
+      path = options_end + 1;
+      if (!is_video_file(path))
+         return -1;
+      unifrog_text_copy(frontend->action, sizeof(frontend->action), "video");
+      unifrog_text_copy(frontend->path, sizeof(frontend->path), path);
+      frontend->video_preset = 0;
+      frontend->video_disable_audio = 0;
+      frontend->runtime_read_profile[0] = '\0';
+      while (options_begin < options_end) {
+         const char *key = options_begin;
+         const char *eq;
+         const char *value;
+
+         while (options_begin < options_end && *options_begin != ',' &&
+             *options_begin != '=')
+            options_begin++;
+         eq = options_begin;
+         if (options_begin < options_end && *options_begin == '=')
+            options_begin++;
+         value = options_begin;
+         while (options_begin < options_end && *options_begin != ',')
+            options_begin++;
+         if (action_key_equals(key, eq, "fastsd"))
+            action_copy_text(frontend->runtime_read_profile,
+               sizeof(frontend->runtime_read_profile), value, options_begin);
+         else if (action_key_equals(key, eq, "preset")) {
+            int parsed = 0;
+
+            if (action_parse_int(value, options_begin, &parsed) == 0)
+               frontend->video_preset = parsed;
+         } else if (action_key_equals(key, eq, "noaudio")) {
+            int parsed = 0;
+
+            if (action_parse_int(value, options_begin, &parsed) == 0)
+               frontend->video_disable_audio = parsed ? 1 : 0;
+         }
+         if (options_begin < options_end && *options_begin == ',')
+            options_begin++;
+      }
+      printf("js2300 action video fastsd=%s path=%s\n",
+         frontend->runtime_read_profile, frontend->path);
       return 0;
    }
    if (strncmp(id, "firmware:", 9) == 0) {

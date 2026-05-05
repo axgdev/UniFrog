@@ -112,6 +112,7 @@ static struct ttf_loaded_font ttf_fonts[TTF_MAX_FONTS];
 static unsigned ttf_font_count;
 static struct ttf_cached_glyph ttf_cache[TTF_GLYPH_CACHE];
 static uint32_t ttf_cache_age;
+static float ttf_pixel_height = TTF_PIXEL_HEIGHT;
 static int ttf_active;
 static int ttf_baseline_offset;
 
@@ -367,7 +368,7 @@ static void ttf_draw_text(const struct unifrog_surface *surface,
 
       if (cp == '\n') {
          xpos = x;
-         baseline += (int)(TTF_PIXEL_HEIGHT + 3.0f);
+         baseline += (int)(ttf_pixel_height + 3.0f);
          text = next;
          continue;
       }
@@ -582,13 +583,13 @@ static int ttf_add_font_file(const char *path)
    }
    font->data = data;
    font->size = size;
-   font->scale = stbtt_ScaleForPixelHeight(&font->info, TTF_PIXEL_HEIGHT);
+   font->scale = stbtt_ScaleForPixelHeight(&font->info, ttf_pixel_height);
    stbtt_GetFontVMetrics(&font->info, &font->ascent, &font->descent,
       &font->line_gap);
    if (ttf_font_count == 0) {
       ttf_baseline_offset = (int)((float)font->ascent * font->scale + 0.5f);
       if (ttf_baseline_offset < 1)
-         ttf_baseline_offset = (int)TTF_PIXEL_HEIGHT;
+         ttf_baseline_offset = (int)ttf_pixel_height;
    }
    ttf_font_count++;
    return 0;
@@ -604,6 +605,7 @@ static int load_ttf_file(const char *path)
 
    unifrog_text_copy(paths, sizeof(paths), path);
    ttf_clear();
+   ttf_pixel_height = TTF_PIXEL_HEIGHT;
    len = strlen(paths);
    for (size_t i = 0; i <= len; i++) {
       if (paths[i] == ';' || paths[i] == '|' || paths[i] == '\0') {
@@ -616,7 +618,12 @@ static int load_ttf_file(const char *path)
              paths[end - 1u] == '\t'))
             end--;
          count = end - start;
-         if (count > 0 && count < sizeof(part)) {
+         if (count > 5 && memcmp(paths + start, "size=", 5) == 0) {
+            int size = atoi(paths + start + 5);
+
+            if (size >= 8 && size <= 20)
+               ttf_pixel_height = (float)size;
+         } else if (count > 0 && count < sizeof(part)) {
             memcpy(part, paths + start, count);
             part[count] = '\0';
             if (ttf_add_font_file(part) == 0)

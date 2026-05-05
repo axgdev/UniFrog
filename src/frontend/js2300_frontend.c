@@ -134,17 +134,21 @@ int frontend_restore_boot_read_window(struct js2300_frontend *frontend,
 int frontend_start_runtime_read_window(struct js2300_frontend *frontend,
    const char *tag)
 {
+   const char *profile = frontend && frontend->runtime_read_profile[0] ?
+      frontend->runtime_read_profile : UNIFROG_SD_READ_MODE;
    char detail[160];
    char restore_detail[160];
    int ret;
    int restore_ret;
 
    if (!frontend || frontend->boot_read_active ||
-       !frontend_boot_read_profile_enabled())
+       !profile || !profile[0] || strcmp(profile, "boot") == 0 ||
+       strcmp(profile, "safe") == 0 || strcmp(profile, "off") == 0 ||
+       strcmp(profile, "none") == 0 || strcmp(profile, UNIFROG_SD_MODE) == 0)
       return 0;
    if (!unifrog_platform_sd_runtime_supported()) {
       printf("unifrog frontend runtime_read skip profile=%s tag=%s reason=no_runtime\n",
-         UNIFROG_SD_READ_MODE, tag ? tag : "");
+         profile, tag ? tag : "");
       return 0;
    }
 
@@ -156,12 +160,12 @@ int frontend_start_runtime_read_window(struct js2300_frontend *frontend,
    detail[0] = '\0';
    restore_detail[0] = '\0';
    printf("unifrog frontend runtime_read begin profile=%s boot=%s tag=%s pending=%u\n",
-      UNIFROG_SD_READ_MODE, UNIFROG_SD_MODE, tag ? tag : "",
+      profile, UNIFROG_SD_MODE, tag ? tag : "",
       (unsigned)unifrog_log_pending());
-   ret = unifrog_platform_sd_apply_profile(UNIFROG_SD_READ_MODE, 4, 100,
+   ret = unifrog_platform_sd_apply_profile(profile, 4, 100,
       detail, sizeof(detail));
    printf("unifrog frontend runtime_read switch ret=%d profile=%s detail=%s\n",
-      ret, UNIFROG_SD_READ_MODE, detail);
+      ret, profile, detail);
    if (ret == 0) {
       frontend->boot_read_active = 1;
       return 1;

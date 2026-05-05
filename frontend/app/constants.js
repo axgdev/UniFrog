@@ -82,6 +82,40 @@ var avOutputOptions = [
   { label: "NTSC", value: 1 },
   { label: "PAL", value: 2 }
 ];
+var languageOptions = [
+  { label: "English", value: "en" },
+  { label: "Español", value: "es" },
+  { label: "Français", value: "fr" },
+  { label: "Deutsch", value: "de" },
+  { label: "Português", value: "pt" },
+  { label: "中文", value: "zh-Hans" },
+  { label: "日本語", value: "ja" },
+  { label: "한국어", value: "ko" },
+  { label: "العربية", value: "ar" }
+];
+var fontOptions = [
+  { label: "Noto Sans", value: "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf" },
+  { label: "Arabic", value: "/media/mmcblk0/unifrog/fonts/NotoSansArabic-Regular.ttf" },
+  { label: "Devanagari", value: "/media/mmcblk0/unifrog/fonts/NotoSansDevanagari-Regular.ttf" },
+  { label: "Bengali", value: "/media/mmcblk0/unifrog/fonts/NotoSansBengali-Regular.ttf" },
+  { label: "Tamil", value: "/media/mmcblk0/unifrog/fonts/NotoSansTamil-Regular.ttf" },
+  { label: "Telugu", value: "/media/mmcblk0/unifrog/fonts/NotoSansTelugu-Regular.ttf" },
+  { label: "CJK", value: "/media/mmcblk0/unifrog/fonts/NotoSansCJKsc-Regular.otf" }
+];
+var fontSizeOptions = [
+  { label: "10", value: 10 }, { label: "11", value: 11 },
+  { label: "12", value: 12 }, { label: "13", value: 13 },
+  { label: "14", value: 14 }, { label: "15", value: 15 }
+];
+var fastSdOptions = [
+  { label: "Boot", value: "boot" },
+  { label: "hs1", value: "hs1" },
+  { label: "wide50", value: "wide50" },
+  { label: "wide", value: "wide" },
+  { label: "uhs12", value: "uhs12" },
+  { label: "uhs25", value: "uhs25" },
+  { label: "uhs", value: "uhs" }
+];
 var mediaSuffixes = [
   ".mp4", ".mov", ".mkv", ".avi", ".ts", ".m2ts", ".mpg", ".mpeg",
   ".h264", ".264", ".mp3", ".wav", ".flac", ".ogg", ".opus", ".aac",
@@ -100,20 +134,43 @@ var videoModes = [
 var launchRows = [
   "Audio", "Gain", "CPU", "GE", "Backlight", "Frameskip", "Display", "Core", "Start"
 ];
-var settingRows = [
+var settingRootRows = [
+  { id: "settings_display", label: "Display" },
+  { id: "settings_launch", label: "Launch" },
+  { id: "settings_library", label: "Library" },
+  { id: "settings_system", label: "System" },
+  { id: "settings_tools", label: "Tools" }
+];
+var settingDisplayRows = [
   { id: "brightness", label: "Backlight" },
+  { id: "language", label: "Language" },
+  { id: "font", label: "Font" },
+  { id: "font_size", label: "Font size" },
+  { id: "av", label: "AV output" }
+];
+var settingLaunchRows = [
   { id: "audio", label: "Audio" },
   { id: "gain", label: "Gain" },
   { id: "cpu", label: "CPU" },
   { id: "ge", label: "GE" },
-  { id: "av", label: "AV output" },
   { id: "frameskip", label: "Frameskip" },
+  { id: "fast_sd", label: "Fast SD" }
+];
+var settingLibraryRows = [
   { id: "auto_index", label: "Auto index boot" },
   { id: "rom_roots", label: "ROM roots" },
-  { id: "index", label: "Index library" },
+  { id: "index", label: "Index library" }
+];
+var settingSystemRows = [
   { id: "system_check", label: "System check" },
   { id: "input", label: "Input monitor" },
+  { id: "about", label: "About" },
+  { id: "reboot", label: "Reboot" }
+];
+var settingToolRows = [
   { id: "developer", label: "Developer tools" },
+  { id: "storage_mode", label: "Storage mode test" },
   { id: "reboot", label: "Reboot" },
   { id: "about", label: "About" }
 ];
+var settingRows = settingRootRows;

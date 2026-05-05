@@ -26,6 +26,7 @@ struct unifrog_libretro_run_options {
    int backlight_level;
    int frameskip;
    int display_mode;
+   char sd_read_profile[16];
    char core_id[24];
    char core_path[256];
 };

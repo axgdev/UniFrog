@@ -251,6 +251,8 @@ function openHomeItem(now) {
   else if (id === "media") openMediaIndex(now);
   else if (id === "settings") {
     pushNav();
+    settingRows = settingRootRows;
+    settingsTitle = "Settings";
     selected = 0;
     scroll = 0;
     view = SETTINGS;
@@ -298,7 +300,8 @@ function runLaunchGame(now) {
   var options = "audio=" + String(audio) + ",gain=" + String(gain) +
     ",cpu=" + String(cpu) + ",ge=" + String(ge) +
     ",backlight=" + String(backlight) + ",fs=" + String(fs) +
-    ",display=" + String(display) + ",core=" + core;
+    ",display=" + String(display) + ",fastsd=" + config.fastSd +
+    ",core=" + core;
   config.audio = audio;
   config.gain = gain;
   config.cpu = cpu;
@@ -391,8 +394,10 @@ function cycleLaunch(delta) {
 
 function changeSetting(delta, now) {
   var id = settingRows[selected].id;
+  if (startsWithText(id, "settings_")) return;
   if (id === "index" || id === "system_check" || id === "input" ||
-      id === "developer" || id === "reboot" || id === "about") {
+      id === "developer" || id === "reboot" || id === "about" ||
+      id === "storage_mode") {
     return;
   } else if (id === "brightness") {
     config.brightness =
@@ -428,6 +433,26 @@ function changeSetting(delta, now) {
     config.autoIndex = config.autoIndex ? 0 : 1;
   } else if (id === "rom_roots") {
     config.romRoots = config.romRoots === "/ROMS|/" ? "/ROMS" : "/ROMS|/";
+  } else if (id === "language") {
+    config.language =
+      languageOptions[(optionIndex(languageOptions, config.language, 0) +
+      languageOptions.length + delta) % languageOptions.length].value;
+  } else if (id === "font") {
+    config.font =
+      fontOptions[(optionIndex(fontOptions, config.font, 0) +
+      fontOptions.length + delta) % fontOptions.length].value;
+    if (JS2300.video.font)
+      JS2300.video.font(config.font + ";size=" + String(config.fontSize));
+  } else if (id === "font_size") {
+    config.fontSize =
+      fontSizeOptions[(optionIndex(fontSizeOptions, config.fontSize, 2) +
+      fontSizeOptions.length + delta) % fontSizeOptions.length].value;
+    if (JS2300.video.font)
+      JS2300.video.font(config.font + ";size=" + String(config.fontSize));
+  } else if (id === "fast_sd") {
+    config.fastSd =
+      fastSdOptions[(optionIndex(fastSdOptions, config.fastSd, 0) +
+      fastSdOptions.length + delta) % fastSdOptions.length].value;
   }
   writeSettings();
   dirty = true;
@@ -435,7 +460,37 @@ function changeSetting(delta, now) {
 
 function activateSetting(now) {
   var id = settingRows[selected].id;
-  if (id === "index") {
+  if (id === "settings_display") {
+    pushNav();
+    settingRows = settingDisplayRows;
+    settingsTitle = "Display";
+    selected = 0;
+    scroll = 0;
+  } else if (id === "settings_launch") {
+    pushNav();
+    settingRows = settingLaunchRows;
+    settingsTitle = "Launch";
+    selected = 0;
+    scroll = 0;
+  } else if (id === "settings_library") {
+    pushNav();
+    settingRows = settingLibraryRows;
+    settingsTitle = "Library";
+    selected = 0;
+    scroll = 0;
+  } else if (id === "settings_system") {
+    pushNav();
+    settingRows = settingSystemRows;
+    settingsTitle = "System";
+    selected = 0;
+    scroll = 0;
+  } else if (id === "settings_tools") {
+    pushNav();
+    settingRows = settingToolRows;
+    settingsTitle = "Tools";
+    selected = 0;
+    scroll = 0;
+  } else if (id === "index") {
     indexGames(now);
   } else if (id === "system_check") {
     runAction("developer:system_check", now);
@@ -451,6 +506,12 @@ function activateSetting(now) {
     showToast("Developer", now);
   } else if (id === "reboot") {
     runAction("reboot", now);
+  } else if (id === "storage_mode") {
+    pushNav();
+    selected = 0;
+    scroll = 0;
+    view = STORAGE_MODE;
+    showToast("Storage mode", now);
   } else if (id === "about") {
     pushNav();
     view = ABOUT;
@@ -486,8 +547,10 @@ function handleInput(input, now) {
     if (pressed & BTN_RIGHT) move(8, entries.length);
     if (pressed & BTN_A) openEntry(now);
   } else if (view === SYSTEMS) {
-    if (repeated(input, BTN_UP, now, 360, 150)) move(-1, systems.length);
-    else if (repeated(input, BTN_DOWN, now, 360, 150)) move(1, systems.length);
+    if (repeated(input, BTN_UP, now, 360, 150)) move(-2, systems.length);
+    else if (repeated(input, BTN_DOWN, now, 360, 150)) move(2, systems.length);
+    else if (repeated(input, BTN_LEFT, now, 360, 150)) move(-1, systems.length);
+    else if (repeated(input, BTN_RIGHT, now, 360, 150)) move(1, systems.length);
     if (pressed & BTN_A) openSystemList(now);
   } else if (view === INDEX_LIST) {
     if (repeated(input, BTN_UP, now, 360, 150)) move(-1, currentItems.length);
@@ -516,8 +579,9 @@ function handleInput(input, now) {
     if (repeated(input, BTN_UP, now, 360, 150)) move(-1, videoModes.length);
     else if (repeated(input, BTN_DOWN, now, 360, 150)) move(1, videoModes.length);
     if (pressed & BTN_A)
-      runAction("video:" + (videoModes[selected].noAudio ? "n:" : "") +
-        String(videoModes[selected].id) + ":" + pendingVideoPath, now);
+      runAction("video+fastsd=" + config.fastSd + ",preset=" +
+        String(videoModes[selected].id) + ",noaudio=" +
+        String(videoModes[selected].noAudio ? 1 : 0) + ":" + pendingVideoPath, now);
   } else if (view === SETTINGS) {
     if (repeated(input, BTN_UP, now, 360, 150)) move(-1, settingRows.length);
     else if (repeated(input, BTN_DOWN, now, 360, 150)) move(1, settingRows.length);

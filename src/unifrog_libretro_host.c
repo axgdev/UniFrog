@@ -544,9 +544,16 @@ static void libretro_storage_quiet_end(const char *tag, int flush)
       (void)unifrog_log_flush();
 }
 
-static int libretro_read_profile_enabled(void)
+static const char *libretro_read_profile(
+   const struct unifrog_libretro_run_options *options)
 {
-   const char *profile = UNIFROG_SD_READ_MODE;
+   if (options && options->sd_read_profile[0])
+      return options->sd_read_profile;
+   return UNIFROG_SD_READ_MODE;
+}
+
+static int libretro_read_profile_enabled(const char *profile)
+{
 
    if (!profile || !profile[0])
       return 0;
@@ -558,18 +565,18 @@ static int libretro_read_profile_enabled(void)
    return 1;
 }
 
-static int libretro_begin_read_profile(const char *tag)
+static int libretro_begin_read_profile(const char *profile, const char *tag)
 {
    char detail[160];
    char restore_detail[160];
    int ret;
    int restore_ret;
 
-   if (!libretro_read_profile_enabled())
+   if (!libretro_read_profile_enabled(profile))
       return 0;
    if (!unifrog_platform_sd_runtime_supported()) {
       printf("unifrog libretro read_profile skip profile=%s tag=%s reason=no_runtime\n",
-         UNIFROG_SD_READ_MODE, tag ? tag : "");
+         profile, tag ? tag : "");
       return 0;
    }
 
@@ -577,11 +584,11 @@ static int libretro_begin_read_profile(const char *tag)
    restore_detail[0] = '\0';
    libretro_storage_quiet_begin(tag);
    printf("unifrog libretro read_profile begin profile=%s boot=%s tag=%s\n",
-      UNIFROG_SD_READ_MODE, UNIFROG_SD_MODE, tag ? tag : "");
-   ret = unifrog_platform_sd_apply_profile(UNIFROG_SD_READ_MODE, 4, 100,
+      profile, UNIFROG_SD_MODE, tag ? tag : "");
+   ret = unifrog_platform_sd_apply_profile(profile, 4, 100,
       detail, sizeof(detail));
    printf("unifrog libretro read_profile switch ret=%d profile=%s detail=%s\n",
-      ret, UNIFROG_SD_READ_MODE, detail);
+      ret, profile, detail);
    if (ret == 0)
       return 1;
 
@@ -593,7 +600,8 @@ static int libretro_begin_read_profile(const char *tag)
    return 0;
 }
 
-static void libretro_end_read_profile(int active, const char *tag, int ok)
+static void libretro_end_read_profile(int active, const char *profile,
+   const char *tag, int ok)
 {
    char detail[160];
    int ret;
@@ -603,7 +611,7 @@ static void libretro_end_read_profile(int active, const char *tag, int ok)
    detail[0] = '\0';
    ret = unifrog_platform_sd_restore_boot(4, 100, detail, sizeof(detail));
    printf("unifrog libretro read_profile restore ret=%d ok=%d profile=%s tag=%s detail=%s\n",
-      ret, ok ? 1 : 0, UNIFROG_SD_READ_MODE, tag ? tag : "", detail);
+      ret, ok ? 1 : 0, profile ? profile : "", tag ? tag : "", detail);
    libretro_storage_quiet_end(tag, 1);
 }
 
@@ -620,6 +628,7 @@ void unifrog_libretro_run_options_init(
    options->backlight_level = -1;
    options->frameskip = UNIFROG_LIBRETRO_FRAMESKIP_OFF;
    options->display_mode = UNIFROG_LIBRETRO_DISPLAY_FIT;
+   options->sd_read_profile[0] = '\0';
    options->core_id[0] = '\0';
    options->core_path[0] = '\0';
 }
@@ -4856,10 +4865,12 @@ static int run_core(const struct libretro_core_api *core, const char *path,
 retry_content_prepare:
    if (!read_profile_retry_safe && !info.need_fullpath &&
        !path_is_wrapped_compressed(path)) {
-      read_profile_active = libretro_begin_read_profile("content_prepare");
-   } else if (!read_profile_retry_safe && libretro_read_profile_enabled()) {
+      read_profile_active = libretro_begin_read_profile(
+         libretro_read_profile(options), "content_prepare");
+   } else if (!read_profile_retry_safe &&
+       libretro_read_profile_enabled(libretro_read_profile(options))) {
       printf("unifrog libretro read_profile skip profile=%s reason=%s path=%s\n",
-         UNIFROG_SD_READ_MODE,
+         libretro_read_profile(options),
          info.need_fullpath ? "core_needs_fullpath" : "compressed_wrapper",
          path);
    }
@@ -4949,7 +4960,8 @@ retry_content_prepare:
 out_content_prepare:
    if (content_prepare_failed && read_profile_active &&
        !read_profile_retry_safe) {
-      libretro_end_read_profile(read_profile_active, "content_prepare", 0);
+      libretro_end_read_profile(read_profile_active,
+         libretro_read_profile(options), "content_prepare", 0);
       read_profile_active = 0;
       read_profile_retry_safe = 1;
       content_prepare_failed = 0;
@@ -4962,11 +4974,11 @@ out_content_prepare:
       content_kind = "none";
       content_cache = 0;
       printf("unifrog libretro read_profile retry_safe profile=%s path=%s\n",
-         UNIFROG_SD_READ_MODE, path);
+         libretro_read_profile(options), path);
       goto retry_content_prepare;
    }
-   libretro_end_read_profile(read_profile_active, "content_prepare",
-      !content_prepare_failed);
+   libretro_end_read_profile(read_profile_active,
+      libretro_read_profile(options), "content_prepare", !content_prepare_failed);
    read_profile_active = 0;
    if (content_prepare_failed)
       goto out_finish;

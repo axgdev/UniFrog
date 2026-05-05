@@ -26,7 +26,7 @@ NOTO_SANS_CJK_URL ?= https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/Sim
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 SD_MODE ?= safe
-SD_READ_MODE ?= $(if $(filter safe,$(SD_MODE)),uhs25,boot)
+SD_READ_MODE ?= boot
 HCRTOS_MEDIA ?= module
 
 -include config.mk

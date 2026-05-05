@@ -47,6 +47,18 @@ function iconForItem(item) {
   return "";
 }
 
+function iconForSystemName(name) {
+  if (name === "Game Boy Advance") return iconFile(theme.icons.gba);
+  if (name === "Game Boy / Color") return iconFile(theme.icons.gb);
+  if (name === "Nintendo (NES)") return iconFile(theme.icons.nes);
+  if (name === "Super Nintendo") return iconFile(theme.icons.snes);
+  if (name === "Sega Genesis") return iconFile(theme.icons.genesis);
+  if (name === "PC Engine") return iconFile(theme.icons.pcengine);
+  if (name === "PlayStation") return iconFile(theme.icons.psx);
+  if (name === "Media") return iconFile(theme.icons.media);
+  return iconFile(theme.icons.games);
+}
+
 function drawIconFallback(x, y, active) {
   var c = active ? theme.colors.dark : theme.colors.edge;
 
@@ -216,18 +228,33 @@ function drawBrowser(now) {
 function drawSystems(now) {
   var i;
   var idx;
+  var col;
+  var row;
+  var x;
   var y;
   var active;
+  var path;
+  var ret;
   JS2300.video.clear(theme.colors.background);
   topBar("Games");
-  drawRows(systems.length, 38, 22, 19);
   for (i = 0; i < 8; i++) {
     idx = scroll + i;
-    y = 43 + i * 22;
+    col = i % 2;
+    row = Math.floor(i / 2);
+    x = 10 + col * 154;
+    y = 38 + row * 43;
     if (idx < systems.length) {
       active = idx === selected;
-      JS2300.video.text(16, y, systems[idx], active ? theme.text.selected : theme.text.primary);
-      JS2300.video.text(248, y, String(systemCounts[idx]),
+      JS2300.video.rects([
+        [x, y, 146, 40, active ? theme.colors.accent : theme.colors.row],
+        [x, y, 4, 40, theme.colors.accent2]
+      ]);
+      path = iconForSystemName(systems[idx]);
+      ret = path && JS2300.video.image ? JS2300.video.image(path, x + 7, y + 2, 36, 36) : -1;
+      if (ret !== 0) drawIconFallback(x + 7, y + 2, active);
+      JS2300.video.text(x + 50, y + 8, shortText(systems[idx], 14),
+        active ? theme.text.selected : theme.text.primary);
+      JS2300.video.text(x + 50, y + 23, String(systemCounts[idx]) + " games",
         active ? theme.text.selectedMuted : theme.text.muted);
     }
   }
@@ -406,9 +433,16 @@ function settingValue(id) {
     return launchFrameskipOptions[optionIndex(launchFrameskipOptions, config.frameskip, 1)].label;
   if (id === "auto_index") return config.autoIndex ? "On" : "Off";
   if (id === "rom_roots") return shortText(config.romRoots, 18);
+  if (id === "language")
+    return languageOptions[optionIndex(languageOptions, config.language, 0)].label;
+  if (id === "font") return fontOptions[optionIndex(fontOptions, config.font, 0)].label;
+  if (id === "font_size") return String(config.fontSize);
+  if (id === "fast_sd")
+    return fastSdOptions[optionIndex(fastSdOptions, config.fastSd, 0)].label;
   if (id === "index") return "Scan";
   if (id === "system_check") return "Verify";
   if (id === "developer") return "Tools";
+  if (id === "storage_mode") return "Run";
   if (id === "reboot") return "Now";
   return "";
 }
@@ -420,7 +454,7 @@ function drawSettings(now) {
   var active;
   var row;
   JS2300.video.clear(theme.colors.background);
-  topBar("Settings");
+  topBar(settingsTitle);
   drawRows(settingRows.length, 31, 21, 18);
   for (i = 0; i < 9; i++) {
     idx = scroll + i;
