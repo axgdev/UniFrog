@@ -39,6 +39,8 @@ int frontend_fb_open(struct js2300_frontend *frontend)
    frontend->frame_draw_ops = 0;
    frontend->frame_has_visible_content = 0;
    frontend->boot_logo_present_skips = 0;
+   frontend->pending_backlight_valid = 0;
+   frontend->pending_av_valid = 0;
    if (preserve_logo) {
       unifrog_boot_logo_release_early();
       printf("unifrog boot_logo preserved current=%u buffers=%u\n",
@@ -77,6 +79,30 @@ static void frontend_begin_frame(struct js2300_frontend *frontend)
    frontend->frame_open = 1;
    frontend->frame_draw_ops = 0;
    frontend->frame_has_visible_content = 0;
+}
+
+static void frontend_apply_deferred_display(struct js2300_frontend *frontend)
+{
+   if (!frontend)
+      return;
+   if (frontend->pending_av_valid) {
+      int mode = frontend->pending_av_mode;
+      int ret;
+
+      frontend->pending_av_valid = 0;
+      ret = unifrog_av_set_mode(mode);
+      printf("unifrog boot_logo deferred av_output mode=%d ret=%d\n",
+         mode, ret);
+   }
+   if (frontend->pending_backlight_valid) {
+      unsigned level = frontend->pending_backlight_level;
+      int ret;
+
+      frontend->pending_backlight_valid = 0;
+      ret = unifrog_backlight_set(level);
+      printf("unifrog boot_logo deferred backlight level=%u ret=%d\n",
+         level, ret);
+   }
 }
 
 void host_log(void *opaque, const char *message)
@@ -261,6 +287,7 @@ void host_video_present(void *opaque)
       unifrog_boot_logo_mark_replaced();
       printf("unifrog boot_logo replaced buffer=%u ops=%u\n",
          frontend->draw_buffer, frontend->frame_draw_ops);
+      frontend_apply_deferred_display(frontend);
    }
    frontend->frame_open = 0;
 }
@@ -328,14 +355,19 @@ void host_battery(void *opaque, struct js2300_battery_status *status)
 
 int host_backlight(void *opaque, int level, int *out_level)
 {
+   struct js2300_frontend *frontend = opaque;
    unsigned current = 0;
    int ret = 0;
-   (void)opaque;
 
    if (level >= 0) {
       if (level > 100)
          level = 100;
-      ret = unifrog_backlight_set((unsigned)level);
+      if (frontend && unifrog_boot_logo_is_active()) {
+         frontend->pending_backlight_level = (unsigned)level;
+         frontend->pending_backlight_valid = 1;
+      } else {
+         ret = unifrog_backlight_set((unsigned)level);
+      }
    }
    if (unifrog_backlight_get(&current) != 0) {
       if (level >= 0)
@@ -345,20 +377,32 @@ int host_backlight(void *opaque, int level, int *out_level)
    }
    if (out_level)
       *out_level = (int)current;
-   if (level >= 0)
-      printf("js2300 backlight request=%d ret=%d current=%u\n",
-         level, ret, current);
+   if (level >= 0) {
+      if (frontend && frontend->pending_backlight_valid &&
+          frontend->pending_backlight_level == (unsigned)level)
+         printf("js2300 backlight request=%d ret=%d current=%u deferred=1\n",
+            level, ret, current);
+      else
+         printf("js2300 backlight request=%d ret=%d current=%u\n",
+            level, ret, current);
+   }
    return ret;
 }
 
 int host_av_output(void *opaque, int mode, int *out_mode)
 {
+   struct js2300_frontend *frontend = opaque;
    int current = 0;
    int ret = 0;
-   (void)opaque;
 
-   if (mode >= 0)
-      ret = unifrog_av_set_mode(mode);
+   if (mode >= 0) {
+      if (frontend && unifrog_boot_logo_is_active()) {
+         frontend->pending_av_mode = mode;
+         frontend->pending_av_valid = 1;
+      } else {
+         ret = unifrog_av_set_mode(mode);
+      }
+   }
    if (unifrog_av_get_mode(&current) != 0) {
       if (mode >= 0)
          printf("js2300 av_output request=%d ret=%d get_failed=1\n",
@@ -367,9 +411,15 @@ int host_av_output(void *opaque, int mode, int *out_mode)
    }
    if (out_mode)
       *out_mode = current;
-   if (mode >= 0)
-      printf("js2300 av_output request=%d ret=%d current=%d\n",
-         mode, ret, current);
+   if (mode >= 0) {
+      if (frontend && frontend->pending_av_valid &&
+          frontend->pending_av_mode == mode)
+         printf("js2300 av_output request=%d ret=%d current=%d deferred=1\n",
+            mode, ret, current);
+      else
+         printf("js2300 av_output request=%d ret=%d current=%d\n",
+            mode, ret, current);
+   }
    return ret;
 }
 

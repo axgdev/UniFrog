@@ -130,6 +130,10 @@ struct js2300_frontend {
    unsigned frame_draw_ops;
    int frame_has_visible_content;
    unsigned boot_logo_present_skips;
+   int pending_backlight_valid;
+   unsigned pending_backlight_level;
+   int pending_av_valid;
+   int pending_av_mode;
    int relaunch;
    int input_recovered;
    int boot_read_active;

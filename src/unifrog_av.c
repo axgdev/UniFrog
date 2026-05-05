@@ -36,6 +36,17 @@ int unifrog_av_set_mode(int mode)
    int ret = 0;
 
    mode = sanitize_mode(mode);
+   if (cached_mode_valid && cached_mode == mode) {
+      unifrog_log("unifrog av mode=%d ret=0 cached=1\n", mode);
+      return 0;
+   }
+   if (!cached_mode_valid && mode == UNIFROG_AV_OFF) {
+      cached_mode = mode;
+      cached_mode_valid = 1;
+      unifrog_log("unifrog av mode=%d ret=0 assume_off=1\n", mode);
+      return 0;
+   }
+
    fd = open("/dev/dis", O_RDWR);
    if (fd < 0) {
       unifrog_log("unifrog av mode=%d open_dis=fail\n", mode);
