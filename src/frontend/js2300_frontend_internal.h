@@ -60,6 +60,9 @@
 #ifndef UNIFROG_SD_MODE
 #define UNIFROG_SD_MODE "unknown"
 #endif
+#ifndef UNIFROG_SD_READ_MODE
+#define UNIFROG_SD_READ_MODE "boot"
+#endif
 #ifndef UNIFROG_SD_EXPERIMENTAL
 #define UNIFROG_SD_EXPERIMENTAL 0
 #endif
@@ -112,6 +115,9 @@ struct js2300_frontend {
    int frame_open;
    int relaunch;
    int input_recovered;
+   int boot_read_active;
+   int boot_read_started;
+   size_t boot_read_old_auto_flush;
    uint32_t icon_use_counter;
 };
 
@@ -178,6 +184,10 @@ void host_exit(void *opaque, const char *reason);
 
 void frontend_configure_host(struct js2300_frontend *frontend,
    struct js2300_host *host);
+int frontend_start_boot_read_window(struct js2300_frontend *frontend,
+   const char *tag);
+int frontend_restore_boot_read_window(struct js2300_frontend *frontend,
+   const char *tag, int flush);
 int run_requested_action(struct js2300_frontend *frontend);
 
 #endif

@@ -12,6 +12,7 @@ var config = {
   lastCore: ""
 };
 
+var settingsWritePending = false;
 var view = HOME;
 var selected = 0;
 var scroll = 0;
@@ -75,6 +76,7 @@ var IMAGE_LOADS_PER_FRAME = 2;
 var NAV_STACK_MAX = 16;
 var frontendStartupStartMs = JS2300.now();
 var frontendPhaseStartMs = frontendStartupStartMs;
+var bootStorageRestored = false;
 
 function frontendPhase(stage) {
   if (typeof frontendStartupMark === "function") {
@@ -90,6 +92,26 @@ function frontendStartupTotalMs() {
   if (typeof __frontendLoadStart === "number")
     return JS2300.now() - __frontendLoadStart;
   return JS2300.now() - frontendStartupStartMs;
+}
+
+function restoreBootStorageIfNeeded() {
+  var ret;
+
+  if (bootStorageRestored || !JS2300.system.action)
+    return;
+  if (JS2300.system.action("storage:fast-read-active") <= 0) {
+    bootStorageRestored = true;
+    return;
+  }
+  ret = JS2300.system.action("storage:restore-boot");
+  JS2300.log("frontend storage restore ret=" + String(ret));
+  if (ret < 0)
+    return;
+  bootStorageRestored = true;
+  if (settingsWritePending) {
+    settingsWritePending = false;
+    writeSettings();
+  }
 }
 
 JS2300.log("unifrog frontend start");
@@ -136,6 +158,7 @@ while (running) {
             String(frontendStartupTotalMs()));
         dirty = false;
         noteFrontendReady(now);
+        restoreBootStorageIfNeeded();
       } else {
         JS2300.sleep(16);
       }
@@ -176,6 +199,7 @@ while (running) {
       dirty = true;
     }
     noteFrontendReady(now);
+    restoreBootStorageIfNeeded();
   } else {
     JS2300.sleep(16);
   }

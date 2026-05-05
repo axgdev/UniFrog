@@ -77,24 +77,26 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 ### Storage
 
 - The SD/MMC path is sensitive to signal integrity. A flat SD extender cable caused frequent CRC errors and automount churn.
-- The default build boots with the reliable 1-bit SD profile and uses a guarded
-  `uhs25` window for read-to-memory ROM loads. Developer -> Storage test can
-  run a quick guarded runtime sweep from that safe boot: it buffers logs, shows
-  progress on screen, prefers `/ROMS/test.md` when present, verifies a safe
-  remount first, switches profiles through the SD bus suspend/resume hooks,
-  records host caps/timing/mount status, restores the safe boot profile, then
-  writes the report. The screen shows the most reliable freeze stage; warm
-  reboot diagnostics are secondary because full power cycles can overwrite them
-  before UniFrog starts.
+- The default build boots with the reliable 1-bit SD profile and uses guarded
+  `uhs25` windows for frontend startup reads and read-to-memory ROM loads.
+  The frontend restores the safe boot profile before normal UI writes. Developer
+  -> Storage test can run a quick guarded runtime sweep from that safe boot: it
+  buffers logs, shows progress on screen, prefers `/ROMS/test.md` when present,
+  verifies a safe remount first, switches profiles through the SD bus
+  suspend/resume hooks, records host caps/timing/mount status, restores the
+  safe boot profile, then writes the report. The screen shows the most reliable
+  freeze stage; warm reboot diagnostics are secondary because full power cycles
+  can overwrite them before UniFrog starts.
 - `SD_MODE=hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, and `uhs` remain
   fixed-profile diagnostic boot builds. `logunifrog0009.txt` showed wide and
   UHS were unstable on the tested device.
 - SD cards support 1-bit and 4-bit transfer widths here. The HCRTOS MMC driver
   reports invalid `bus-width` values, so 2-bit and 3-bit profiles are not valid
   experiments.
-- Runtime profile switching is used for diagnostics and for the default
-  ROM-load read window: `SD_READ_MODE=uhs25` switches only for read-to-memory
-  content prep, restores the safe boot profile before core init, and retries
+- Runtime profile switching is used for diagnostics and for default
+  `SD_READ_MODE=uhs25` read windows. Frontend startup keeps file-backed logging
+  suspended until the first screen is ready, restores safe mode, then flushes.
+  ROM content prep restores the safe boot profile before core init and retries
   the read in safe mode if the fast window fails. Storage full test reads
   `/ROMS/probes/test*.md`, returns to safe mode after each experimental read,
   and checkpoints the report before the next probe. Storage mode test switches

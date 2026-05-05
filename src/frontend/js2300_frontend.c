@@ -28,6 +28,94 @@ void frontend_configure_host(struct js2300_frontend *frontend,
    host->fs_index = host_fs_index;
 }
 
+static int frontend_boot_read_profile_enabled(void)
+{
+   const char *profile = UNIFROG_SD_READ_MODE;
+
+   if (!profile || !profile[0])
+      return 0;
+   if (strcmp(profile, "boot") == 0 || strcmp(profile, "safe") == 0 ||
+       strcmp(profile, "off") == 0 || strcmp(profile, "none") == 0)
+      return 0;
+   if (strcmp(profile, UNIFROG_SD_MODE) == 0)
+      return 0;
+   return 1;
+}
+
+int frontend_start_boot_read_window(struct js2300_frontend *frontend,
+   const char *tag)
+{
+   char detail[160];
+   char restore_detail[160];
+   int ret;
+   int restore_ret;
+
+   if (!frontend || frontend->boot_read_active ||
+       frontend->boot_read_started || !frontend_boot_read_profile_enabled())
+      return 0;
+   frontend->boot_read_started = 1;
+   if (!unifrog_platform_sd_runtime_supported()) {
+      printf("unifrog frontend boot_read skip profile=%s tag=%s reason=no_runtime\n",
+         UNIFROG_SD_READ_MODE, tag ? tag : "");
+      return 0;
+   }
+
+   frontend->boot_read_old_auto_flush = unifrog_log_auto_flush_bytes();
+   unifrog_log_set_auto_flush_bytes(0);
+   unifrog_log_defer_begin();
+   unifrog_platform_set_storage_log_suspended(1);
+
+   detail[0] = '\0';
+   restore_detail[0] = '\0';
+   printf("unifrog frontend boot_read begin profile=%s boot=%s tag=%s pending=%u\n",
+      UNIFROG_SD_READ_MODE, UNIFROG_SD_MODE, tag ? tag : "",
+      (unsigned)unifrog_log_pending());
+   ret = unifrog_platform_sd_apply_profile(UNIFROG_SD_READ_MODE, 4, 100,
+      detail, sizeof(detail));
+   printf("unifrog frontend boot_read switch ret=%d profile=%s detail=%s\n",
+      ret, UNIFROG_SD_READ_MODE, detail);
+   if (ret == 0) {
+      frontend->boot_read_active = 1;
+      return 1;
+   }
+
+   restore_ret = unifrog_platform_sd_restore_boot(4, 100, restore_detail,
+      sizeof(restore_detail));
+   printf("unifrog frontend boot_read fallback restore_ret=%d detail=%s\n",
+      restore_ret, restore_detail);
+   unifrog_platform_set_storage_log_suspended(0);
+   unifrog_log_defer_end();
+   unifrog_log_set_auto_flush_bytes(frontend->boot_read_old_auto_flush);
+   (void)unifrog_log_flush();
+   return 0;
+}
+
+int frontend_restore_boot_read_window(struct js2300_frontend *frontend,
+   const char *tag, int flush)
+{
+   char detail[160];
+   int ret;
+
+   if (!frontend || !frontend->boot_read_active)
+      return 0;
+   detail[0] = '\0';
+   printf("unifrog frontend boot_read restore begin tag=%s profile=%s pending=%u deferred=%d\n",
+      tag ? tag : "", UNIFROG_SD_READ_MODE,
+      (unsigned)unifrog_log_pending(), unifrog_log_flush_deferred());
+   ret = unifrog_platform_sd_restore_boot(4, 100, detail, sizeof(detail));
+   printf("unifrog frontend boot_read restore ret=%d tag=%s detail=%s\n",
+      ret, tag ? tag : "", detail);
+   if (ret != 0)
+      return ret;
+   frontend->boot_read_active = 0;
+   unifrog_platform_set_storage_log_suspended(0);
+   unifrog_log_defer_end();
+   unifrog_log_set_auto_flush_bytes(frontend->boot_read_old_auto_flush);
+   if (flush)
+      (void)unifrog_log_flush();
+   return ret;
+}
+
 int js2300_frontend_main(void)
 {
    struct js2300_frontend frontend;
@@ -101,12 +189,17 @@ int js2300_frontend_main(void)
       snprintf(diag_tag, sizeof(diag_tag), "frontend.created.%u", relaunch);
       unifrog_diag_memory_snapshot(diag_tag);
       if (ret == 0) {
+         if (relaunch == 0)
+            (void)frontend_start_boot_read_window(&frontend,
+               "frontend_launch");
          run_start_ms = unifrog_perf_time_ms();
          ret = js2300_runtime_run(runtime);
          printf("unifrog js phase=runtime_run relaunch=%u ms=%lu ret=%d\n",
             relaunch, (unsigned long)(unifrog_perf_time_ms() - run_start_ms),
             ret);
       }
+      (void)frontend_restore_boot_read_window(&frontend,
+         "frontend_runtime_end", 1);
       snprintf(diag_tag, sizeof(diag_tag), "frontend.after_run.%u", relaunch);
       unifrog_diag_memory_snapshot(diag_tag);
       js2300_runtime_destroy(runtime);

@@ -1621,6 +1621,11 @@ int host_action(void *opaque, const char *id)
 
    if (strcmp(id, "storage:experimental") == 0)
       return UNIFROG_SD_EXPERIMENTAL ? 1 : 0;
+   if (strcmp(id, "storage:fast-read-active") == 0)
+      return frontend->boot_read_active ? 1 : 0;
+   if (strcmp(id, "storage:restore-boot") == 0)
+      return frontend_restore_boot_read_window(frontend, "js_action", 1) == 0 ?
+         1 : -1;
    if (strcmp(id, "storage:recover") == 0)
       return unifrog_platform_recover_storage("js_action", 4, 100) == 0 ?
          1 : -1;

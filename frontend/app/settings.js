@@ -64,8 +64,13 @@ function loadSettings() {
     JS2300.system.backlight(config.brightness);
   if (JS2300.system.avOutput)
     JS2300.system.avOutput(config.av);
-  if (firstBoot)
-    writeSettings();
+  if (firstBoot) {
+    if (JS2300.system.action &&
+        JS2300.system.action("storage:fast-read-active") > 0)
+      settingsWritePending = true;
+    else
+      writeSettings();
+  }
 }
 
 function loadThemeFile() {
