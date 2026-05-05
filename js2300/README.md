@@ -37,6 +37,10 @@ JS2300 verifies source and bytecode fingerprints before executing bytecode.
 This avoids relying on FAT timestamps and falls back to source if a file was
 edited without rebuilding bytecode or if the VM rejects bytecode for the current
 atom-table state.
+To keep `load("...")` fast and reliable, JS2300 preloads manifest-matched
+entry scripts and literal `load()` dependencies before attaching the `JS2300.*`
+API. The JS2300-owned MQuickJS build raises the ROM atom-table limit for these
+preloaded bytecode files.
 
 ## Contract
 

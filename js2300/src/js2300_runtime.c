@@ -15,6 +15,7 @@
 #define JS2300_MAX_BYTECODE_ENTRIES 128u
 #define JS2300_MAX_BYTECODE_PATH 192u
 #define JS2300_MAX_BYTECODE_MANIFEST_BYTES (64u * 1024u)
+#define JS2300_MAX_PRELOAD_DEPTH 12u
 #define JS2300_MAX_SCRIPT_BYTES (512u * 1024u)
 #define JS2300_MAX_TEXT_FILE_BYTES (2u * 1024u * 1024u)
 #define JS2300_MAX_RECTS 128u
@@ -70,6 +71,14 @@ struct js2300_bytecode_entry {
    uint64_t bytecode_hash;
 };
 
+struct js2300_preloaded_bytecode {
+   char path[JS2300_MAX_BYTECODE_PATH];
+   JSGCRef ref;
+   size_t bytecode_size;
+   int loaded;
+   int used;
+};
+
 struct js2300_runtime {
    struct js2300_config config;
    struct js2300_host host;
@@ -81,6 +90,8 @@ struct js2300_runtime {
    struct js2300_bytecode_entry bytecode_entries[JS2300_MAX_BYTECODE_ENTRIES];
    unsigned bytecode_entry_count;
    int bytecode_manifest_loaded;
+   struct js2300_preloaded_bytecode preloaded_bytecode[JS2300_MAX_BYTECODE_ENTRIES];
+   unsigned preloaded_bytecode_count;
    int api_attached;
    uint32_t input_now;
    uint32_t input_prev;
@@ -156,6 +167,9 @@ static char *build_script_path(const struct js2300_config *config,
                                const char *script_path);
 static int js_attach_api(JSContext *ctx);
 static int js2300_ensure_api(struct js2300_runtime *runtime);
+static void log_exception_message(struct js2300_runtime *runtime,
+                                  const char *prefix);
+static void clear_preloaded_bytecode(struct js2300_runtime *runtime);
 
 static char *build_entry_path(const struct js2300_config *config)
 {
@@ -479,6 +493,7 @@ static void js2300_close_context(struct js2300_runtime *runtime)
    if (active_runtime == runtime)
       active_runtime = NULL;
    if (runtime->ctx) {
+      clear_preloaded_bytecode(runtime);
       JS_FreeContext(runtime->ctx);
       runtime->ctx = NULL;
    }
@@ -510,6 +525,231 @@ static void log_bytecode_skip(struct js2300_runtime *runtime,
    snprintf(line, sizeof(line), "js2300 bytecode skip reason=%s path=%s",
       reason ? reason : "unknown", path ? path : "?");
    host_log(runtime, line);
+}
+
+static int is_script_space(char ch)
+{
+   return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
+}
+
+static struct js2300_preloaded_bytecode *find_preloaded_bytecode(
+   struct js2300_runtime *runtime, const char *script_path)
+{
+   const char *rel;
+
+   if (!runtime || !script_path)
+      return NULL;
+
+   rel = relative_script_path(&runtime->config, script_path);
+   if (!rel || !rel[0] || rel[0] == '/')
+      return NULL;
+
+   for (unsigned i = 0; i < runtime->preloaded_bytecode_count; i++) {
+      if (strcmp(runtime->preloaded_bytecode[i].path, rel) == 0)
+         return &runtime->preloaded_bytecode[i];
+   }
+   return NULL;
+}
+
+static int preload_bytecode_path(struct js2300_runtime *runtime,
+                                 const char *path,
+                                 unsigned depth);
+
+static void preload_load_literals(struct js2300_runtime *runtime,
+                                  const char *source,
+                                  size_t source_len,
+                                  unsigned depth)
+{
+   size_t i = 0;
+
+   if (!runtime || !source || depth >= JS2300_MAX_PRELOAD_DEPTH)
+      return;
+
+   while (i + 5u < source_len) {
+      char quote;
+      size_t start;
+      size_t end;
+      char script[JS2300_MAX_BYTECODE_PATH];
+      char *path;
+
+      if (source[i] != 'l' || source[i + 1u] != 'o' ||
+          source[i + 2u] != 'a' || source[i + 3u] != 'd' ||
+          source[i + 4u] != '(') {
+         i++;
+         continue;
+      }
+
+      i += 5u;
+      while (i < source_len && is_script_space(source[i]))
+         i++;
+      if (i >= source_len || (source[i] != '"' && source[i] != '\''))
+         continue;
+
+      quote = source[i++];
+      start = i;
+      while (i < source_len && source[i] != quote)
+         i++;
+      end = i;
+      if (i >= source_len || end <= start ||
+          end - start >= sizeof(script))
+         continue;
+
+      memcpy(script, source + start, end - start);
+      script[end - start] = '\0';
+      path = build_script_path(&runtime->config, script);
+      if (path) {
+         (void)preload_bytecode_path(runtime, path, depth + 1u);
+         free(path);
+      }
+   }
+}
+
+static int preload_bytecode_path(struct js2300_runtime *runtime,
+                                 const char *path,
+                                 unsigned depth)
+{
+   const struct js2300_bytecode_entry *entry;
+   struct js2300_preloaded_bytecode *slot;
+   const char *rel;
+   char *bytecode_path;
+   char *source = NULL;
+   char *bytecode = NULL;
+   size_t source_len = 0;
+   size_t bytecode_len = 0;
+   uint64_t source_hash;
+   uint64_t bytecode_hash;
+   JSValue ret;
+   JSValue *root;
+   char line[224];
+   uint32_t start_ms = host_millis(runtime);
+
+   if (!runtime || !runtime->ctx || !path ||
+       depth > JS2300_MAX_PRELOAD_DEPTH)
+      return -1;
+   if (runtime->api_attached)
+      return -1;
+   if (find_preloaded_bytecode(runtime, path))
+      return 0;
+
+   entry = find_bytecode_entry(runtime, path);
+   if (!entry)
+      return -1;
+
+   rel = relative_script_path(&runtime->config, path);
+   if (!rel || !rel[0] || rel[0] == '/' ||
+       strlen(rel) >= JS2300_MAX_BYTECODE_PATH ||
+       runtime->preloaded_bytecode_count >= JS2300_MAX_BYTECODE_ENTRIES)
+      return -1;
+
+   bytecode_path = build_bytecode_path(path);
+   if (!bytecode_path)
+      return -1;
+
+   bytecode = read_file(bytecode_path,
+      runtime->config.bytecode_cache_bytes ?
+      runtime->config.bytecode_cache_bytes : JS2300_DEFAULT_BYTECODE_CACHE_BYTES,
+      &bytecode_len);
+   if (!bytecode) {
+      log_bytecode_skip(runtime, path, "read_bytecode");
+      free(bytecode_path);
+      return -1;
+   }
+
+   bytecode_hash = fnv1a64(bytecode, bytecode_len);
+   if (bytecode_len != entry->bytecode_size ||
+       bytecode_hash != entry->bytecode_hash) {
+      log_bytecode_skip(runtime, path, "bytecode_changed");
+      free(bytecode);
+      free(bytecode_path);
+      return -1;
+   }
+
+   source = read_file(path, JS2300_MAX_SCRIPT_BYTES, &source_len);
+   if (!source) {
+      log_bytecode_skip(runtime, path, "read_source");
+      free(bytecode);
+      free(bytecode_path);
+      return -1;
+   }
+
+   source_hash = fnv1a64(source, source_len);
+   if (source_len != entry->source_size || source_hash != entry->source_hash) {
+      log_bytecode_skip(runtime, path, "source_changed");
+      preload_load_literals(runtime, source, source_len, depth);
+      free(source);
+      free(bytecode);
+      free(bytecode_path);
+      return -1;
+   }
+
+   if (!JS_IsBytecode((const uint8_t *)bytecode, bytecode_len)) {
+      log_bytecode_skip(runtime, path, "invalid_bytecode");
+      preload_load_literals(runtime, source, source_len, depth);
+      free(source);
+      free(bytecode);
+      free(bytecode_path);
+      return -1;
+   }
+
+   if (JS_RelocateBytecode(runtime->ctx, (uint8_t *)bytecode,
+       (uint32_t)bytecode_len) != 0) {
+      log_bytecode_skip(runtime, path, "relocate");
+      preload_load_literals(runtime, source, source_len, depth);
+      free(source);
+      free(bytecode);
+      free(bytecode_path);
+      return -1;
+   }
+
+   ret = JS_LoadBytecode(runtime->ctx, (const uint8_t *)bytecode);
+   if (JS_IsException(ret)) {
+      log_exception_message(runtime, "js2300 bytecode load_exception");
+      preload_load_literals(runtime, source, source_len, depth);
+      free(source);
+      free(bytecode);
+      free(bytecode_path);
+      return -1;
+   }
+
+   if (remember_bytecode_buffer(runtime, bytecode) != 0) {
+      free(source);
+      free(bytecode);
+      free(bytecode_path);
+      return -1;
+   }
+
+   slot = &runtime->preloaded_bytecode[runtime->preloaded_bytecode_count++];
+   memset(slot, 0, sizeof(*slot));
+   memcpy(slot->path, rel, strlen(rel) + 1u);
+   slot->bytecode_size = bytecode_len;
+   slot->loaded = 1;
+   root = JS_AddGCRef(runtime->ctx, &slot->ref);
+   *root = ret;
+
+   snprintf(line, sizeof(line),
+      "js2300 bytecode preload ms=%lu bytes=%lu path=%s",
+      (unsigned long)(host_millis(runtime) - start_ms),
+      (unsigned long)bytecode_len, path);
+   host_log(runtime, line);
+
+   preload_load_literals(runtime, source, source_len, depth);
+   free(source);
+   free(bytecode_path);
+   return 0;
+}
+
+static void clear_preloaded_bytecode(struct js2300_runtime *runtime)
+{
+   if (!runtime || !runtime->ctx)
+      return;
+
+   for (unsigned i = 0; i < runtime->preloaded_bytecode_count; i++) {
+      if (runtime->preloaded_bytecode[i].loaded) {
+         JS_DeleteGCRef(runtime->ctx, &runtime->preloaded_bytecode[i].ref);
+         runtime->preloaded_bytecode[i].loaded = 0;
+      }
+   }
+   runtime->preloaded_bytecode_count = 0;
 }
 
 static void log_exception_message(struct js2300_runtime *runtime,
@@ -567,116 +807,38 @@ static JSValue eval_script_bytecode(struct js2300_runtime *runtime,
                                     char **fallback_source,
                                     size_t *fallback_source_len)
 {
-   const struct js2300_bytecode_entry *entry;
-   char *bytecode_path;
-   char *source = NULL;
-   char *bytecode;
-   size_t source_len = 0;
-   size_t bytecode_len = 0;
-   uint64_t source_hash;
-   uint64_t bytecode_hash;
+   struct js2300_preloaded_bytecode *slot;
    JSValue ret;
-   uint32_t start_ms = host_millis(runtime);
+   uint32_t start_ms;
 
    if (fallback_source)
       *fallback_source = NULL;
    if (fallback_source_len)
       *fallback_source_len = 0;
 
-   if (runtime->api_attached) {
-      log_bytecode_skip(runtime, path, "api_attached");
+   slot = find_preloaded_bytecode(runtime, path);
+   if (!slot) {
+      log_bytecode_skip(runtime, path, "not_preloaded");
       return JS_UNINITIALIZED;
    }
-
-   entry = find_bytecode_entry(runtime, path);
-   if (!entry) {
-      log_bytecode_skip(runtime, path, "manifest_entry");
+   if (!slot->loaded || slot->used) {
+      log_bytecode_skip(runtime, path, "already_used");
       return JS_UNINITIALIZED;
-   }
-
-   bytecode_path = build_bytecode_path(path);
-   if (!bytecode_path)
-      return JS_UNINITIALIZED;
-
-   bytecode = read_file(bytecode_path,
-      runtime->config.bytecode_cache_bytes ?
-      runtime->config.bytecode_cache_bytes : JS2300_DEFAULT_BYTECODE_CACHE_BYTES,
-      &bytecode_len);
-   if (!bytecode) {
-      log_bytecode_skip(runtime, path, "read_bytecode");
-      free(bytecode_path);
-      return JS_UNINITIALIZED;
-   }
-
-   bytecode_hash = fnv1a64(bytecode, bytecode_len);
-   if (bytecode_len != entry->bytecode_size ||
-       bytecode_hash != entry->bytecode_hash) {
-      log_bytecode_skip(runtime, path, "bytecode_changed");
-      free(bytecode);
-      free(bytecode_path);
-      return JS_UNINITIALIZED;
-   }
-
-   source = read_file(path, JS2300_MAX_SCRIPT_BYTES, &source_len);
-   if (!source) {
-      log_bytecode_skip(runtime, path, "read_source");
-      free(bytecode);
-      free(bytecode_path);
-      return JS_UNINITIALIZED;
-   }
-
-   source_hash = fnv1a64(source, source_len);
-   if (source_len != entry->source_size || source_hash != entry->source_hash) {
-      log_bytecode_skip(runtime, path, "source_changed");
-      if (fallback_source && fallback_source_len) {
-         *fallback_source = source;
-         *fallback_source_len = source_len;
-      } else {
-         free(source);
-      }
-      free(bytecode);
-      free(bytecode_path);
-      return JS_UNINITIALIZED;
-   }
-   free(source);
-
-   if (!JS_IsBytecode((const uint8_t *)bytecode, bytecode_len)) {
-      log_bytecode_skip(runtime, path, "invalid_bytecode");
-      free(bytecode);
-      free(bytecode_path);
-      return JS_UNINITIALIZED;
-   }
-
-   if (JS_RelocateBytecode(runtime->ctx, (uint8_t *)bytecode,
-       (uint32_t)bytecode_len) != 0) {
-      log_bytecode_skip(runtime, path, "relocate");
-      free(bytecode);
-      free(bytecode_path);
-      return JS_UNINITIALIZED;
-   }
-
-   ret = JS_LoadBytecode(runtime->ctx, (const uint8_t *)bytecode);
-   if (JS_IsException(ret)) {
-      log_exception_message(runtime, "js2300 bytecode load_exception");
-      free(bytecode);
-      free(bytecode_path);
-      return JS_UNINITIALIZED;
-   }
-
-   if (remember_bytecode_buffer(runtime, bytecode) != 0) {
-      free(bytecode);
-      free(bytecode_path);
-      return JS_ThrowInternalError(runtime->ctx, "bytecode cache exhausted");
    }
 
    if (js2300_ensure_api(runtime) != 0) {
-      free(bytecode_path);
       return JS_ThrowInternalError(runtime->ctx, "api attach failed");
    }
 
+   ret = slot->ref.val;
+   JS_DeleteGCRef(runtime->ctx, &slot->ref);
+   slot->ref.val = JS_UNDEFINED;
+   slot->loaded = 0;
+   slot->used = 1;
+   start_ms = host_millis(runtime);
    ret = JS_Run(runtime->ctx, ret);
-   log_eval_result(runtime, phase, "bytecode", path, bytecode_len, start_ms);
-   free(bytecode_path);
+   log_eval_result(runtime, phase, "bytecode", path, slot->bytecode_size,
+      start_ms);
    return ret;
 }
 
@@ -910,6 +1072,7 @@ int js2300_runtime_run(struct js2300_runtime *runtime)
 
    active_runtime = runtime;
    host_log(runtime, "js2300 eval start");
+   (void)preload_bytecode_path(runtime, path, 0);
    ret = eval_script_file(runtime, path, "entry");
    if (JS_IsException(ret)) {
       JSCStringBuf buf;

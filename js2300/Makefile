@@ -5,6 +5,7 @@ OUT ?= output
 TARGET := $(OUT)/libjs2300.a
 MQUICKJS_DIR ?= ../.deps/mquickjs
 MQUICKJS_ATOM_ALIGN ?= 256
+MQUICKJS_ROM_ATOM_TABLES ?= 16
 MQUICKJS_ATOM_ALIGN_PATCH ?=
 MQUICKJS_TCC_PATCH ?= ../patches/mquickjs/0001-use-portable-int-overflow-checks.patch
 MQUICKJS_BUILD := $(BUILD)/mquickjs
@@ -45,6 +46,7 @@ help:
 print-config:
 	@echo "TOOLCHAIN=$(TOOLCHAIN)"
 	@echo "MQUICKJS_DIR=$(MQUICKJS_DIR)"
+	@echo "MQUICKJS_ROM_ATOM_TABLES=$(MQUICKJS_ROM_ATOM_TABLES)"
 	@echo "BUILD=$(BUILD)"
 	@echo "OUT=$(OUT)"
 	@echo "TARGET=$(TARGET)"
@@ -67,6 +69,12 @@ $(MQUICKJS_PREPARE_STAMP): $(MQUICKJS_DIR)/mquickjs.c $(MQUICKJS_DIR)/mquickjs_b
 	@mkdir -p "$(MQUICKJS_BUILD)"
 	@cp "$(MQUICKJS_DIR)"/*.[ch] "$(MQUICKJS_BUILD)"/
 	@cp "$(MQUICKJS_DIR)/Makefile" "$(MQUICKJS_BUILD)"/
+	@if grep -q '^#define N_ROM_ATOM_TABLES_MAX ' "$(MQUICKJS_BUILD)/mquickjs.c"; then \
+		sed -i 's/^#define N_ROM_ATOM_TABLES_MAX .*/#define N_ROM_ATOM_TABLES_MAX $(MQUICKJS_ROM_ATOM_TABLES)/' "$(MQUICKJS_BUILD)/mquickjs.c"; \
+	fi
+	@if ! grep -q '^#define N_ROM_ATOM_TABLES_MAX $(MQUICKJS_ROM_ATOM_TABLES)$$' "$(MQUICKJS_BUILD)/mquickjs.c"; then \
+		echo "error: JS2300 requires MQuickJS N_ROM_ATOM_TABLES_MAX $(MQUICKJS_ROM_ATOM_TABLES)"; exit 1; \
+	fi
 	@touch $@
 
 $(MQUICKJS_HOST_PREPARE_STAMP): $(MQUICKJS_PREPARE_STAMP)

@@ -65,6 +65,8 @@ make -C frontend package
 `bytecode-manifest.txt` stores source and bytecode fingerprints, because device
 timestamps are not reliable. JS2300 executes bytecode only when the manifest
 matches the current bytes; otherwise it falls back to source and logs why.
+Entry scripts and literal `load()` dependencies are bytecode-preloaded before
+the JS API is attached, so the modular files stay fast without bundling.
 
 The direct frontend default is `../.deps/mquickjs`, which is the same checkout
 the root Makefile fetches as `.deps/mquickjs`. Override it when needed:
