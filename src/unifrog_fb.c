@@ -9,6 +9,7 @@
 #include <kernel/fb.h>
 #include <hcuapi/fb.h>
 
+#include <unifrog/log.h>
 #include <unifrog/perf.h>
 
 static void clear_fb(struct unifrog_fb *fb)
@@ -56,38 +57,92 @@ static int put_rgb565_var(int fd, struct fb_var_screeninfo *var, unsigned flags)
    return ioctl(fd, FBIOPUT_VSCREENINFO, var);
 }
 
+static int fb_var_is_usable_rgb565(const struct fb_var_screeninfo *var)
+{
+   if (!var)
+      return 0;
+   if (var->bits_per_pixel != 16 ||
+       var->red.length != 5 ||
+       var->green.length != 6 ||
+       var->blue.length != 5)
+      return 0;
+   if (var->xres_virtual < var->xres || var->yres_virtual < var->yres)
+      return 0;
+   if (var->xoffset + var->xres > var->xres_virtual ||
+       var->yoffset + var->yres > var->yres_virtual)
+      return 0;
+   return 1;
+}
+
 int unifrog_fb_open(struct unifrog_fb *fb, unsigned flags)
 {
    struct fb_fix_screeninfo fix;
    struct fb_var_screeninfo var;
    int fd;
+   int put_var = 0;
+   const char *fail_stage = "open";
    size_t screen_bytes;
+   uint32_t start_ms;
+   uint32_t open_ms;
+   uint32_t get1_ms;
+   uint32_t put_ms;
+   uint32_t get2_ms;
+   uint32_t cache_ms;
+   uint32_t mmap_ms;
+   uint32_t clear_ms = 0;
+   uint32_t pan_ms = 0;
+   uint32_t blank_ms = 0;
 
    if (!fb)
       return -1;
    clear_fb(fb);
    fb->fd = -1;
 
+   start_ms = unifrog_perf_time_ms();
    fd = open("/dev/fb0", O_RDWR);
-   if (fd < 0)
+   if (fd < 0) {
+      unifrog_log("unifrog fb open flags=0x%x ret=-1 stage=open total_ms=%lu\n",
+         flags, (unsigned long)(unifrog_perf_time_ms() - start_ms));
       return -1;
+   }
+   open_ms = unifrog_perf_time_ms();
 
    memset(&fix, 0, sizeof(fix));
    if (ioctl(fd, FBIOGET_FSCREENINFO, &fix) != 0 ||
-       get_var(fd, &var) != 0 ||
-       put_rgb565_var(fd, &var, flags) != 0 ||
-       ioctl(fd, FBIOGET_FSCREENINFO, &fix) != 0 ||
-       get_var(fd, &var) != 0)
+       get_var(fd, &var) != 0) {
+      fail_stage = "get1";
       goto fail;
+   }
+   get1_ms = unifrog_perf_time_ms();
+
+   if (!(flags & UNIFROG_FB_OPEN_PRESERVE) ||
+       !fb_var_is_usable_rgb565(&var)) {
+      put_var = 1;
+      if (put_rgb565_var(fd, &var, flags) != 0) {
+         fail_stage = "put_var";
+         goto fail;
+      }
+   }
+   put_ms = unifrog_perf_time_ms();
+
+   if (ioctl(fd, FBIOGET_FSCREENINFO, &fix) != 0 ||
+       get_var(fd, &var) != 0) {
+      fail_stage = "get2";
+      goto fail;
+   }
+   get2_ms = unifrog_perf_time_ms();
 
    ioctl(fd, HCFBIOSET_MMAP_CACHE,
       (flags & UNIFROG_FB_OPEN_CACHED) ? HCFB_MMAP_CACHE : HCFB_MMAP_NO_CACHE);
+   cache_ms = unifrog_perf_time_ms();
 
    fb->pixels = mmap(NULL, fix.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
    if (fb->pixels == MAP_FAILED) {
       fb->pixels = NULL;
+      fail_stage = "mmap";
       goto fail;
    }
+   mmap_ms = unifrog_perf_time_ms();
 
    fb->fd = fd;
    fb->width = var.xres;
@@ -111,12 +166,35 @@ int unifrog_fb_open(struct unifrog_fb *fb, unsigned flags)
    if (!(flags & UNIFROG_FB_OPEN_PRESERVE)) {
       memset(fb->pixels, 0, fb->visible_bytes);
       unifrog_perf_cache_flush(fb->pixels, fb->visible_bytes);
+      clear_ms = unifrog_perf_time_ms();
       (void)unifrog_fb_pan(fb, 0);
+      pan_ms = unifrog_perf_time_ms();
       ioctl(fd, FBIOBLANK, FB_BLANK_UNBLANK);
+      blank_ms = unifrog_perf_time_ms();
    }
+   unifrog_log("unifrog fb open flags=0x%x preserve=%u put_var=%d "
+      "total_ms=%lu open_ms=%lu get1_ms=%lu put_ms=%lu get2_ms=%lu "
+      "cache_ms=%lu mmap_ms=%lu clear_ms=%lu pan_ms=%lu blank_ms=%lu "
+      "%ux%u bpp=%u stride=%u current=%u buffers=%u max=%u smem=%lu\n",
+      flags, (flags & UNIFROG_FB_OPEN_PRESERVE) ? 1u : 0u, put_var,
+      (unsigned long)(unifrog_perf_time_ms() - start_ms),
+      (unsigned long)(open_ms - start_ms),
+      (unsigned long)(get1_ms - open_ms),
+      (unsigned long)(put_ms - get1_ms),
+      (unsigned long)(get2_ms - put_ms),
+      (unsigned long)(cache_ms - get2_ms),
+      (unsigned long)(mmap_ms - cache_ms),
+      clear_ms ? (unsigned long)(clear_ms - mmap_ms) : 0ul,
+      pan_ms ? (unsigned long)(pan_ms - clear_ms) : 0ul,
+      blank_ms ? (unsigned long)(blank_ms - pan_ms) : 0ul,
+      fb->width, fb->height, fb->bpp, fb->stride_pixels,
+      fb->current_buffer, fb->buffer_count, fb->max_buffers,
+      (unsigned long)fb->smem_len);
    return 0;
 
 fail:
+   unifrog_log("unifrog fb open flags=0x%x ret=-1 stage=%s total_ms=%lu\n",
+      flags, fail_stage, (unsigned long)(unifrog_perf_time_ms() - start_ms));
    close(fd);
    clear_fb(fb);
    fb->fd = -1;
@@ -204,17 +282,36 @@ int unifrog_fb_wait_vsync(const struct unifrog_fb *fb)
 int unifrog_fb_set_buffer_count(struct unifrog_fb *fb, unsigned buffers)
 {
    struct fb_var_screeninfo var;
+   unsigned old_buffers;
+   uint32_t start_ms;
+   uint32_t get_ms;
+   uint32_t put_ms;
 
    if (!fb || fb->fd < 0 || buffers == 0 || buffers > fb->max_buffers)
       return -1;
+   old_buffers = fb->buffer_count;
+   if (old_buffers == buffers) {
+      unifrog_log("unifrog fb buffers old=%u requested=%u ret=0 cached=1 current=%u\n",
+         old_buffers, buffers, fb->current_buffer);
+      return 0;
+   }
+   start_ms = unifrog_perf_time_ms();
    if (get_var(fb->fd, &var) != 0)
       return -1;
+   get_ms = unifrog_perf_time_ms();
    var.yres_virtual = var.yres * buffers;
    if (ioctl(fb->fd, FBIOPUT_VSCREENINFO, &var) != 0)
       return -1;
+   put_ms = unifrog_perf_time_ms();
    fb->buffer_count = buffers;
    if (fb->current_buffer >= buffers)
       fb->current_buffer = 0;
+   unifrog_log("unifrog fb buffers old=%u requested=%u ret=0 "
+      "total_ms=%lu get_ms=%lu put_ms=%lu current=%u yvirt=%u\n",
+      old_buffers, buffers, (unsigned long)(put_ms - start_ms),
+      (unsigned long)(get_ms - start_ms),
+      (unsigned long)(put_ms - get_ms), fb->current_buffer,
+      var.yres_virtual);
    return 0;
 }
 

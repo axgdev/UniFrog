@@ -10,6 +10,7 @@ extern "C" {
 int unifrog_boot_logo_present(struct unifrog_fb *fb, const char *tag);
 int unifrog_boot_logo_present_early(void);
 int unifrog_boot_logo_is_active(void);
+uint32_t unifrog_boot_logo_shown_ms(void);
 void unifrog_boot_logo_mark_replaced(void);
 void unifrog_boot_logo_release_early(void);
 

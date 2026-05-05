@@ -41,6 +41,8 @@ int frontend_fb_open(struct js2300_frontend *frontend)
    frontend->boot_logo_present_skips = 0;
    frontend->pending_backlight_valid = 0;
    frontend->pending_av_valid = 0;
+   frontend->video_present_count = 0;
+   frontend->video_present_log_count = 0;
    if (preserve_logo) {
       unifrog_boot_logo_release_early();
       printf("unifrog boot_logo preserved current=%u buffers=%u\n",
@@ -265,11 +267,21 @@ int host_video_image(void *opaque, const char *path,
 void host_video_present(void *opaque)
 {
    struct js2300_frontend *frontend = opaque;
+   uint32_t start_ms;
+   uint32_t flush_ms;
+   uint32_t wait_ms;
+   uint32_t pan_ms;
+   uint32_t done_ms;
+   int pan_ret = -1;
+   int replaced = 0;
+   int logo_active;
+   unsigned present_index;
 
    if (!frontend->frame_open) {
       unifrog_fb_wait_vsync(&frontend->fb);
       return;
    }
+   present_index = ++frontend->video_present_count;
    if (unifrog_boot_logo_is_active() &&
        !frontend->frame_has_visible_content) {
       if (frontend->boot_logo_present_skips < 4)
@@ -280,14 +292,43 @@ void host_video_present(void *opaque)
       frontend->frame_open = 0;
       return;
    }
+   start_ms = unifrog_perf_time_ms();
+   logo_active = unifrog_boot_logo_is_active();
    unifrog_fb_flush_buffer(&frontend->fb, frontend->draw_buffer);
+   flush_ms = unifrog_perf_time_ms();
    unifrog_fb_wait_vsync(&frontend->fb);
-   if (unifrog_fb_pan(&frontend->fb, frontend->draw_buffer) == 0 &&
-       unifrog_boot_logo_is_active()) {
+   wait_ms = unifrog_perf_time_ms();
+   pan_ret = unifrog_fb_pan(&frontend->fb, frontend->draw_buffer);
+   pan_ms = unifrog_perf_time_ms();
+   if (pan_ret == 0 && unifrog_boot_logo_is_active()) {
+      uint32_t logo_ms = unifrog_boot_logo_shown_ms();
+
       unifrog_boot_logo_mark_replaced();
+      replaced = 1;
       printf("unifrog boot_logo replaced buffer=%u ops=%u\n",
          frontend->draw_buffer, frontend->frame_draw_ops);
+      printf("unifrog boot_perf phase=logo_to_ui logo_age_ms=%lu "
+         "frontend_ms=%lu ops=%u buffer=%u\n",
+         logo_ms ? (unsigned long)(pan_ms - logo_ms) : 0ul,
+         (unsigned long)(pan_ms - frontend->frontend_start_ms),
+         frontend->frame_draw_ops, frontend->draw_buffer);
       frontend_apply_deferred_display(frontend);
+   }
+   done_ms = unifrog_perf_time_ms();
+   if (replaced || frontend->video_present_log_count < 4) {
+      printf("unifrog video_present n=%u ops=%u visible=%d buffer=%u "
+         "logo_before=%d replaced=%d ret=%d total_ms=%lu flush_ms=%lu "
+         "wait_ms=%lu pan_ms=%lu deferred_ms=%lu frontend_ms=%lu\n",
+         present_index, frontend->frame_draw_ops,
+         frontend->frame_has_visible_content, frontend->draw_buffer,
+         logo_active, replaced, pan_ret,
+         (unsigned long)(done_ms - start_ms),
+         (unsigned long)(flush_ms - start_ms),
+         (unsigned long)(wait_ms - flush_ms),
+         (unsigned long)(pan_ms - wait_ms),
+         (unsigned long)(done_ms - pan_ms),
+         (unsigned long)(done_ms - frontend->frontend_start_ms));
+      frontend->video_present_log_count++;
    }
    frontend->frame_open = 0;
 }

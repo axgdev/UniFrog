@@ -107,6 +107,11 @@ int unifrog_backlight_set(unsigned level)
    if (level > 100)
       level = 100;
 
+   if (cached_level_valid && cached_level == level) {
+      unifrog_log("unifrog backlight direct level=%u cached=1\n", level);
+      return 0;
+   }
+
    if (set_direct_pwm(level) == 0)
       return 0;
 

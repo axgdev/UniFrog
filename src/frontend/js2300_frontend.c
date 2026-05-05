@@ -47,6 +47,8 @@ int frontend_start_boot_read_window(struct js2300_frontend *frontend,
 {
    char detail[160];
    char restore_detail[160];
+   uint32_t start_ms;
+   uint32_t switch_ms;
    int ret;
    int restore_ret;
 
@@ -70,10 +72,15 @@ int frontend_start_boot_read_window(struct js2300_frontend *frontend,
    printf("unifrog frontend boot_read begin profile=%s boot=%s tag=%s pending=%u\n",
       UNIFROG_SD_READ_MODE, UNIFROG_SD_MODE, tag ? tag : "",
       (unsigned)unifrog_log_pending());
+   start_ms = unifrog_perf_time_ms();
    ret = unifrog_platform_sd_apply_profile(UNIFROG_SD_READ_MODE, 4, 100,
       detail, sizeof(detail));
+   switch_ms = unifrog_perf_time_ms();
    printf("unifrog frontend boot_read switch ret=%d profile=%s detail=%s\n",
       ret, UNIFROG_SD_READ_MODE, detail);
+   printf("unifrog boot_perf phase=boot_read_switch ms=%lu total_ms=%lu ret=%d\n",
+      (unsigned long)(switch_ms - start_ms),
+      (unsigned long)(switch_ms - frontend->frontend_start_ms), ret);
    if (ret == 0) {
       frontend->boot_read_active = 1;
       return 1;
@@ -94,6 +101,8 @@ int frontend_restore_boot_read_window(struct js2300_frontend *frontend,
    const char *tag, int flush)
 {
    char detail[160];
+   uint32_t start_ms;
+   uint32_t done_ms;
    int ret;
 
    if (!frontend || !frontend->boot_read_active)
@@ -102,9 +111,15 @@ int frontend_restore_boot_read_window(struct js2300_frontend *frontend,
    printf("unifrog frontend boot_read restore begin tag=%s profile=%s pending=%u deferred=%d\n",
       tag ? tag : "", UNIFROG_SD_READ_MODE,
       (unsigned)unifrog_log_pending(), unifrog_log_flush_deferred());
+   start_ms = unifrog_perf_time_ms();
    ret = unifrog_platform_sd_restore_boot(4, 100, detail, sizeof(detail));
+   done_ms = unifrog_perf_time_ms();
    printf("unifrog frontend boot_read restore ret=%d tag=%s detail=%s\n",
       ret, tag ? tag : "", detail);
+   printf("unifrog boot_perf phase=boot_read_restore ms=%lu total_ms=%lu ret=%d tag=%s\n",
+      (unsigned long)(done_ms - start_ms),
+      (unsigned long)(done_ms - frontend->frontend_start_ms), ret,
+      tag ? tag : "");
    if (ret != 0)
       return ret;
    frontend->boot_read_active = 0;
@@ -174,6 +189,7 @@ int js2300_frontend_main(void)
 
    memset(&frontend, 0, sizeof(frontend));
    frontend_start_ms = unifrog_perf_time_ms();
+   frontend.frontend_start_ms = frontend_start_ms;
    unifrog_battery_status_init(&frontend.battery);
 
    if (frontend_fb_open(&frontend) != 0)
@@ -194,6 +210,8 @@ int js2300_frontend_main(void)
       const char *recover_tag;
       unsigned relaunch = launch_count++;
       uint32_t launch_ms;
+      uint32_t input_start_ms;
+      uint32_t input_done_ms;
       uint32_t create_start_ms;
       uint32_t run_start_ms;
       char diag_tag[48];
@@ -210,7 +228,13 @@ int js2300_frontend_main(void)
          unifrog_input_clear();
          frontend.input_recovered = 0;
       } else {
+         input_start_ms = unifrog_perf_time_ms();
          unifrog_input_recover_core_transition(recover_tag);
+         input_done_ms = unifrog_perf_time_ms();
+         printf("unifrog boot_perf phase=input_recover ms=%lu total_ms=%lu tag=%s\n",
+            (unsigned long)(input_done_ms - input_start_ms),
+            (unsigned long)(input_done_ms - frontend_start_ms),
+            recover_tag);
       }
       unifrog_libretro_run_options_init(&frontend.run_options);
       old_auto_flush = unifrog_log_auto_flush_bytes();
