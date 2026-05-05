@@ -10,7 +10,7 @@ var config = {
   autoIndex: 0,
   romRoots: "/ROMS|/",
   language: "en",
-  font: "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf",
+  font: "builtin",
   fontSize: 12,
   fastSd: "boot",
   lastPath: "",

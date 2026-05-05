@@ -80,8 +80,10 @@ files for English, Simplified Chinese, Hindi, Spanish, French, Arabic,
 Bengali, Portuguese, Russian, Urdu, Indonesian, German, Japanese, Swahili,
 Marathi, Telugu, Turkish, Tamil, Vietnamese, and Korean.
 
-Themes use `font=/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf` by
-default. The native renderer reads UTF-8 text and renders glyphs on demand from
+Themes use `font=builtin` by default. That selects the native 5x7 bitmap font,
+which is sharp and cheap on the device but only covers the built-in ASCII UI
+glyphs. The settings menu can switch to packaged TTF fonts when Unicode text is
+needed. The native renderer reads UTF-8 text and renders glyphs on demand from
 TTF files through a small cache. A theme may provide a semicolon-separated
 fallback list, for example:
 
@@ -96,6 +98,12 @@ glyph per line:
 ```text
 A=7e 11 11 11 7e
 ```
+
+The fast ROM/module loading setting intentionally exposes only `boot` and `hs1`
+in the normal launcher. Wider and UHS profiles can still be tested from the
+Developer storage diagnostics, but they are not offered for game launches
+because a bad card/profile combination can lose the filesystem before the
+frontend can recover.
 
 Icon keys such as `icon_gba`, `icon_snes`, `icon_media`, and `icon_settings`
 accept absolute paths or paths relative to `icon_root`.

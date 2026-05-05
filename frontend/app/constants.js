@@ -94,7 +94,14 @@ var languageOptions = [
   { label: "العربية", value: "ar" }
 ];
 var fontOptions = [
+  { label: "Bitmap 5x7", value: "builtin" },
   { label: "Noto Sans", value: "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf" },
+  { label: "Arabic fallback", value: "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf;/media/mmcblk0/unifrog/fonts/NotoSansArabic-Regular.ttf" },
+  { label: "Devanagari fallback", value: "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf;/media/mmcblk0/unifrog/fonts/NotoSansDevanagari-Regular.ttf" },
+  { label: "Bengali fallback", value: "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf;/media/mmcblk0/unifrog/fonts/NotoSansBengali-Regular.ttf" },
+  { label: "Tamil fallback", value: "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf;/media/mmcblk0/unifrog/fonts/NotoSansTamil-Regular.ttf" },
+  { label: "Telugu fallback", value: "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf;/media/mmcblk0/unifrog/fonts/NotoSansTelugu-Regular.ttf" },
+  { label: "CJK fallback", value: "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf;/media/mmcblk0/unifrog/fonts/DroidSansFallback.ttf" },
   { label: "Arabic", value: "/media/mmcblk0/unifrog/fonts/NotoSansArabic-Regular.ttf" },
   { label: "Devanagari", value: "/media/mmcblk0/unifrog/fonts/NotoSansDevanagari-Regular.ttf" },
   { label: "Bengali", value: "/media/mmcblk0/unifrog/fonts/NotoSansBengali-Regular.ttf" },
@@ -109,12 +116,7 @@ var fontSizeOptions = [
 ];
 var fastSdOptions = [
   { label: "Boot", value: "boot" },
-  { label: "hs1", value: "hs1" },
-  { label: "wide50", value: "wide50" },
-  { label: "wide", value: "wide" },
-  { label: "uhs12", value: "uhs12" },
-  { label: "uhs25", value: "uhs25" },
-  { label: "uhs", value: "uhs" }
+  { label: "hs1", value: "hs1" }
 ];
 var mediaSuffixes = [
   ".mp4", ".mov", ".mkv", ".avi", ".ts", ".m2ts", ".mpg", ".mpeg",

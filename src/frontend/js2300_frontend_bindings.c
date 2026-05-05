@@ -19,6 +19,31 @@ static void frontend_fb_clear_buffers(struct unifrog_fb *fb)
    }
 }
 
+static void frontend_fb_return_frame(struct unifrog_fb *fb, const char *tag)
+{
+   uint16_t bg = UNIFROG_RGB565(9, 12, 20);
+   uint16_t edge = UNIFROG_RGB565(31, 44, 68);
+   uint16_t text = UNIFROG_RGB565(226, 232, 240);
+   uint16_t muted = UNIFROG_RGB565(148, 163, 184);
+
+   for (unsigned i = 0; i < fb->buffer_count; i++) {
+      struct unifrog_surface surface = unifrog_fb_surface_for_buffer(fb, i);
+      int x = (int)surface.width / 2 - 45;
+      int y = (int)surface.height / 2 - 12;
+
+      unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height, bg);
+      unifrog_gfx_draw_hline(&surface, 0, 0, surface.width, edge);
+      unifrog_gfx_draw_hline(&surface, 0, (int)surface.height - 1,
+         surface.width, edge);
+      unifrog_gfx_draw_text(&surface, x, y, "UNIFROG", text, 2);
+      unifrog_gfx_draw_text(&surface, x + 7, y + 22, "Returning", muted, 1);
+      unifrog_fb_flush_buffer(fb, i);
+   }
+   (void)unifrog_fb_pan(fb, fb->current_buffer);
+   printf("unifrog js fb return_frame tag=%s current=%u buffers=%u\n",
+      tag ? tag : "none", fb->current_buffer, fb->buffer_count);
+}
+
 static void frontend_video_state_reset(struct js2300_frontend *frontend)
 {
    frontend->draw_buffer = frontend->fb.current_buffer;
@@ -39,8 +64,7 @@ static int frontend_fb_open_tagged(struct js2300_frontend *frontend,
    unsigned flags;
 
    preserve_logo = unifrog_boot_logo_is_active();
-   flags = (preserve_logo || !redraw_logo) ?
-      UNIFROG_FB_OPEN_PRESERVE : UNIFROG_FB_OPEN_DEFAULT;
+   flags = preserve_logo ? UNIFROG_FB_OPEN_PRESERVE : UNIFROG_FB_OPEN_DEFAULT;
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_FB_OPEN_BEGIN,
       unifrog_perf_time_ms(), (uint32_t)preserve_logo, 0);
    if (unifrog_fb_open(&frontend->fb, flags) != 0) {
@@ -51,6 +75,8 @@ static int frontend_fb_open_tagged(struct js2300_frontend *frontend,
    if (!preserve_logo && redraw_logo) {
       frontend_fb_clear_buffers(&frontend->fb);
       (void)unifrog_fb_pan(&frontend->fb, frontend->fb.current_buffer);
+   } else if (!preserve_logo) {
+      frontend_fb_return_frame(&frontend->fb, tag);
    }
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_FB_CLEAR_DONE,
       unifrog_perf_time_ms(), frontend->fb.width,
@@ -364,6 +390,14 @@ int host_video_font(void *opaque, const char *path)
    int ret;
    (void)opaque;
 
+   if (!path || !path[0] || strcmp(path, "builtin") == 0 ||
+       strncmp(path, "builtin;", 8) == 0 || strcmp(path, "bitmap") == 0 ||
+       strncmp(path, "bitmap;", 7) == 0) {
+      unifrog_gfx_reset_font();
+      printf("js2300 font load path=%s ret=0 reason=builtin\n",
+         path ? path : "?");
+      return 0;
+   }
    if (path && strstr(path, ".otf")) {
       printf("js2300 font load path=%s ret=-1 reason=otf_disabled\n", path);
       return -1;

@@ -99,16 +99,16 @@ ROM roots without modifying packaged defaults.
 
 SD builds boot with the reliable 1-bit profile. Frontend startup stays on that
 boot profile by default. Fast SD read windows are reserved for ROM and native
-module loading, and the frontend `fast_sd` option lets users choose `boot`,
-`hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, or `uhs` for their own card. In the
-safe build, Developer -> Storage test runs a quick
-guarded runtime sweep: it buffers logs, shows
-progress on screen, prefers `/ROMS/test.md` when present, verifies a safe
-remount first, switches profiles through the SD bus suspend/resume hooks, tries
-`hs1`, `wide50`, `uhs12`, `uhs25`, `wide`, and `uhs`, then restores the safe
-boot profile before writing `/unifrog/storage-test-result.txt` and the frontend
-report. Developer -> Storage full test uses `/ROMS/probes/test*.md`, restores
-the safe profile after each experimental read, and checkpoints
+module loading. The frontend `fast_sd` option intentionally exposes only
+`boot` and `hs1`; wider and UHS modes can lose the filesystem on some cards
+before the launcher can recover. In the safe build, Developer -> Storage test
+runs a quick guarded runtime sweep: it buffers logs, shows progress on screen,
+prefers `/ROMS/test.md` when present, verifies a safe remount first, switches
+profiles through the SD bus suspend/resume hooks, tries `hs1`, `wide50`,
+`uhs12`, `uhs25`, `wide`, and `uhs`, then restores the safe boot profile before
+writing `/unifrog/storage-test-result.txt` and the frontend report. Developer
+-> Storage full test uses `/ROMS/probes/test*.md`, restores the safe profile
+after each experimental read, and checkpoints
 `/unifrog/storage-full-test-result.txt` between modes. Developer -> Storage
 mode test selects one profile, switches once, runs all probes, then restores
 safe mode and writes `/unifrog/storage-mode-test-result.txt`. The on-screen

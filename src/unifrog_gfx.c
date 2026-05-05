@@ -662,6 +662,12 @@ static int font_path_list_has_ttf(const char *path)
    return 0;
 }
 
+void unifrog_gfx_reset_font(void)
+{
+   ttf_clear();
+   memset(font5x7_custom_valid, 0, sizeof(font5x7_custom_valid));
+}
+
 int unifrog_gfx_load_font5x7_file(const char *path)
 {
    FILE *file;

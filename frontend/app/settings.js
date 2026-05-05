@@ -66,11 +66,11 @@ function writeUserOptions() {
   text += "auto_index=" + String(config.autoIndex) + "\n";
   text += "### [language] :[" + config.language + "] :[en|zh-Hans|hi|es|fr|ar|bn|pt|ru|ur|id|de|ja|sw|mr|te|tr|ta|vi|ko]\n";
   text += "language=" + config.language + "\n";
-  text += "### [font] :[" + config.font + "] :[NotoSans-Regular|NotoSansArabic|NotoSansDevanagari|NotoSansBengali|NotoSansTamil|NotoSansTelugu|DroidSansFallback]\n";
+  text += "### [font] :[" + config.font + "] :[Bitmap5x7|NotoSans-Regular|ArabicFallback|DevanagariFallback|BengaliFallback|TamilFallback|TeluguFallback|CJKFallback|NotoSansArabic|NotoSansDevanagari|NotoSansBengali|NotoSansTamil|NotoSansTelugu|DroidSansFallback]\n";
   text += "font=" + config.font + "\n";
   text += "### [font_size] :[" + String(config.fontSize) + "] :[10|11|12|13|14|15]\n";
   text += "font_size=" + String(config.fontSize) + "\n";
-  text += "### [fast_sd] :[" + config.fastSd + "] :[boot|hs1|wide50|wide|uhs12|uhs25|uhs]\n";
+  text += "### [fast_sd] :[" + config.fastSd + "] :[boot|hs1]\n";
   text += "fast_sd=" + config.fastSd + "\n";
   JS2300.fs.writeText(USER_OPTIONS_PATH, text);
 }
@@ -115,6 +115,8 @@ function loadSettings() {
   config.fontSize =
     fontSizeOptions[optionIndex(fontSizeOptions, config.fontSize, 2)].value;
   config.fastSd = fastSdOptions[optionIndex(fastSdOptions, config.fastSd, 0)].value;
+  if (config.font === "builtin" && fontForLanguage(config.language) !== "builtin")
+    config.font = fontForLanguage(config.language);
   if (JS2300.system.backlight)
     JS2300.system.backlight(config.brightness);
   if (JS2300.system.avOutput)
@@ -226,7 +228,7 @@ function fontForLanguage(language) {
     return latin + ";/media/mmcblk0/unifrog/fonts/NotoSansTelugu-Regular.ttf";
   if (language === "ja" || language === "ko" || language === "zh-Hans")
     return latin + ";/media/mmcblk0/unifrog/fonts/DroidSansFallback.ttf";
-  return latin;
+  return "builtin";
 }
 
 function updateBattery(now) {
