@@ -82,7 +82,7 @@ static void init_board_gpios(void)
    gpio_configure(PINPAD_T07, GPIO_DIR_OUTPUT);
    gpio_set_output(PINPAD_T07, true);
 
-   printf("unifrog platform gpio_init l=0x%08lx/0x%08lx r=0x%08lx/0x%08lx "
+   unifrog_log("unifrog platform gpio_init l=0x%08lx/0x%08lx r=0x%08lx/0x%08lx "
           "mux_l22=%u mux_l23=%u mux_l24=%u mux_l25=%u mux_l26=%u mux_l27=%u mux_l28=%u mux_l29=%u mux_r07=%u\n",
       (unsigned long)*(volatile uint32_t *)0xb8800058u,
       (unsigned long)*(volatile uint32_t *)0xb8800054u,
@@ -109,7 +109,7 @@ static void log_storage_config(void)
    if (node < 0)
       node = fdt_get_node_offset_by_path("/mmc");
    if (node < 0) {
-      printf("unifrog storage config mmc_node=missing\n");
+      unifrog_log("unifrog storage config mmc_node=missing\n");
       return;
    }
 
@@ -117,7 +117,7 @@ static void log_storage_config(void)
    (void)fdt_get_property_u_32_index(node, "bus-width", 0, &bus_width);
    (void)fdt_get_property_u_32_index(node, "clock-frequency", 0, &clock);
 
-   printf("unifrog storage config mode=%s experimental=%d node=%d status=%s clock=%lu "
+   unifrog_log("unifrog storage config mode=%s experimental=%d node=%d status=%s clock=%lu "
           "bus-width=%lu cap-highspeed=%d supports-highspeed=%d "
           "uhs-sdr12=%d uhs-sdr25=%d uhs-sdr50=%d no-1v8=%d broken-cd=%d\n",
       UNIFROG_SD_MODE,
@@ -141,7 +141,7 @@ static void log_fastboot_diag(void)
    if (diag->magic != FASTBOOT_DIAG_MAGIC)
       return;
 
-   printf("unifrog fastboot diag stage=0x%08lx event=%lu result=%ld path=%s\n",
+   unifrog_log("unifrog fastboot diag stage=0x%08lx event=%lu result=%ld path=%s\n",
       (unsigned long)diag->stage_addr,
       (unsigned long)diag->event,
       (long)diag->result,

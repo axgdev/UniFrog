@@ -1299,7 +1299,7 @@ void unifrog_core_load_progress(const char *stage, unsigned current,
       printf("unifrog libretro load_progress stage=%s current=%u total=%u percent=%u\n",
          stage && stage[0] ? stage : "?", current, total, percent);
       if (watchdog_phase == LIBRETRO_WATCHDOG_PHASE_LOAD)
-         (void)unifrog_log_flush_force();
+         (void)unifrog_log_flush();
    }
 }
 

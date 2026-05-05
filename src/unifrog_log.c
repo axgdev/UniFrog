@@ -4,10 +4,17 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/unistd.h>
 
 #define MEMLOG_BYTES (1024 * 1024)
 #define MEMLOG_AUTO_FLUSH_BYTES (4 * 1024)
+#define MEMLOG_FILE_MAX_BYTES (1024 * 1024)
+
+struct memlog_path {
+   const char *path;
+   const char *prev_path;
+};
 
 static char memlog[MEMLOG_BYTES];
 static size_t memlog_len;
@@ -19,11 +26,11 @@ static int memlog_flush_deferred;
 static const char *memlog_last_path;
 static int memlog_last_result;
 
-static const char *const memlog_paths[] = {
-   "/media/mmcblk0/log.txt",
-   "/media/mmcblk0p1/log.txt",
-   "/media/mmcblk0p2/log.txt",
-   "/log.txt",
+static const struct memlog_path memlog_paths[] = {
+   { "/media/mmcblk0/log.txt", "/media/mmcblk0/log-prev.txt" },
+   { "/media/mmcblk0p1/log.txt", "/media/mmcblk0p1/log-prev.txt" },
+   { "/media/mmcblk0p2/log.txt", "/media/mmcblk0p2/log-prev.txt" },
+   { "/log.txt", "/log-prev.txt" },
 };
 
 static int memlog_open(int flags)
@@ -32,14 +39,29 @@ static int memlog_open(int flags)
 
    memlog_last_path = NULL;
    for (size_t i = 0; i < sizeof(memlog_paths) / sizeof(memlog_paths[0]); i++) {
-      fd = open(memlog_paths[i], flags, 0666);
+      fd = open(memlog_paths[i].path, flags, 0666);
       if (fd >= 0) {
-         memlog_last_path = memlog_paths[i];
+         memlog_last_path = memlog_paths[i].path;
          break;
       }
    }
 
    return fd;
+}
+
+static void memlog_rotate_large_files(void)
+{
+   struct stat st;
+
+   for (size_t i = 0; i < sizeof(memlog_paths) / sizeof(memlog_paths[0]); i++) {
+      if (stat(memlog_paths[i].path, &st) != 0)
+         continue;
+      if (st.st_size <= (off_t)MEMLOG_FILE_MAX_BYTES)
+         continue;
+      (void)unlink(memlog_paths[i].prev_path);
+      if (rename(memlog_paths[i].path, memlog_paths[i].prev_path) != 0)
+         (void)unlink(memlog_paths[i].path);
+   }
 }
 
 int unifrog_log(const char *fmt, ...)
@@ -83,6 +105,10 @@ int unifrog_log_reset(void)
 
    if (memlog_flushing)
       return 0;
+
+   memlog_flushing = 1;
+   memlog_rotate_large_files();
+   memlog_flushing = 0;
 
    if (memlog_len > 0 || memlog_dropped)
       (void)unifrog_log_flush();

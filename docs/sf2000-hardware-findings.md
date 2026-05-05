@@ -87,14 +87,17 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
   profile is parsed from the DTB when the block device is initialized, and
   switching timing/bus width under a mounted filesystem would need explicit
   driver support.
-- Experimental SD builds defer normal file-log flushes during game launch so
-  ROM/core reads are not competing with diagnostic writes on an unstable bus.
-- UniFrog appends a boot marker to `/log.txt` instead of truncating the file.
-  The in-memory log buffer now flushes before overflow when file I/O is safe
-  instead of truncating older buffered data.
-- The SDK file UART must append to `/log.txt`; UniFrog owns the one boot-time
-  marker. If file UART truncates on a late SD mount notification it can erase
-  earlier app/core runs.
+- Experimental SD builds defer file-log flushes during game launch where
+  possible so ROM/core reads are not competing with diagnostic writes on an
+  unstable bus.
+- `logunifrog0010.txt` confirmed `SD_MODE=uhs`, but GBA ZIP preparation was
+  still about 5.7 s and did not beat the best reliable 1-bit runs. The run
+  still showed boot-time automount churn, but no mid-session unmount lines.
+- UniFrog keeps `/log.txt` bounded: when it grows past 1 MiB at boot, it moves
+  the previous file to `/log-prev.txt` before appending the new run.
+- The SDK file UART appends lazily after mount and syncs only after larger
+  chunks. It must not open and `fsync()` `/log.txt` immediately on every mount
+  notification because that competes with early SD probing.
 - HCRTOS FAT append semantics must be real, not just `O_APPEND` in the stored
   file flags. The FAT mount has to seek to end on open and before each append
   write, otherwise UniFrog flushes and file UART writes can overwrite earlier

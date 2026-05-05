@@ -68,10 +68,11 @@ verification before handing off changes. If linker scripts or link libraries
 change, run `make clean && make verify`.
 
 SD builds default to the reliable 1-bit profile. Use `SD_MODE=wide` or
-`SD_MODE=uhs` only as diagnostics; those builds defer normal file-log flushes
-while launching games so unstable storage tests are not slowed further by log
-writes. The board DTS in `board/hc15xx/common/dts/sf2000_min.dts` is the
-single source used by both the firmware and SDK kernel rebuild.
+`SD_MODE=uhs` only as diagnostics; those builds defer file-log flushes while
+launching games where possible so unstable storage tests are not slowed further
+by log writes. Device logs rotate to `log-prev.txt` when `log.txt` grows past
+1 MiB. The board DTS in `board/hc15xx/common/dts/sf2000_min.dts` is the single
+source used by both the firmware and SDK kernel rebuild.
 
 ## Layout
 
