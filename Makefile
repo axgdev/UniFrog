@@ -57,7 +57,7 @@ DTS_PRE := $(BUILD)/$(DTS_NAME).dtb.dts.tmp
 DTB := $(BUILD)/$(DTS_NAME).dtb
 DTB_ASM := $(BUILD)/$(DTS_NAME)_dtb.S
 DTB_OBJ := $(BUILD)/$(DTS_NAME)_dtb.o
-DTS_MODE_STAMP := $(BUILD)/sd-mode-$(SD_MODE).stamp
+DTS_MODE_STAMP := $(BUILD)/sd-mode.stamp
 DTC ?= dtc
 EMBED_DTB ?= 1
 CCACHE ?=
@@ -841,14 +841,16 @@ $(FASTBOOT_STUB_BIN): $(FASTBOOT_STUB_OUT)
 	@echo "  OBJCOPY $@"
 	$(Q)$(OBJCOPY) -O binary $< $@
 
-$(DTS_MODE_STAMP): | $(BUILD)
-	$(Q)printf '%s\n' \
+$(DTS_MODE_STAMP): FORCE | $(BUILD)
+	$(Q)value=$$(printf '%s\n' \
 		"SD_MODE=$(SD_MODE)" \
 		"SD_BUS_WIDTH=$(SD_BUS_WIDTH)" \
 		"SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED)" \
 		"SD_CAP_UHS=$(SD_CAP_UHS)" \
 		"SD_NO_1V8=$(SD_NO_1V8)" \
-		"SD_EXPERIMENTAL=$(SD_EXPERIMENTAL)" > $@
+		"SD_EXPERIMENTAL=$(SD_EXPERIMENTAL)"); \
+	old=$$(cat $@ 2>/dev/null || true); \
+	if test "$$value" != "$$old"; then printf '%s\n' "$$value" > $@; fi
 
 $(DTS_PRE): $(DTS) $(DTS_MODE_STAMP) | $(BUILD)
 	@echo "  CPP     $<"

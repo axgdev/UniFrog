@@ -90,6 +90,9 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 - Experimental SD builds defer file-log flushes during game launch where
   possible so ROM/core reads are not competing with diagnostic writes on an
   unstable bus.
+- Trust the `unifrog storage config` line when comparing SD modes. It reports
+  the DTB profile actually seen by the kernel (`bus-width`, high-speed, UHS,
+  and 1.8 V flags).
 - `logunifrog0010.txt` confirmed `SD_MODE=uhs`, but GBA ZIP preparation was
   still about 5.7 s and did not beat the best reliable 1-bit runs. The run
   still showed boot-time automount churn, but no mid-session unmount lines.
