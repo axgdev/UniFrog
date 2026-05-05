@@ -434,9 +434,19 @@ function changeSetting(delta, now) {
   } else if (id === "rom_roots") {
     config.romRoots = config.romRoots === "/ROMS|/" ? "/ROMS" : "/ROMS|/";
   } else if (id === "language") {
-    config.language =
+    var nextLanguage =
       languageOptions[(optionIndex(languageOptions, config.language, 0) +
       languageOptions.length + delta) % languageOptions.length].value;
+    var nextLanguageFont = fontForLanguage(nextLanguage);
+    if (!JS2300.video.font ||
+        JS2300.video.font(nextLanguageFont + ";size=" + String(config.fontSize)) >= 0) {
+      config.language = nextLanguage;
+      config.font = nextLanguageFont;
+      loadLocale(config.language);
+    } else {
+      toast = "Font missing";
+      toastUntilMs = now + 1200;
+    }
   } else if (id === "font") {
     var nextFont =
       fontOptions[(optionIndex(fontOptions, config.font, 0) +

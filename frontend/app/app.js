@@ -83,6 +83,7 @@ var NAV_STACK_MAX = 16;
 var frontendStartupStartMs = JS2300.now();
 var frontendPhaseStartMs = frontendStartupStartMs;
 var bootStorageRestored = false;
+var localeText = [];
 
 function frontendPhase(stage) {
   if (typeof frontendStartupMark === "function") {

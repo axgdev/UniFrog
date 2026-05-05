@@ -216,6 +216,13 @@ void unifrog_log_defer_end(void)
       memlog_defer_depth--;
 }
 
+void unifrog_log_defer_force_end(void)
+{
+   if (memlog_defer_depth > 0)
+      memlog_flush_deferred = 1;
+   memlog_defer_depth = 0;
+}
+
 int unifrog_log_flush_deferred(void)
 {
    return memlog_flush_deferred;

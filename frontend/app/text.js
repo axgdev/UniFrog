@@ -112,6 +112,50 @@ function readKey(text, key) {
   return "";
 }
 
+function setLocaleValue(key, value) {
+  var i;
+  for (i = 0; i < localeText.length; i++) {
+    if (localeText[i].key === key) {
+      localeText[i].value = value;
+      return;
+    }
+  }
+  localeText[localeText.length] = { key: key, value: value };
+}
+
+function loadLocale(language) {
+  var path = "/media/mmcblk0/unifrog/locales/" + language + ".ini";
+  var text = JS2300.fs.readText ? JS2300.fs.readText(path) : null;
+  var i = 0;
+  var line = "";
+  var eq;
+  var c;
+
+  localeText = [];
+  if (!text) return;
+  while (i <= text.length) {
+    if (i === text.length) c = 10;
+    else c = text.charCodeAt(i);
+    if (c === 10 || c === 13) {
+      eq = line.indexOf("=");
+      if (eq > 0)
+        setLocaleValue(textWindow(line, 0, eq), lineValue(line, eq + 1));
+      line = "";
+    } else {
+      line += String.fromCharCode(c);
+    }
+    i++;
+  }
+}
+
+function tr(key, fallback) {
+  var i;
+  for (i = 0; i < localeText.length; i++) {
+    if (localeText[i].key === key) return localeText[i].value;
+  }
+  return fallback;
+}
+
 function lineValue(line, offset) {
   var out = "";
   var i;

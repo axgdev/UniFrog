@@ -39,7 +39,8 @@ static int frontend_fb_open_tagged(struct js2300_frontend *frontend,
    unsigned flags;
 
    preserve_logo = unifrog_boot_logo_is_active();
-   flags = preserve_logo ? UNIFROG_FB_OPEN_PRESERVE : UNIFROG_FB_OPEN_DEFAULT;
+   flags = (preserve_logo || !redraw_logo) ?
+      UNIFROG_FB_OPEN_PRESERVE : UNIFROG_FB_OPEN_DEFAULT;
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_FB_OPEN_BEGIN,
       unifrog_perf_time_ms(), (uint32_t)preserve_logo, 0);
    if (unifrog_fb_open(&frontend->fb, flags) != 0) {
@@ -47,7 +48,7 @@ static int frontend_fb_open_tagged(struct js2300_frontend *frontend,
       return -1;
    }
    frontend_fb_set_handoff_buffers(&frontend->fb, preserve_logo);
-   if (!preserve_logo) {
+   if (!preserve_logo && redraw_logo) {
       frontend_fb_clear_buffers(&frontend->fb);
       (void)unifrog_fb_pan(&frontend->fb, frontend->fb.current_buffer);
    }

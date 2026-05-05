@@ -12,6 +12,17 @@ function homeDetail(item) {
   return item.detail;
 }
 
+function itemTextKey(item) {
+  if (item.id === "last") return "continue";
+  if (item.id === "index") return "index_library";
+  if (item.id === "files") return "files";
+  return item.id;
+}
+
+function itemLabel(item) {
+  return tr(itemTextKey(item), item.label);
+}
+
 function countForSystem(name) {
   var i;
   for (i = 0; i < systems.length; i++) {
@@ -181,7 +192,7 @@ function drawHome(now) {
     y = 47 + rowIndex * 42;
     active = idx === selected;
     focus = active ? theme.colors.accent : theme.colors.row;
-    label = shortText(homeItems[idx].label, 14);
+    label = shortText(itemLabel(homeItems[idx]), 14);
     detail = shortText(homeDetail(homeItems[idx]), 12);
     JS2300.video.rects([
       [x, y, w, h, focus],
@@ -454,7 +465,7 @@ function drawSettings(now) {
   var active;
   var row;
   JS2300.video.clear(theme.colors.background);
-  topBar(settingsTitle);
+  topBar(tr(lowerAscii(settingsTitle), settingsTitle));
   drawRows(settingRows.length, 31, 21, 18);
   for (i = 0; i < 9; i++) {
     idx = scroll + i;
@@ -462,7 +473,8 @@ function drawSettings(now) {
     y = 36 + i * 21;
     active = idx === selected;
     row = settingRows[idx];
-    JS2300.video.text(16, y, row.label, active ? theme.text.selected : theme.text.primary);
+    JS2300.video.text(16, y, tr(row.id, row.label),
+      active ? theme.text.selected : theme.text.primary);
     if (row.id === "brightness") {
       drawSlider(154, y - 1, 82, config.brightness, 1, 100, active);
       JS2300.video.text(250, y, settingValue(row.id),

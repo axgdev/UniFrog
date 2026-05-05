@@ -485,6 +485,11 @@ int host_action(void *opaque, const char *id)
          unifrog_log_defer_end();
          unifrog_log_set_auto_flush_bytes(old_auto_flush);
       }
+      unifrog_platform_set_storage_log_suspended(0);
+      unifrog_log_defer_force_end();
+      if (storage_quiet)
+         unifrog_log_set_auto_flush_bytes(old_auto_flush);
+      (void)unifrog_log_flush_force();
       frontend_fb_reopen(frontend, "warm_libretro_return");
       unifrog_input_clear();
       frontend->input_recovered = 1;

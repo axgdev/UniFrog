@@ -119,6 +119,7 @@ function loadSettings() {
     JS2300.system.backlight(config.brightness);
   if (JS2300.system.avOutput)
     JS2300.system.avOutput(config.av);
+  loadLocale(config.language);
   if (firstBoot) {
     if (JS2300.system.action &&
         JS2300.system.action("storage:fast-read-active") > 0)
@@ -209,6 +210,23 @@ function loadThemeFile() {
 function applyConfiguredFont() {
   if (JS2300.video.font)
     JS2300.video.font(config.font + ";size=" + String(config.fontSize));
+}
+
+function fontForLanguage(language) {
+  var latin = "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf";
+  if (language === "ar" || language === "ur")
+    return latin + ";/media/mmcblk0/unifrog/fonts/NotoSansArabic-Regular.ttf";
+  if (language === "hi" || language === "mr")
+    return latin + ";/media/mmcblk0/unifrog/fonts/NotoSansDevanagari-Regular.ttf";
+  if (language === "bn")
+    return latin + ";/media/mmcblk0/unifrog/fonts/NotoSansBengali-Regular.ttf";
+  if (language === "ta")
+    return latin + ";/media/mmcblk0/unifrog/fonts/NotoSansTamil-Regular.ttf";
+  if (language === "te")
+    return latin + ";/media/mmcblk0/unifrog/fonts/NotoSansTelugu-Regular.ttf";
+  if (language === "ja" || language === "ko" || language === "zh-Hans")
+    return latin + ";/media/mmcblk0/unifrog/fonts/DroidSansFallback.ttf";
+  return latin;
 }
 
 function updateBattery(now) {
