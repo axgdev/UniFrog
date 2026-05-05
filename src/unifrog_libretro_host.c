@@ -471,6 +471,7 @@ static volatile unsigned watchdog_active;
 static volatile unsigned watchdog_phase;
 static volatile unsigned watchdog_marker;
 static volatile unsigned watchdog_heartbeat;
+static volatile unsigned watchdog_storage_recoveries;
 
 static void loading_draw(const char *title, const char *detail,
    unsigned percent);
@@ -1259,8 +1260,11 @@ static void libretro_watchdog_task(void *arg)
    unsigned last_phase = 0;
    unsigned last_marker = 0;
    unsigned last_heartbeat = 0;
+   unsigned recover_at = libretro_watchdog_load_stall_polls() / 2u;
 
    (void)arg;
+   if (recover_at < 8u)
+      recover_at = 8u;
 
    while (watchdog_active) {
       vTaskDelay(LIBRETRO_WATCHDOG_TICKS);
@@ -1280,6 +1284,20 @@ static void libretro_watchdog_task(void *arg)
          last_phase = watchdog_phase;
          last_marker = watchdog_marker;
          last_heartbeat = watchdog_heartbeat;
+      }
+      if (watchdog_phase == LIBRETRO_WATCHDOG_PHASE_LOAD &&
+          stable_polls == recover_at && watchdog_storage_recoveries == 0) {
+         char detail[160];
+         int ret;
+
+         detail[0] = '\0';
+         watchdog_storage_recoveries++;
+         unifrog_platform_set_storage_log_suspended(0);
+         ret = unifrog_platform_sd_restore_boot(4, 100, detail,
+            sizeof(detail));
+         printf("unifrog libretro watchdog storage_restore ret=%d phase=%u marker=%u stable=%u detail=%s\n",
+            ret, watchdog_phase, watchdog_marker, stable_polls, detail);
+         watchdog_heartbeat++;
       }
       if (watchdog_phase == LIBRETRO_WATCHDOG_PHASE_LOAD &&
           stable_polls >= libretro_watchdog_load_stall_polls()) {
@@ -1307,6 +1325,7 @@ static void libretro_watchdog_start(void)
    watchdog_phase = 0;
    watchdog_marker = 0;
    watchdog_heartbeat = 1;
+   watchdog_storage_recoveries = 0;
    if (xTaskCreate(libretro_watchdog_task, (const char *)"lr_wdog",
        configTASK_STACK_DEPTH, NULL, portPRI_TASK_HIGH, NULL) != pdPASS) {
       watchdog_active = 0;

@@ -45,6 +45,8 @@ These inputs are fetched by `make deps` and pinned by the root `Makefile` or
 | Zstandard | `.deps/support/zstd` | Zstd decode support | BSD 3-Clause. See `.deps/support/zstd/LICENSE`. |
 | HCRTOS SDK | `unifrog-hcrtos-sdk/` | Headers, libraries, kernel rebuild, media module | Mixed open-source and vendor terms. See the SDK license and third-party notice files. |
 | Noto Fonts | `.deps/fonts` | Optional packaged UI fonts | SIL Open Font License 1.1. Fetched from the notofonts GitHub repositories by `make deps-fonts`. |
+| Spleen | `.deps/fonts/Spleen*.bdf` | Packaged bitmap UI fonts | BSD 2-Clause. See `.deps/fonts/Spleen-LICENSE.txt`. |
+| GNU Unifont | `.deps/fonts/Unifont-*.bdf.gz` | Packaged compressed fallback bitmap font source | Dual licensed under SIL Open Font License 1.1 and GPL-2.0-or-later with the GNU font embedding exception. See `.deps/fonts/Unifont-LICENSE.txt` and the upstream Unifont license page. |
 
 ## Libretro Core Modules
 

@@ -82,7 +82,8 @@ Marathi, Telugu, Turkish, Tamil, Vietnamese, and Korean.
 
 Themes use `font=builtin` by default. That selects the native 5x7 bitmap font,
 which is sharp and cheap on the device but only covers the built-in ASCII UI
-glyphs. The settings menu can switch to packaged TTF fonts when Unicode text is
+glyphs. The settings menu can switch to packaged Spleen BDF bitmap fonts for
+larger Latin text, or to packaged TTF fonts when broader Unicode text is
 needed. The native renderer reads UTF-8 text and renders glyphs on demand from
 TTF files through a small cache. A theme may provide a semicolon-separated
 fallback list, for example:
@@ -99,23 +100,24 @@ glyph per line:
 A=7e 11 11 11 7e
 ```
 
-The fast ROM/module loading setting intentionally exposes only `boot` and `hs1`
-in the normal launcher. Wider and UHS profiles can still be tested from the
-Developer storage diagnostics, but they are not offered for game launches
-because a bad card/profile combination can lose the filesystem before the
-frontend can recover.
+The fast ROM/module loading setting exposes `boot`, `hs1`, `wide50`, `wide`,
+`uhs12`, `uhs25`, and `uhs`. If a launch stalls while using an experimental
+profile, the load watchdog attempts to restore the boot storage profile once
+before showing the core hang screen. Developer storage diagnostics remain the
+best way to test a card before choosing a fast mode for normal launches.
 
 Icon keys such as `icon_gba`, `icon_snes`, `icon_media`, and `icon_settings`
 accept absolute paths or paths relative to `icon_root`.
 
-`make deps-fonts` fetches permissively licensed Noto fonts into `.deps/fonts`;
-`make -C frontend package` includes `.ttf` files as `/unifrog/fonts` when
-present. OTF fonts are deliberately not packaged because they are too large for
-this target. The package ships Android's Apache-2.0 `DroidSansFallback.ttf` as
-the full CJK option for ROM filenames that need Japanese, Chinese, or Korean
-glyphs. The default theme loads the Latin/Greek/Cyrillic Noto Sans file only to
-keep normal startup memory low. Users and language-specific themes can add
-Arabic, Devanagari, Bengali, Tamil, Telugu, or CJK full fallback files when
+`make deps-fonts` fetches permissively licensed Noto TTF fonts, Spleen BDF
+bitmap fonts, and the compressed GNU Unifont BDF fallback source into
+`.deps/fonts`; `make -C frontend package` includes those files as
+`/unifrog/fonts` when present. OTF fonts are deliberately not packaged because
+they are too large for this target. The package ships Android's Apache-2.0
+`DroidSansFallback.ttf` as the full CJK option for ROM filenames that need
+Japanese, Chinese, or Korean glyphs. The default theme uses the built-in bitmap
+font to keep normal startup memory low. Users and language-specific themes can
+add Arabic, Devanagari, Bengali, Tamil, Telugu, or CJK full fallback files when
 they need those scripts.
 
 System icons live under `/unifrog/themes/system-icons/icons`. The packaged

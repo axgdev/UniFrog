@@ -66,11 +66,11 @@ function writeUserOptions() {
   text += "auto_index=" + String(config.autoIndex) + "\n";
   text += "### [language] :[" + config.language + "] :[en|zh-Hans|hi|es|fr|ar|bn|pt|ru|ur|id|de|ja|sw|mr|te|tr|ta|vi|ko]\n";
   text += "language=" + config.language + "\n";
-  text += "### [font] :[" + config.font + "] :[Bitmap5x7|NotoSans-Regular|ArabicFallback|DevanagariFallback|BengaliFallback|TamilFallback|TeluguFallback|CJKFallback|NotoSansArabic|NotoSansDevanagari|NotoSansBengali|NotoSansTamil|NotoSansTelugu|DroidSansFallback]\n";
+  text += "### [font] :[" + config.font + "] :[Bitmap5x7|Spleen6x12|Spleen8x16|NotoSans-Regular|ArabicFallback|DevanagariFallback|BengaliFallback|TamilFallback|TeluguFallback|CJKFallback|NotoSansArabic|NotoSansDevanagari|NotoSansBengali|NotoSansTamil|NotoSansTelugu|DroidSansFallback]\n";
   text += "font=" + config.font + "\n";
   text += "### [font_size] :[" + String(config.fontSize) + "] :[10|11|12|13|14|15]\n";
   text += "font_size=" + String(config.fontSize) + "\n";
-  text += "### [fast_sd] :[" + config.fastSd + "] :[boot|hs1]\n";
+  text += "### [fast_sd] :[" + config.fastSd + "] :[boot|hs1|wide50|wide|uhs12|uhs25|uhs]\n";
   text += "fast_sd=" + config.fastSd + "\n";
   JS2300.fs.writeText(USER_OPTIONS_PATH, text);
 }

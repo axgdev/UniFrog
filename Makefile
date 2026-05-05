@@ -23,6 +23,11 @@ NOTO_SANS_BENGALI_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted
 NOTO_SANS_TAMIL_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansTamil/NotoSansTamil-Regular.ttf
 NOTO_SANS_TELUGU_URL ?= https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansTelugu/NotoSansTelugu-Regular.ttf
 DROID_SANS_FALLBACK_URL ?= https://android.googlesource.com/platform/frameworks/base/+/android13-qpr1-s5-release/data/fonts/DroidSansFallback.ttf?format=TEXT
+SPLEEN_6X12_URL ?= https://raw.githubusercontent.com/fcambus/spleen/master/spleen-6x12.bdf
+SPLEEN_8X16_URL ?= https://raw.githubusercontent.com/fcambus/spleen/master/spleen-8x16.bdf
+SPLEEN_LICENSE_URL ?= https://raw.githubusercontent.com/fcambus/spleen/master/LICENSE
+UNIFONT_BDF_GZ_URL ?= https://unifoundry.com/pub/unifont/unifont-17.0.04/font-builds/unifont-17.0.04.bdf.gz
+UNIFONT_LICENSE_URL ?= https://unifoundry.com/LICENSE.txt
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 SD_MODE ?= safe
@@ -830,7 +835,12 @@ deps-fonts:
 	fetch_font "$(NOTO_SANS_BENGALI_URL)" NotoSansBengali-Regular.ttf; \
 	fetch_font "$(NOTO_SANS_TAMIL_URL)" NotoSansTamil-Regular.ttf; \
 	fetch_font "$(NOTO_SANS_TELUGU_URL)" NotoSansTelugu-Regular.ttf; \
-	fetch_android_font "$(DROID_SANS_FALLBACK_URL)" DroidSansFallback.ttf
+	fetch_android_font "$(DROID_SANS_FALLBACK_URL)" DroidSansFallback.ttf; \
+	fetch_font "$(SPLEEN_6X12_URL)" Spleen6x12.bdf; \
+	fetch_font "$(SPLEEN_8X16_URL)" Spleen8x16.bdf; \
+	fetch_font "$(SPLEEN_LICENSE_URL)" Spleen-LICENSE.txt; \
+	fetch_font "$(UNIFONT_BDF_GZ_URL)" Unifont-17.0.04.bdf.gz; \
+	fetch_font "$(UNIFONT_LICENSE_URL)" Unifont-LICENSE.txt
 
 deps-status:
 	@set -e; \

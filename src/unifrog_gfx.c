@@ -21,6 +21,8 @@
 #define TTF_MAX_BYTES (24u * 1024u * 1024u)
 #define TTF_PATH_LIST_MAX 1024
 #define TTF_PATH_MAX 512
+#define BDF_MAX_GLYPHS 2048
+#define BDF_BITMAP_MAX_BYTES (160u * 1024u)
 
 struct font5x7_glyph {
    char c;
@@ -85,6 +87,26 @@ static const struct font5x7_glyph font5x7_punctuation[] = {
 
 static uint8_t font5x7_custom[95][5];
 static uint8_t font5x7_custom_valid[95];
+
+struct bdf_glyph {
+   uint32_t codepoint;
+   int width;
+   int height;
+   int xoff;
+   int yoff;
+   int advance;
+   unsigned data_offset;
+   unsigned row_bytes;
+};
+
+static struct bdf_glyph bdf_glyphs[BDF_MAX_GLYPHS];
+static uint8_t bdf_bitmap[BDF_BITMAP_MAX_BYTES];
+static unsigned bdf_glyph_count;
+static unsigned bdf_bitmap_used;
+static int bdf_active;
+static int bdf_ascent = 8;
+static int bdf_line_height = 12;
+
 struct ttf_loaded_font {
    uint8_t *data;
    size_t size;
@@ -173,6 +195,17 @@ static void ttf_clear(void)
    ttf_baseline_offset = 0;
 }
 
+static void bdf_clear(void)
+{
+   memset(bdf_glyphs, 0, sizeof(bdf_glyphs));
+   memset(bdf_bitmap, 0, sizeof(bdf_bitmap));
+   bdf_glyph_count = 0;
+   bdf_bitmap_used = 0;
+   bdf_active = 0;
+   bdf_ascent = 8;
+   bdf_line_height = 12;
+}
+
 static uint16_t blend_rgb565(uint16_t dst, uint16_t src, unsigned alpha)
 {
    unsigned inv = 255u - alpha;
@@ -232,6 +265,60 @@ static uint32_t utf8_next_codepoint(const char **text)
    }
    *text += 1;
    return '?';
+}
+
+static const struct bdf_glyph *bdf_find_glyph(uint32_t codepoint)
+{
+   for (unsigned i = 0; i < bdf_glyph_count; i++) {
+      if (bdf_glyphs[i].codepoint == codepoint)
+         return &bdf_glyphs[i];
+   }
+   return NULL;
+}
+
+static void bdf_draw_glyph(const struct unifrog_surface *surface,
+   int x, int y, const struct bdf_glyph *glyph, uint16_t color)
+{
+   if (!glyph || glyph->data_offset + glyph->row_bytes * glyph->height >
+       bdf_bitmap_used)
+      return;
+   for (int row = 0; row < glyph->height; row++) {
+      const uint8_t *src = bdf_bitmap + glyph->data_offset +
+         (unsigned)row * glyph->row_bytes;
+      for (int col = 0; col < glyph->width; col++) {
+         unsigned byte_index = (unsigned)col >> 3;
+         unsigned bit_index = 7u - ((unsigned)col & 7u);
+
+         if (src[byte_index] & (1u << bit_index))
+            unifrog_gfx_put_pixel(surface, x + glyph->xoff + col,
+               y + bdf_ascent - glyph->yoff - glyph->height + row, color);
+      }
+   }
+}
+
+static void bdf_draw_text(const struct unifrog_surface *surface,
+   int x, int y, const char *text, uint16_t color)
+{
+   const char *p = text;
+
+   while (p && *p) {
+      uint32_t cp = utf8_next_codepoint(&p);
+      const struct bdf_glyph *glyph;
+
+      if (cp == '\n') {
+         y += bdf_line_height;
+         continue;
+      }
+      glyph = bdf_find_glyph(cp);
+      if (!glyph)
+         glyph = bdf_find_glyph('?');
+      if (glyph) {
+         bdf_draw_glyph(surface, x, y, glyph, color);
+         x += glyph->advance > 0 ? glyph->advance : glyph->width + 1;
+      } else {
+         x += 6;
+      }
+   }
 }
 
 static struct ttf_cached_glyph *ttf_find_cache(uint32_t codepoint,
@@ -471,6 +558,10 @@ void unifrog_gfx_draw_text(const struct unifrog_surface *surface,
       ttf_draw_text(surface, x, y, text, color);
       return;
    }
+   if (bdf_active && scale == 1) {
+      bdf_draw_text(surface, x, y, text, color);
+      return;
+   }
 
    while (*text) {
       unifrog_gfx_draw_char(surface, x, y, *text, color, scale);
@@ -662,9 +753,163 @@ static int font_path_list_has_ttf(const char *path)
    return 0;
 }
 
+static int font_path_has_ext(const char *path, const char *ext)
+{
+   size_t ext_len;
+   const char *start = path;
+
+   if (!path || !ext)
+      return 0;
+   ext_len = strlen(ext);
+   for (const char *p = path;; p++) {
+      if (*p == ';' || *p == '|' || *p == '\0') {
+         size_t len = (size_t)(p - start);
+
+         if (len >= ext_len &&
+             strncasecmp(start + len - ext_len, ext, ext_len) == 0)
+            return 1;
+         if (*p == '\0')
+            break;
+         start = p + 1u;
+      }
+   }
+   return 0;
+}
+
+static unsigned hex_nibble(char c)
+{
+   if (c >= '0' && c <= '9')
+      return (unsigned)(c - '0');
+   if (c >= 'a' && c <= 'f')
+      return (unsigned)(c - 'a') + 10u;
+   if (c >= 'A' && c <= 'F')
+      return (unsigned)(c - 'A') + 10u;
+   return 0xffu;
+}
+
+static int bdf_parse_bitmap_row(const char *line, uint8_t *out,
+   unsigned row_bytes)
+{
+   memset(out, 0, row_bytes);
+   for (unsigned i = 0; i < row_bytes; i++) {
+      unsigned hi;
+      unsigned lo;
+
+      while (*line == ' ' || *line == '\t')
+         line++;
+      hi = hex_nibble(line[0]);
+      lo = hex_nibble(line[1]);
+      if (hi > 0x0fu || lo > 0x0fu)
+         return -1;
+      out[i] = (uint8_t)((hi << 4) | lo);
+      line += 2;
+   }
+   return 0;
+}
+
+static int load_bdf_file(const char *path)
+{
+   FILE *file;
+   char clean_path[TTF_PATH_MAX];
+   char line[256];
+   struct bdf_glyph glyph;
+   uint8_t rows[64 * 8];
+   unsigned row_bytes = 0;
+   unsigned rows_read = 0;
+   int in_char = 0;
+   int in_bitmap = 0;
+   int loaded = 0;
+
+   if (!path)
+      return -1;
+   for (size_t i = 0; i < sizeof(clean_path); i++) {
+      if (path[i] == ';' || path[i] == '|' || path[i] == '\0') {
+         clean_path[i] = '\0';
+         break;
+      }
+      clean_path[i] = path[i];
+      if (i + 1u == sizeof(clean_path))
+         clean_path[i] = '\0';
+   }
+   file = fopen(clean_path, "rb");
+   if (!file)
+      return -1;
+   bdf_clear();
+   while (fgets(line, sizeof(line), file)) {
+      if (strncmp(line, "FONT_ASCENT ", 12) == 0) {
+         bdf_ascent = atoi(line + 12);
+      } else if (strncmp(line, "FONTBOUNDINGBOX ", 16) == 0) {
+         int w = 0, h = 0;
+
+         if (sscanf(line + 16, "%d %d", &w, &h) >= 2 && h > 0)
+            bdf_line_height = h;
+      } else if (strncmp(line, "STARTCHAR", 9) == 0) {
+         memset(&glyph, 0, sizeof(glyph));
+         glyph.codepoint = UINT32_MAX;
+         in_char = 1;
+         in_bitmap = 0;
+         row_bytes = 0;
+         rows_read = 0;
+      } else if (in_char && strncmp(line, "ENCODING ", 9) == 0) {
+         glyph.codepoint = (uint32_t)strtoul(line + 9, NULL, 10);
+      } else if (in_char && strncmp(line, "DWIDTH ", 7) == 0) {
+         glyph.advance = atoi(line + 7);
+      } else if (in_char && strncmp(line, "BBX ", 4) == 0) {
+         if (sscanf(line + 4, "%d %d %d %d", &glyph.width,
+             &glyph.height, &glyph.xoff, &glyph.yoff) != 4) {
+            glyph.width = 0;
+            glyph.height = 0;
+         }
+         if (glyph.width > 0 && glyph.height > 0 &&
+             glyph.height <= 64) {
+            row_bytes = ((unsigned)glyph.width + 7u) / 8u;
+            if (row_bytes > 8)
+               row_bytes = 0;
+         }
+      } else if (in_char && strncmp(line, "BITMAP", 6) == 0) {
+         in_bitmap = 1;
+         rows_read = 0;
+      } else if (in_char && in_bitmap && strncmp(line, "ENDCHAR", 7) != 0) {
+         if (row_bytes && rows_read < (unsigned)glyph.height &&
+             rows_read * row_bytes + row_bytes <= sizeof(rows)) {
+            if (bdf_parse_bitmap_row(line, rows + rows_read * row_bytes,
+                row_bytes) == 0)
+               rows_read++;
+         }
+      } else if (in_char && strncmp(line, "ENDCHAR", 7) == 0) {
+         unsigned bytes = row_bytes * (unsigned)glyph.height;
+
+         if (glyph.codepoint != UINT32_MAX && glyph.width > 0 &&
+             glyph.height > 0 && row_bytes > 0 &&
+             rows_read == (unsigned)glyph.height &&
+             bdf_glyph_count < BDF_MAX_GLYPHS &&
+             bdf_bitmap_used + bytes <= sizeof(bdf_bitmap)) {
+            glyph.row_bytes = row_bytes;
+            glyph.data_offset = bdf_bitmap_used;
+            memcpy(bdf_bitmap + bdf_bitmap_used, rows, bytes);
+            bdf_bitmap_used += bytes;
+            bdf_glyphs[bdf_glyph_count++] = glyph;
+            loaded++;
+         }
+         in_char = 0;
+         in_bitmap = 0;
+      }
+   }
+   fclose(file);
+   if (!loaded) {
+      bdf_clear();
+      return -1;
+   }
+   ttf_clear();
+   memset(font5x7_custom_valid, 0, sizeof(font5x7_custom_valid));
+   bdf_active = 1;
+   return loaded;
+}
+
 void unifrog_gfx_reset_font(void)
 {
    ttf_clear();
+   bdf_clear();
    memset(font5x7_custom_valid, 0, sizeof(font5x7_custom_valid));
 }
 
@@ -678,6 +923,8 @@ int unifrog_gfx_load_font5x7_file(const char *path)
       return -1;
    if (font_path_list_has_ttf(path))
       return load_ttf_file(path);
+   if (font_path_has_ext(path, ".bdf"))
+      return load_bdf_file(path);
    file = fopen(path, "rb");
    if (!file)
       return -1;
@@ -695,7 +942,9 @@ int unifrog_gfx_load_font5x7_file(const char *path)
       loaded++;
    }
    fclose(file);
-   if (loaded)
+   if (loaded) {
       ttf_clear();
+      bdf_clear();
+   }
    return (int)loaded;
 }

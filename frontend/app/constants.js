@@ -95,6 +95,8 @@ var languageOptions = [
 ];
 var fontOptions = [
   { label: "Bitmap 5x7", value: "builtin" },
+  { label: "Spleen 6x12", value: "/media/mmcblk0/unifrog/fonts/Spleen6x12.bdf" },
+  { label: "Spleen 8x16", value: "/media/mmcblk0/unifrog/fonts/Spleen8x16.bdf" },
   { label: "Noto Sans", value: "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf" },
   { label: "Arabic fallback", value: "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf;/media/mmcblk0/unifrog/fonts/NotoSansArabic-Regular.ttf" },
   { label: "Devanagari fallback", value: "/media/mmcblk0/unifrog/fonts/NotoSans-Regular.ttf;/media/mmcblk0/unifrog/fonts/NotoSansDevanagari-Regular.ttf" },
@@ -116,7 +118,12 @@ var fontSizeOptions = [
 ];
 var fastSdOptions = [
   { label: "Boot", value: "boot" },
-  { label: "hs1", value: "hs1" }
+  { label: "hs1", value: "hs1" },
+  { label: "wide50", value: "wide50" },
+  { label: "wide", value: "wide" },
+  { label: "uhs12", value: "uhs12" },
+  { label: "uhs25", value: "uhs25" },
+  { label: "uhs", value: "uhs" }
 ];
 var mediaSuffixes = [
   ".mp4", ".mov", ".mkv", ".avi", ".ts", ".m2ts", ".mpg", ".mpeg",

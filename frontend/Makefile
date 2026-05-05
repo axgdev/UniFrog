@@ -25,7 +25,7 @@ APP_FILES := $(sort $(wildcard $(APP_DIR)/*.js))
 THEME_FILES := $(shell find $(THEME_DIR) -type f 2>/dev/null)
 DEFAULT_FILES := $(shell find $(DEFAULT_DIR) -type f 2>/dev/null)
 LOCALE_FILES := $(shell find $(LOCALE_DIR) -type f 2>/dev/null)
-FONT_FILES := $(shell find $(FONT_SOURCE_DIR) -maxdepth 1 -type f -name '*.ttf' 2>/dev/null)
+FONT_FILES := $(shell find $(FONT_SOURCE_DIR) -maxdepth 1 -type f \( -name '*.ttf' -o -name '*.bdf' -o -name '*.bdf.gz' -o -name '*LICENSE*.txt' -o -name '*OFL*.txt' \) 2>/dev/null)
 FONT_TEXT_FILES := $(ENTRY_FILES) $(APP_FILES) $(DEFAULT_FILES) $(LOCALE_FILES) \
 	$(filter %.js %.ini %.opt,$(THEME_FILES))
 JS_FILES := $(ENTRY_FILES) $(APP_FILES) \
@@ -74,6 +74,9 @@ package: check $(JS_PACKAGE_BYTECODE) $(BYTECODE_MANIFEST) $(THEME_FILES) $(DEFA
 	@if test -d "$(FONT_STAGE_DIR)"; then \
 		mkdir -p "$(PACKAGE)/$(FONT_DIR)"; \
 		cp "$(FONT_STAGE_DIR)"/*.ttf "$(PACKAGE)/$(FONT_DIR)/" 2>/dev/null || true; \
+		cp "$(FONT_STAGE_DIR)"/*.bdf "$(PACKAGE)/$(FONT_DIR)/" 2>/dev/null || true; \
+		cp "$(FONT_STAGE_DIR)"/*.bdf.gz "$(PACKAGE)/$(FONT_DIR)/" 2>/dev/null || true; \
+		cp "$(FONT_STAGE_DIR)"/*.txt "$(PACKAGE)/$(FONT_DIR)/" 2>/dev/null || true; \
 	fi
 	@cp $(SCRIPT_DIR)/*.js $(PACKAGE)/$(SCRIPT_DIR)/
 	@for f in $(JS_FILES); do \
