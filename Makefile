@@ -33,6 +33,7 @@ PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 SD_MODE ?= safe
 SD_READ_MODE ?= boot
 HCRTOS_MEDIA ?= module
+HW_PROBE ?= 0
 
 -include config.mk
 
@@ -102,6 +103,7 @@ OPT_FLAGS := -O0 -O1 -O2 -O3 -Os -Og -Ofast
 SD_MODES := safe hs1 wide50 wide uhs12 uhs25 uhs
 SD_READ_MODES := boot off none safe hs1 wide50 wide uhs12 uhs25 uhs
 HCRTOS_MEDIA_MODES := module firmware
+HW_PROBE_MODES := 0 1
 
 ifneq ($(filter $(SD_MODE),$(SD_MODES)),$(SD_MODE))
 $(error SD_MODE must be one of: $(SD_MODES))
@@ -111,6 +113,9 @@ $(error SD_READ_MODE must be one of: $(SD_READ_MODES))
 endif
 ifneq ($(filter $(HCRTOS_MEDIA),$(HCRTOS_MEDIA_MODES)),$(HCRTOS_MEDIA))
 $(error HCRTOS_MEDIA must be one of: $(HCRTOS_MEDIA_MODES))
+endif
+ifneq ($(filter $(HW_PROBE),$(HW_PROBE_MODES)),$(HW_PROBE))
+$(error HW_PROBE must be one of: $(HW_PROBE_MODES))
 endif
 
 SD_CLOCK_FREQUENCY := 198000000
@@ -248,6 +253,9 @@ IDENTITY_DEFINES := \
 	-DUNIFROG_FRONTEND_GIT_COMMIT=\"$(UNIFROG_FRONTEND_GIT_COMMIT)\"
 
 DEFINES := $(CONFIG_DEFINES) $(IDENTITY_DEFINES)
+ifeq ($(HW_PROBE),1)
+DEFINES += -DUNIFROG_HW_PROBE=1
+endif
 
 CFLAGS := -EL $(ARCH_CFLAGS) $(OPT_SIZE) -pipe -msoft-float -fsigned-char -W \
 	-ffunction-sections -fdata-sections -G0 \
@@ -375,6 +383,7 @@ APP_OBJECTS := \
 BUILD_IDENTITY_OBJECTS := \
 	$(BUILD)/main.o \
 	$(BUILD)/frontend/js2300_frontend_actions.o \
+	$(BUILD)/unifrog_hw_probe.o \
 	$(BUILD)/unifrog_libretro_host.o \
 	$(BUILD)/unifrog_platform.o
 
@@ -393,6 +402,7 @@ UNIFROG_OBJECTS := \
 	$(BUILD)/unifrog_fb.o \
 	$(BUILD)/unifrog_ge.o \
 	$(BUILD)/unifrog_gfx.o \
+	$(BUILD)/unifrog_hw_probe.o \
 	$(BUILD)/unifrog_input.o \
 	$(BUILD)/unifrog_input_wireless.o \
 	$(BUILD)/unifrog_libretro_host.o \
@@ -598,7 +608,7 @@ BUILD_CONFIG_TOKEN := $(shell printf '%s\n' \
 	'CORE_MODULE_LDFLAGS=$(CORE_MODULE_LDFLAGS)' \
 	'CORE_MODULE_LDLIBS=$(CORE_MODULE_LDLIBS)' \
 	'DTS_CPPFLAGS=$(DTS_CPPFLAGS)' 'DTCFLAGS=$(DTCFLAGS)' \
-	'EMBED_DTB=$(EMBED_DTB)' | cksum | awk '{print $$1}')
+	'EMBED_DTB=$(EMBED_DTB)' 'HW_PROBE=$(HW_PROBE)' | cksum | awk '{print $$1}')
 BUILD_IDENTITY_TOKEN := $(shell printf '%s\n' \
 	'UNIFROG_GIT_COMMIT=$(UNIFROG_GIT_COMMIT)' \
 	'UNIFROG_BOOT_VERSION=$(UNIFROG_BOOT_VERSION)' \
@@ -688,7 +698,7 @@ $(FASTBOOT_OBJECTS): $(FASTBOOT_CONFIG_STAMP)
 $(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 
 .DELETE_ON_ERROR:
-COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild
+COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild hw-probe
 SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-fonts deps-support deps-cores
 PACKAGE_TARGETS := frontend-package core-package module-package sdcard-package sd-zip install refresh-sd refresh-sd-clean
 VERIFY_TARGETS := asdcheck fastboot-check fastboot-only-check layout-check boot-logo-check js2300-check frontend-check core-smoke-check
@@ -702,6 +712,13 @@ verify:
 	$(Q)$(MAKE) --no-print-directory quick-check
 	$(Q)$(MAKE) --no-print-directory check
 	$(Q)$(MAKE) --no-print-directory fastboot-check
+
+hw-probe:
+	$(Q)$(MAKE) --no-print-directory \
+		BUILD=build-hw-probe OUT=output-hw-probe \
+		SDCARD_PACKAGE_DIR=output-hw-probe/sdcard-package \
+		SDZIP=output-hw-probe/UniFrog-hw-probe-sdcard.zip \
+		HW_PROBE=1 SD_MODE=safe SD_READ_MODE=boot HCRTOS_MEDIA=module sd-zip
 
 help:
 	@echo "$(APP) common workflow:"
@@ -749,6 +766,7 @@ help:
 	@echo "  make SD_READ_MODE=boot  Disable the runtime fast-read ROM window"
 	@echo "  make HCRTOS_MEDIA=module  Keep native media in an SD-loaded module"
 	@echo "  make HCRTOS_MEDIA=firmware  Link native media into unifrog.bin"
+	@echo "  make hw-probe     Build a read-only hardware-register probe SD package"
 	@echo "  make SD_MODE=hs1   Diagnostic 1-bit high-speed SD build"
 	@echo "  make SD_MODE=wide50 Diagnostic 4-bit high-speed, lower-clock SD build"
 	@echo "  make SD_MODE=wide  Diagnostic 4-bit high-speed SD build"
@@ -773,6 +791,7 @@ print-config:
 	@echo "SD_MODE=$(SD_MODE)"
 	@echo "SD_READ_MODE=$(SD_READ_MODE)"
 	@echo "HCRTOS_MEDIA=$(HCRTOS_MEDIA)"
+	@echo "HW_PROBE=$(HW_PROBE)"
 	@echo "SD_CLOCK_FREQUENCY=$(SD_CLOCK_FREQUENCY)"
 	@echo "SD_BUS_WIDTH=$(SD_BUS_WIDTH)"
 	@echo "SD_CAP_HIGHSPEED=$(SD_CAP_HIGHSPEED)"

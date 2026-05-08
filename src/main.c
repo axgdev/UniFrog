@@ -16,6 +16,9 @@
 #include <unifrog/boot_logo.h>
 #include <unifrog/boot_trace.h>
 #include <unifrog/diag.h>
+#ifdef UNIFROG_HW_PROBE
+#include <unifrog/hw_probe.h>
+#endif
 #include <unifrog/log.h>
 #include <unifrog/perf.h>
 #include <unifrog/platform.h>
@@ -121,7 +124,13 @@ static void *frontend_thread(void *arg)
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_JS_BEGIN,
       unifrog_perf_time_ms(), 0, 0);
    unifrog_boot_trace_log("boot.before_js");
+#ifdef UNIFROG_HW_PROBE
+   unifrog_log("unifrog hw_probe mode=1 skip_js=1\n");
+   (void)unifrog_log_flush();
+   (void)unifrog_hw_probe_run();
+#else
    js2300_frontend_main();
+#endif
 
    unifrog_platform_idle_forever();
    return NULL;
