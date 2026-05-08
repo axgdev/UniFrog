@@ -61,6 +61,18 @@ static const struct hw_probe_reg probe_regs[] = {
    { "PINMUXT", 0xb8800500u },
    { "BOOT_OBS_2E090", 0xb882e090u },
    { "BOOT_OBS_2E098", 0xb882e098u },
+   { "SDIO_CMD_CTRL", 0xb884c000u },
+   { "SDIO_CMD_ARG", 0xb884c004u },
+   { "SDIO_BLOCK_SIZE", 0xb884c008u },
+   { "SDIO_STATUS", 0xb884c00bu },
+   { "SDIO_RESP0", 0xb884c010u },
+   { "SDIO_DMA_ADDR", 0xb884c020u },
+   { "SDIO_DMA_LEN", 0xb884c028u },
+   { "SDIO_XFER_CTRL", 0xb884c030u },
+   { "TIMER0_STATUS", 0xb8818a08u },
+   { "TIMER1_STATUS", 0xb8818a18u },
+   { "TIMER3_STATUS", 0xb8818a38u },
+   { "TIMER4_STATUS", 0xb8818a48u },
 };
 
 static const struct hw_probe_range probe_ranges[] = {
@@ -75,6 +87,8 @@ static const struct hw_probe_range probe_ranges[] = {
    { "pinmux_r", 0xb88004e0u, 0xb88004fcu, 4u },
    { "pinmux_t", 0xb8800500u, 0xb880051cu, 4u },
    { "boot_obs", 0xb882e080u, 0xb882e0a0u, 4u },
+   { "timer_irq", 0xb8818a00u, 0xb8818a5cu, 4u },
+   { "sdio", 0xb884c000u, 0xb884c04cu, 4u },
 };
 
 static uint32_t hw_read32(uint32_t addr)
@@ -250,6 +264,12 @@ int unifrog_hw_probe_run(void)
    log_stability("IRQ_STATUS2", 0xb8800034u);
    log_stability("SYS_CLK_CTR", 0xb8800078u);
    log_stability("CPU_CLK_PLL", 0xb8800380u);
+   log_stability("TIMER0_STATUS", 0xb8818a08u);
+   log_stability("TIMER1_STATUS", 0xb8818a18u);
+   log_stability("TIMER3_STATUS", 0xb8818a38u);
+   log_stability("TIMER4_STATUS", 0xb8818a48u);
+   log_stability("SDIO_STATUS", 0xb884c00bu);
+   log_stability("SDIO_XFER_CTRL", 0xb884c030u);
    (void)unifrog_log_flush();
 
    for (i = 0; i < ARRAY_SIZE(probe_ranges); i++) {
