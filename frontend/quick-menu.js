@@ -4,6 +4,7 @@ var quickSelected = 0;
 var quickStatus = JS2300.system.action("quick:status");
 var quickSlot = JS2300.system.action("quick:state-slot");
 var quickCpu = JS2300.system.action("quick:cpu");
+var quickFastForward = JS2300.system.action("quick:fast-forward-status");
 var quickToastText = "";
 var quickToastUntil = 0;
 var quickItems = [
@@ -12,6 +13,7 @@ var quickItems = [
   "Load state",
   "Save slot",
   "CPU",
+  "Fast forward",
   "Audio",
   "Display",
   "Backlight",
@@ -48,10 +50,11 @@ function quickDetail(index) {
   if (index === 2) return "L slot " + String(quickSlot);
   if (index === 3) return String(quickSlot);
   if (index === 4) return quickCpuLabel();
-  if (index === 5) return quickAudio() ? "On" : "Off";
-  if (index === 6) return quickDisplayLabel();
-  if (index === 7) return String(quickBacklight()) + "%";
-  if (index === 8) return "X";
+  if (index === 5) return quickFastForward ? "On" : "Off";
+  if (index === 6) return quickAudio() ? "On" : "Off";
+  if (index === 7) return quickDisplayLabel();
+  if (index === 8) return String(quickBacklight()) + "%";
+  if (index === 9) return "X";
   return "";
 }
 
@@ -70,9 +73,9 @@ function quickDraw() {
     [0, 0, 320, 240, 0x0841],
     [0, 0, 320, 28, 0x1084],
     [0, 216, 320, 24, 0x1084],
-    [22, 35, 276, 166, 0x1084],
+    [22, 35, 276, 176, 0x1084],
     [22, 35, 276, 1, 0x39c7],
-    [22, 200, 276, 1, 0x39c7]
+    [22, 210, 276, 1, 0x39c7]
   ];
 
   JS2300.video.clear(0x0841);
@@ -177,21 +180,26 @@ function quickActivate() {
     return 0;
   }
   if (quickSelected === 5) {
+    quickFastForward = JS2300.system.action("quick:fast-forward");
+    quickToast(quickFastForward ? "Fast forward on" : "Fast forward off");
+    return 0;
+  }
+  if (quickSelected === 6) {
     quickStatus = JS2300.system.action("quick:audio");
     quickToast(quickAudio() ? "Audio on" : "Audio off");
     return 0;
   }
-  if (quickSelected === 6) {
+  if (quickSelected === 7) {
     quickStatus = JS2300.system.action("quick:display");
     quickToast("Display " + quickDisplayLabel());
     return 0;
   }
-  if (quickSelected === 7) {
+  if (quickSelected === 8) {
     quickStatus = JS2300.system.action("quick:backlight");
     quickToast("Backlight " + String(quickBacklight()) + "%");
     return 0;
   }
-  if (quickSelected === 8) {
+  if (quickSelected === 9) {
     quickReturnToMenu();
     return 1;
   }

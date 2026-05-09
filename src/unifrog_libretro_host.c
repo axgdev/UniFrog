@@ -2027,6 +2027,17 @@ static int quick_js_toggle_audio(void)
    return quick_js_status_value();
 }
 
+static int quick_js_toggle_fast_forward(void)
+{
+   host.fast_forward = host.fast_forward ? 0 : 1;
+   host.audio_gate_open = 0;
+   host.audio_quiet_batches = 0;
+   if (host.audio_open)
+      (void)unifrog_audio_set_output_enabled(&host.audio, 0);
+   printf("unifrog quick_js fast_forward=%d\n", host.fast_forward);
+   return host.fast_forward ? 1 : 0;
+}
+
 static int quick_js_cycle_display(void)
 {
    switch (host.display_mode) {
@@ -2327,6 +2338,10 @@ static int quick_js_action(void *opaque, const char *id)
    }
    if (strcmp(id, "quick:audio") == 0)
       return quick_js_toggle_audio();
+   if (strcmp(id, "quick:fast-forward") == 0)
+      return quick_js_toggle_fast_forward();
+   if (strcmp(id, "quick:fast-forward-status") == 0)
+      return host.fast_forward ? 1 : 0;
    if (strcmp(id, "quick:display") == 0)
       return quick_js_cycle_display();
    if (strcmp(id, "quick:backlight") == 0)

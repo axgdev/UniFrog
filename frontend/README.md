@@ -52,7 +52,8 @@ accept absolute paths or paths relative to `icon_root`.
 
 `quick-menu.js` is the in-game JavaScript pause menu opened with
 `SELECT+START`. Its shortcuts are `B` resume, `X` return to the frontend,
-`L` load state, and `R` save state.
+`L` load state, and `R` save state. It can also toggle fast-forward for the
+current game session.
 
 ## Development
 
