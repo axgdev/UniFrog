@@ -786,7 +786,7 @@ void stage1_main(void)
 
 	clear_bss();
 	disable_interrupts();
-	boot_override_keys = fastboot_scan_any_key();
+	boot_override_keys = 0;
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_START,
 		(unsigned int)(uintptr_t)FASTBOOT_STAGE1_ADDR, 0, 0);
 	fastboot_backlight_off();
@@ -803,15 +803,7 @@ void stage1_main(void)
 	if (rc != 0)
 		goto fail;
 
-	if (boot_override_keys != 0) {
-		boot_trace_note(FASTBOOT_TRACE_STAGE1_INPUT_OVERRIDE,
-			boot_override_keys, fastboot_last_sf2000_keys,
-			fastboot_last_gb300_keys);
-		rom_printf("fastboot: input override keys=0x%08x sf2000=0x%08x gb300=0x%08x\n",
-			(unsigned int)boot_override_keys,
-			(unsigned int)fastboot_last_sf2000_keys,
-			(unsigned int)fastboot_last_gb300_keys);
-	} else if (read_handoff_path(handoff_path, sizeof(handoff_path)) == 0) {
+	if (read_handoff_path(handoff_path, sizeof(handoff_path)) == 0) {
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_HANDOFF_RESULT,
 			0, trace_path_hash(handoff_path), 0);
 		write_diag(FASTBOOT_DIAG_HANDOFF_FOUND, 0, handoff_path);
@@ -824,6 +816,17 @@ void stage1_main(void)
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_HANDOFF_RESULT,
 			(unsigned int)-1, 0, 0);
 		write_diag(FASTBOOT_DIAG_HANDOFF_MISSING, -1, "");
+	}
+
+	boot_override_keys = fastboot_scan_any_key();
+	if (boot_override_keys != 0) {
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_INPUT_OVERRIDE,
+			boot_override_keys, fastboot_last_sf2000_keys,
+			fastboot_last_gb300_keys);
+		rom_printf("fastboot: input override keys=0x%08x sf2000=0x%08x gb300=0x%08x\n",
+			(unsigned int)boot_override_keys,
+			(unsigned int)fastboot_last_sf2000_keys,
+			(unsigned int)fastboot_last_gb300_keys);
 	}
 
 	if (boot_override_keys == 0 &&
