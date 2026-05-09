@@ -21,6 +21,8 @@ jobs:
       - name: Check out UniFrog
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
           submodules: false
 
       - name: Configure Git
@@ -28,6 +30,16 @@ jobs:
           git config --global --add safe.directory "$PWD"
           git config --global user.name "UniFrog CI"
           git config --global user.email "ci@unifrog.local"
+
+      - name: Verify build ref
+        run: |
+          echo "event=${GITHUB_EVENT_NAME}"
+          echo "ref=${GITHUB_REF}"
+          echo "ref_name=${GITHUB_REF_NAME}"
+          echo "sha=${GITHUB_SHA}"
+          echo "checked_out=$(git rev-parse HEAD)"
+          git describe --tags --always --dirty
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
       - name: Cache ccache
         uses: actions/cache@v4
