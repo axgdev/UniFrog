@@ -103,7 +103,7 @@ function smokeSleep() {
 function smokeCoreFiles() {
   var cores = smokeList("/media/mmcblk0/unifrog/cores");
   var expected = [
-    "js2300.bin", "gambatte.bin", "gpsp.bin", "picodrive.bin",
+    "js2300.bin", "gambatte.bin", "gpsp.bin", "gpsp_multicore.bin", "picodrive.bin",
     "snes9x2005.bin", "snes9x2002.bin", "quicknes.bin", "fceumm.bin",
     "gearboy.bin", "pce-fast.bin", "qpsx.bin", "pmp-video.bin"
   ];

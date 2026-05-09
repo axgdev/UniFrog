@@ -14,6 +14,7 @@ CORE_SPECS := \
 	'libretro-common|$(CORE_SOURCE_ROOT)/libretro-common|https://github.com/libretro/libretro-common.git|head|e2e3eccfd245a04771e6a435320b42234c8cc4d7|compat encodings file formats streams string time vfs include' \
 	'gambatte|$(CORE_SOURCE_ROOT)/gambatte-libretro|https://github.com/libretro/gambatte-libretro.git|head|2147d9257911b484b07666994ceecc4c5a2cb318|common libgambatte' \
 	'gpsp|$(CORE_SOURCE_ROOT)/gpsp-libretro|https://github.com/libretro/gpsp.git|head|eca3bee1e2d2043d42f0480012c1e7ec85498f88|.' \
+	'gpsp_multicore|$(CORE_SOURCE_ROOT)/gpsp_multicore|https://github.com/tzubertowski/gpsp_multicore.git|head|63dd94953c27bb2664872331bbc7f212a088db4b|.' \
 	'picodrive|$(CORE_SOURCE_ROOT)/picodrive|https://github.com/libretro/picodrive.git|head|f0d4a0118a9733a1f10bce5a4ac772c474f9300d|cpu/cyclone cpu/cz80 cpu/drc cpu/fame cpu/sh2 pico platform/common platform/libretro unzip zlib' \
 	'snes9x2005|$(CORE_SOURCE_ROOT)/snes9x2005|https://github.com/libretro/snes9x2005.git|head|b60356971fc9caae02cd0853676dced886a08be7|.' \
 	'snes9x2002|$(CORE_SOURCE_ROOT)/snes9x2002|https://github.com/libretro/snes9x2002.git|head|39e0d8c6daf4b1b1302eeecfee8309570aeb6a82|.' \

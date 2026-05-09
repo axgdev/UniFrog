@@ -18,6 +18,8 @@ GAMBATTE_DIR := $(CORE_SOURCE_ROOT)/gambatte-libretro
 GAMBATTE_LIB := $(GAMBATTE_DIR)/gambatte_libretro_sf2000.a
 GPSP_DIR := $(CORE_SOURCE_ROOT)/gpsp-libretro
 GPSP_LIB := $(GPSP_DIR)/gpsp_libretro_sf2000.a
+GPSP_MULTICORE_DIR := $(CORE_SOURCE_ROOT)/gpsp_multicore
+GPSP_MULTICORE_LIB := $(GPSP_MULTICORE_DIR)/gpsp_multicore_libretro_sf2000.a
 PICODRIVE_DIR := $(CORE_SOURCE_ROOT)/picodrive
 PICODRIVE_LIB := $(PICODRIVE_DIR)/picodrive_libretro_sf2000.a
 LIBCHDR_DIR := $(CORE_SUPPORT_ROOT)/libchdr
@@ -93,6 +95,7 @@ libretro_static_rename_cflags = \
 	$(foreach symbol,$(LIBRETRO_API_SYMBOLS),-D$(symbol)=$(1)_$(symbol))
 
 GPSP_RENAME_CFLAGS := $(call libretro_static_rename_cflags,gpsp)
+GPSP_MULTICORE_RENAME_CFLAGS := $(call libretro_static_rename_cflags,gpsp_multicore)
 PICODRIVE_RENAME_CFLAGS := $(call libretro_static_rename_cflags,picodrive)
 SNES9X2005_RENAME_CFLAGS := $(call libretro_static_rename_cflags,snes9x2005)
 SNES9X2002_RENAME_CFLAGS := $(call libretro_static_rename_cflags,snes9x2002)
@@ -164,6 +167,13 @@ GPSP_CFLAGS := -EL -march=mips32 -mtune=mips32 -msoft-float -G0 \
 	-DSF2000 -DROM_BUFFER_SIZE=32 \
 	-DSMALL_TRANSLATION_CACHE \
 	$(GPSP_RENAME_CFLAGS)
+GPSP_MULTICORE_CFLAGS := -EL -march=mips32 -mtune=mips32 -msoft-float -G0 \
+	-mno-abicalls -fno-pic -fsigned-char -ffast-math \
+	-fomit-frame-pointer -ffunction-sections -fdata-sections \
+	-fno-unwind-tables -fno-asynchronous-unwind-tables \
+	-DSF2000 -DROM_BUFFER_SIZE=32 \
+	-DSMALL_TRANSLATION_CACHE \
+	$(GPSP_MULTICORE_RENAME_CFLAGS)
 
 # Use gpSP's stock platform=unix path and override only the cross-toolchain,
 # source list, and static-link flags here. This keeps platform plumbing out of
@@ -184,6 +194,7 @@ GPSP_SOURCES_C := \
 	./libretro/libretro.c \
 	./gba_cc_lut.c \
 	./cpu_threaded.c
+GPSP_MULTICORE_SOURCES_C := $(filter-out ./serial_proto.c,$(GPSP_SOURCES_C))
 
 GPSP_SOURCES_ASM := ./bios_data.S ./mips/mips_stub.S
 GPSP_SOURCES_CC := ./video.cc ./cpu.cc
@@ -206,6 +217,9 @@ GPSP_MAKE_ARGS := platform=unix \
 	SOURCES_C="$(GPSP_SOURCES_C)" \
 	SOURCES_ASM="$(GPSP_SOURCES_ASM)" \
 	SOURCES_CC="$(GPSP_SOURCES_CC)"
+GPSP_MULTICORE_MAKE_ARGS := $(filter-out TARGET=gpsp_libretro_sf2000.a,$(GPSP_MAKE_ARGS)) \
+	SOURCES_C="$(GPSP_MULTICORE_SOURCES_C)" \
+	TARGET=gpsp_multicore_libretro_sf2000.a
 
 LIBRETRO_COMMON_OBJECTS := \
 	$(BUILD)/libretro-common/compat/compat_posix_string.o \
@@ -278,8 +292,8 @@ CHD_SUPPORT_OBJECTS := \
 	$(BUILD)/chd-support/zlib_uncompr.o \
 	$(BUILD)/chd-support/zlib_zutil.o
 
-CORE_TARGETS := gambatte gpsp picodrive snes9x2005 snes9x2002 quicknes \
-	fceumm gearboy pce-fast qpsx pmp-video
+CORE_TARGETS := gambatte gpsp gpsp_multicore picodrive snes9x2005 snes9x2002 \
+	quicknes fceumm gearboy pce-fast qpsx pmp-video
 SUPPORT_TARGETS := libretro-common chd-support
 SMOKE_TARGETS := libretro-common quicknes
 MAINTAIN_TARGETS := support-init init doctor core-status pin-status \
@@ -300,6 +314,7 @@ help:
 	@echo ""
 	@echo "Focused builds:"
 	@echo "  make -C cores gpsp"
+	@echo "  make -C cores gpsp_multicore"
 	@echo "  make -C cores pce-fast"
 	@echo ""
 	@echo "Patch maintenance:"
@@ -440,6 +455,7 @@ doctor:
 	@test -e $(LIBRETRO_COMMON_DIR)/.git || { echo "missing core checkout: $(LIBRETRO_COMMON_DIR); run: make init"; exit 1; }
 	@test -e $(GAMBATTE_DIR)/.git || { echo "missing core checkout: $(GAMBATTE_DIR); run: make init"; exit 1; }
 	@test -e $(GPSP_DIR)/.git || { echo "missing core checkout: $(GPSP_DIR); run: make init"; exit 1; }
+	@test -e $(GPSP_MULTICORE_DIR)/.git || { echo "missing core checkout: $(GPSP_MULTICORE_DIR); run: make init"; exit 1; }
 	@test -e $(PICODRIVE_DIR)/.git || { echo "missing core checkout: $(PICODRIVE_DIR); run: make init"; exit 1; }
 	@test -e $(SNES9X2005_DIR)/.git || { echo "missing core checkout: $(SNES9X2005_DIR); run: make init"; exit 1; }
 	@test -e $(SNES9X2002_DIR)/.git || { echo "missing core checkout: $(SNES9X2002_DIR); run: make init"; exit 1; }
@@ -702,6 +718,10 @@ gpsp: doctor | $(OUT)
 	CFLAGS="$(GPSP_CFLAGS)" $(MAKE) -C $(GPSP_DIR) -f Makefile $(GPSP_MAKE_ARGS)
 	$(call copy_core_lib,$(GPSP_LIB))
 
+gpsp_multicore: doctor | $(OUT)
+	CFLAGS="$(GPSP_MULTICORE_CFLAGS)" $(MAKE) -C $(GPSP_MULTICORE_DIR) -f Makefile $(GPSP_MULTICORE_MAKE_ARGS)
+	$(call copy_core_lib,$(GPSP_MULTICORE_LIB))
+
 picodrive: doctor $(CHD_SUPPORT_LIB) | $(OUT)
 	CFLAGS="$(PICODRIVE_CFLAGS)" CXXFLAGS="$(PICODRIVE_CFLAGS)" \
 	$(MAKE) -C $(PICODRIVE_DIR) -f Makefile.libretro platform=unix \
@@ -792,6 +812,7 @@ status:
 	git -C $(LIBRETRO_COMMON_DIR) status --short
 	git -C $(GAMBATTE_DIR) status --short
 	git -C $(GPSP_DIR) status --short
+	git -C $(GPSP_MULTICORE_DIR) status --short
 	git -C $(PICODRIVE_DIR) status --short
 	git -C $(SNES9X2005_DIR) status --short
 	git -C $(SNES9X2002_DIR) status --short
@@ -808,6 +829,8 @@ clean:
 		CXX=$(CROSS_COMPILE)g++ AR=$(CROSS_COMPILE)ar || true
 	CFLAGS="$(GPSP_CFLAGS)" $(MAKE) -C $(GPSP_DIR) -f Makefile clean \
 		$(GPSP_MAKE_ARGS) || true
+	CFLAGS="$(GPSP_MULTICORE_CFLAGS)" $(MAKE) -C $(GPSP_MULTICORE_DIR) -f Makefile clean \
+		$(GPSP_MULTICORE_MAKE_ARGS) || true
 	CFLAGS="$(PICODRIVE_CFLAGS)" CXXFLAGS="$(PICODRIVE_CFLAGS)" \
 		$(MAKE) -C $(PICODRIVE_DIR) -f Makefile.libretro clean \
 		platform=unix CC=$(CC) CXX=$(CXX) AR=$(AR) STATIC_LINKING=1 \

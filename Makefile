@@ -434,6 +434,7 @@ BOOT_LOGO_RGB565_INC := $(BUILD)/boot/unifrog-logo-rgb565.inc
 BOOT_LOGO_STAMP := $(BUILD)/boot/unifrog-logo.stamp
 GAMBATTE_CORE_LIB := $(CORES)/output/gambatte_libretro_sf2000.a
 GPSP_CORE_LIB := $(CORES)/output/gpsp_libretro_sf2000.a
+GPSP_MULTICORE_CORE_LIB := $(CORES)/output/gpsp_multicore_libretro_sf2000.a
 PICODRIVE_CORE_LIB := $(CORES)/output/picodrive_libretro_sf2000.a
 CHD_SUPPORT_CORE_LIB := $(CORES)/output/libchdr-support-sf2000.a
 SNES9X2005_CORE_LIB := $(CORES)/output/snes9x2005_libretro_sf2000.a
@@ -462,6 +463,7 @@ LIBRETRO_COMMON_BUILD_DEPS = $(CORE_BUILD_DEPS)
 CHD_SUPPORT_BUILD_DEPS = $(CORE_BUILD_DEPS)
 GAMBATTE_BUILD_DEPS = $(CORE_BUILD_DEPS)
 GPSP_BUILD_DEPS = $(CORE_BUILD_DEPS)
+GPSP_MULTICORE_BUILD_DEPS = $(CORE_BUILD_DEPS)
 PICODRIVE_BUILD_DEPS = $(CORE_BUILD_DEPS)
 SNES9X2005_BUILD_DEPS = $(CORE_BUILD_DEPS)
 SNES9X2002_BUILD_DEPS = $(CORE_BUILD_DEPS)
@@ -474,6 +476,7 @@ PMP_VIDEO_BUILD_DEPS = $(CORE_BUILD_DEPS)
 PACKAGE_LIBRETRO_CORE_LIBS := \
 	$(GAMBATTE_CORE_LIB) \
 	$(GPSP_CORE_LIB) \
+	$(GPSP_MULTICORE_CORE_LIB) \
 	$(PICODRIVE_CORE_LIB) \
 	$(SNES9X2005_CORE_LIB) \
 	$(SNES9X2002_CORE_LIB) \
@@ -486,6 +489,7 @@ PACKAGE_LIBRETRO_CORE_LIBS := \
 JS2300_CORE_BIN := $(CORE_PACKAGE)/js2300.bin
 GAMBATTE_CORE_BIN := $(CORE_PACKAGE)/gambatte.bin
 GPSP_CORE_BIN := $(CORE_PACKAGE)/gpsp.bin
+GPSP_MULTICORE_CORE_BIN := $(CORE_PACKAGE)/gpsp_multicore.bin
 PICODRIVE_CORE_BIN := $(CORE_PACKAGE)/picodrive.bin
 SNES9X2005_CORE_BIN := $(CORE_PACKAGE)/snes9x2005.bin
 SNES9X2002_CORE_BIN := $(CORE_PACKAGE)/snes9x2002.bin
@@ -517,6 +521,7 @@ HCRTOS_MEDIA_MODULE_LDLIBS = \
 LIBRETRO_CORE_BINS := \
 	$(GAMBATTE_CORE_BIN) \
 	$(GPSP_CORE_BIN) \
+	$(GPSP_MULTICORE_CORE_BIN) \
 	$(PICODRIVE_CORE_BIN) \
 	$(SNES9X2005_CORE_BIN) \
 	$(SNES9X2002_CORE_BIN) \
@@ -529,6 +534,7 @@ LIBRETRO_CORE_BINS := \
 LIBRETRO_CORE_MODULE_OUTS := \
 	$(BUILD)/core_modules/gambatte.out \
 	$(BUILD)/core_modules/gpsp.out \
+	$(BUILD)/core_modules/gpsp_multicore.out \
 	$(BUILD)/core_modules/picodrive.out \
 	$(BUILD)/core_modules/snes9x2005.out \
 	$(BUILD)/core_modules/snes9x2002.out \
@@ -558,8 +564,8 @@ FASTBOOT_CFLAGS := -EL $(ARCH_CFLAGS) -Os -pipe -msoft-float -fsigned-char -W \
 	-ffreestanding -fno-builtin -fno-pic -mno-abicalls \
 	-nostdinc -I$(GCC_LIBDIR)/include
 
-CORE_MODULE_IDS := gambatte gpsp picodrive snes9x2005 snes9x2002 quicknes \
-	fceumm gearboy pce_fast qpsx pmp_video
+CORE_MODULE_IDS := gambatte gpsp gpsp_multicore picodrive snes9x2005 \
+	snes9x2002 quicknes fceumm gearboy pce_fast qpsx pmp_video
 CORE_MODULE_ENTRY_OBJECTS := $(addprefix $(BUILD)/core_modules/,$(addsuffix _entry.o,$(CORE_MODULE_IDS)))
 CORE_MODULE_SUPPORT_OBJECT := $(BUILD)/core_modules/support.o
 
@@ -1005,6 +1011,7 @@ $(JS2300_CORE_BIN): $(LIBJS2300) | $(CORE_PACKAGE)
 
 $(BUILD)/core_modules/gambatte_entry.o: CORE_MODULE_DEFINES := -DUNIFROG_MODULE_CORE_ID=\"gambatte\" -DUNIFROG_MODULE_EXTENSIONS=\"gb\|gbc\"
 $(BUILD)/core_modules/gpsp_entry.o: CORE_MODULE_DEFINES := -DUNIFROG_MODULE_CORE_ID=\"gpsp\" -DUNIFROG_MODULE_EXTENSIONS=\"gba\" -DUNIFROG_MODULE_SYMBOL_PREFIX=gpsp
+$(BUILD)/core_modules/gpsp_multicore_entry.o: CORE_MODULE_DEFINES := -DUNIFROG_MODULE_CORE_ID=\"gpsp_multicore\" -DUNIFROG_MODULE_EXTENSIONS=\"gba\" -DUNIFROG_MODULE_SYMBOL_PREFIX=gpsp_multicore
 PICODRIVE_CORE_SUPPORT_LIBS := $(CHD_SUPPORT_CORE_LIB)
 PCE_FAST_CORE_SUPPORT_LIBS := $(CHD_SUPPORT_CORE_LIB)
 
@@ -1070,6 +1077,7 @@ endef
 
 $(eval $(call CORE_MODULE_RULES,gambatte,GAMBATTE,$(GAMBATTE_CORE_BIN)))
 $(eval $(call CORE_MODULE_RULES,gpsp,GPSP,$(GPSP_CORE_BIN)))
+$(eval $(call CORE_MODULE_RULES,gpsp_multicore,GPSP_MULTICORE,$(GPSP_MULTICORE_CORE_BIN)))
 $(eval $(call CORE_MODULE_RULES,picodrive,PICODRIVE,$(PICODRIVE_CORE_BIN)))
 $(eval $(call CORE_MODULE_RULES,snes9x2005,SNES9X2005,$(SNES9X2005_CORE_BIN)))
 $(eval $(call CORE_MODULE_RULES,snes9x2002,SNES9X2002,$(SNES9X2002_CORE_BIN)))
