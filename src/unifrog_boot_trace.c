@@ -72,6 +72,10 @@ static const char *boot_trace_name(uint32_t event)
       return "fastboot.stage1.jump";
    case FASTBOOT_TRACE_STAGE1_FAIL:
       return "fastboot.stage1.fail";
+   case FASTBOOT_TRACE_STAGE1_INPUT_OVERRIDE:
+      return "fastboot.stage1.input_override";
+   case FASTBOOT_TRACE_STAGE1_DEFAULT_RESULT:
+      return "fastboot.stage1.default_result";
    case FASTBOOT_TRACE_UNIFROG_MAIN_START:
       return "unifrog.main.start";
    case FASTBOOT_TRACE_UNIFROG_APP_MAIN_START:

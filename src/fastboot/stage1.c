@@ -259,8 +259,14 @@ static uint32_t fastboot_scan_any_key(void)
 	uint32_t raw = 0;
 	unsigned int i;
 
+	/*
+	 * Do not probe the GB300 matrix here yet. On SF2000 hardware the GB300
+	 * data pins can be low/floating this early, which looks like 0xffff and
+	 * would force UniFrog every boot. Enable GB300 only after adding a reliable
+	 * early board discriminator.
+	 */
 	for (i = 0; i < FASTBOOT_BUTTON_SCAN_POLLS; i++)
-		raw |= fastboot_scan_sf2000_keys() | fastboot_scan_gb300_keys();
+		raw |= fastboot_scan_sf2000_keys();
 	return raw;
 }
 
