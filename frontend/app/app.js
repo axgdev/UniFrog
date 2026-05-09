@@ -66,6 +66,7 @@ var scriptItems = [];
 var systemCheckRows = [];
 var systemCheckTitle = "System Check";
 var systemCheckDetail = "";
+var bootDefaultName = "";
 var pendingDeveloperCore = "";
 var pendingDeveloperCorePath = "";
 var frontendReadyLogged = false;

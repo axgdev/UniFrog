@@ -12,6 +12,23 @@
 #define ASD_SKIP 0x200u
 #define RAW_LOAD_LIMIT ((unsigned int)((uintptr_t)FASTBOOT_CHUNK_ADDR - \
 	(uintptr_t)RAW_LOAD_ADDR))
+#define BOOT_ASD_CFG_PATH "firmware/boot_asd.cfg"
+#define DEFAULT_ASD_PREFIX "firmware/"
+#define DEFAULT_ASD_PREFIX_LEN 9u
+#define DEFAULT_ASD_NAME_MAX 64u
+#define DEFAULT_ASD_CFG_READ_MAX 96u
+#define FASTBOOT_PINMUXL_BASE 0xb88004a0u
+#define FASTBOOT_GPIOLCTRL_BASE 0xb8800044u
+#define FASTBOOT_GPIO_INPUT_ST_REG 0x0cu
+#define FASTBOOT_GPIO_OUTPUT_VAL_REG 0x10u
+#define FASTBOOT_GPIO_DIR_REG 0x14u
+#define FASTBOOT_KEY_SF2000_PL1_PIN 23u
+#define FASTBOOT_KEY_SF2000_CLK_PIN 24u
+#define FASTBOOT_KEY_GB300_D1_PIN 25u
+#define FASTBOOT_KEY_GB300_CLK_PIN 26u
+#define FASTBOOT_KEY_GB300_D0_PIN 27u
+#define FASTBOOT_KEY_SHIFTER_BITS 16u
+#define FASTBOOT_BUTTON_SCAN_POLLS 3u
 
 #define FA_READ 0x01u
 
@@ -140,6 +157,111 @@ static uint32_t read_reg32(uint32_t addr)
 static void set_reg32_bits(uint32_t addr, uint32_t mask)
 {
 	*(volatile uint32_t *)(uintptr_t)addr = read_reg32(addr) | mask;
+}
+
+static void clear_reg32_bits(uint32_t addr, uint32_t mask)
+{
+	*(volatile uint32_t *)(uintptr_t)addr = read_reg32(addr) & ~mask;
+}
+
+static void fastboot_delay_ticks(unsigned int ticks)
+{
+	volatile unsigned int i;
+
+	for (i = 0; i < ticks; i++)
+		__asm__ volatile("nop");
+}
+
+static void fastboot_pinmux_l_gpio(unsigned int pin)
+{
+	if (pin < 32u)
+		write_reg8(FASTBOOT_PINMUXL_BASE + pin, 0);
+}
+
+static void fastboot_gpio_l_output(unsigned int pin, int high)
+{
+	uint32_t bit = 1u << pin;
+
+	fastboot_pinmux_l_gpio(pin);
+	set_reg32_bits(FASTBOOT_GPIOLCTRL_BASE + FASTBOOT_GPIO_DIR_REG, bit);
+	if (high)
+		set_reg32_bits(FASTBOOT_GPIOLCTRL_BASE +
+			FASTBOOT_GPIO_OUTPUT_VAL_REG, bit);
+	else
+		clear_reg32_bits(FASTBOOT_GPIOLCTRL_BASE +
+			FASTBOOT_GPIO_OUTPUT_VAL_REG, bit);
+}
+
+static void fastboot_gpio_l_input(unsigned int pin)
+{
+	uint32_t bit = 1u << pin;
+
+	fastboot_pinmux_l_gpio(pin);
+	clear_reg32_bits(FASTBOOT_GPIOLCTRL_BASE + FASTBOOT_GPIO_DIR_REG, bit);
+}
+
+static int fastboot_gpio_l_get(unsigned int pin)
+{
+	return (read_reg32(FASTBOOT_GPIOLCTRL_BASE +
+		FASTBOOT_GPIO_INPUT_ST_REG) >> pin) & 1u;
+}
+
+static uint32_t fastboot_scan_sf2000_keys(void)
+{
+	uint32_t raw = 0;
+	unsigned int i;
+
+	fastboot_gpio_l_output(FASTBOOT_KEY_SF2000_CLK_PIN, 1);
+	fastboot_gpio_l_output(FASTBOOT_KEY_SF2000_PL1_PIN, 0);
+	fastboot_delay_ticks(800);
+	fastboot_gpio_l_input(FASTBOOT_KEY_SF2000_PL1_PIN);
+	fastboot_delay_ticks(800);
+
+	for (i = 0; i < 12u; i++) {
+		if (!fastboot_gpio_l_get(FASTBOOT_KEY_SF2000_PL1_PIN))
+			raw |= 1u << i;
+		fastboot_gpio_l_output(FASTBOOT_KEY_SF2000_CLK_PIN, 0);
+		fastboot_delay_ticks(500);
+		fastboot_gpio_l_output(FASTBOOT_KEY_SF2000_CLK_PIN, 1);
+		fastboot_delay_ticks(500);
+	}
+	return raw;
+}
+
+static uint32_t fastboot_scan_gb300_keys(void)
+{
+	uint32_t raw = 0;
+	unsigned int i;
+
+	fastboot_gpio_l_output(FASTBOOT_KEY_GB300_CLK_PIN, 1);
+	fastboot_gpio_l_output(FASTBOOT_KEY_GB300_D0_PIN, 0);
+	fastboot_gpio_l_output(FASTBOOT_KEY_GB300_D1_PIN, 0);
+	fastboot_gpio_l_output(FASTBOOT_KEY_GB300_CLK_PIN, 0);
+	fastboot_delay_ticks(800);
+	fastboot_gpio_l_input(FASTBOOT_KEY_GB300_D0_PIN);
+	fastboot_gpio_l_input(FASTBOOT_KEY_GB300_D1_PIN);
+	fastboot_delay_ticks(800);
+
+	for (i = 0; i < FASTBOOT_KEY_SHIFTER_BITS; i++) {
+		if (!fastboot_gpio_l_get(FASTBOOT_KEY_GB300_D0_PIN) ||
+				!fastboot_gpio_l_get(FASTBOOT_KEY_GB300_D1_PIN))
+			raw |= 1u << i;
+		fastboot_gpio_l_output(FASTBOOT_KEY_GB300_CLK_PIN, 0);
+		fastboot_delay_ticks(500);
+		fastboot_gpio_l_output(FASTBOOT_KEY_GB300_CLK_PIN, 1);
+		fastboot_delay_ticks(500);
+	}
+	return raw;
+}
+
+static uint32_t fastboot_scan_any_key(void)
+{
+	uint32_t raw = 0;
+	unsigned int i;
+
+	for (i = 0; i < FASTBOOT_BUTTON_SCAN_POLLS; i++)
+		raw |= fastboot_scan_sf2000_keys() | fastboot_scan_gb300_keys();
+	return raw;
 }
 
 static void fastboot_backlight_off(void)
@@ -501,6 +623,90 @@ static int read_handoff_path(char *path, unsigned int path_size)
 	return 0;
 }
 
+static int fastboot_ascii_is_space(char c)
+{
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+static int fastboot_ascii_ends_asd(const char *name)
+{
+	unsigned int len = 0;
+
+	while (name[len] != '\0')
+		len++;
+	if (len < 5u)
+		return 0;
+	return (name[len - 4u] == '.') &&
+		(name[len - 3u] == 'a' || name[len - 3u] == 'A') &&
+		(name[len - 2u] == 's' || name[len - 2u] == 'S') &&
+		(name[len - 1u] == 'd' || name[len - 1u] == 'D');
+}
+
+static int fastboot_valid_asd_name(const char *name)
+{
+	unsigned int i;
+
+	if (!name || name[0] == '\0' || name[0] == '.')
+		return 0;
+	for (i = 0; name[i] != '\0'; i++) {
+		char c = name[i];
+
+		if (i >= DEFAULT_ASD_NAME_MAX)
+			return 0;
+		if (c == '/' || c == '\\' || c == ':' || fastboot_ascii_is_space(c))
+			return 0;
+	}
+	return fastboot_ascii_ends_asd(name);
+}
+
+static int read_default_asd_path(char *path, unsigned int path_size)
+{
+	char cfg[DEFAULT_ASD_CFG_READ_MAX + 1u];
+	char name[DEFAULT_ASD_NAME_MAX + 1u];
+	UINT got = 0;
+	unsigned int begin = 0;
+	unsigned int end;
+	unsigned int i;
+	unsigned int name_len;
+	int rc;
+
+	if (!path || path_size <= DEFAULT_ASD_PREFIX_LEN + 1u)
+		return -1;
+
+	rc = rom_f_open(&file, BOOT_ASD_CFG_PATH, FA_READ);
+	if (rc != 0)
+		return -1;
+	rc = rom_f_read(&file, cfg, DEFAULT_ASD_CFG_READ_MAX, &got);
+	rom_f_close(&file);
+	if (rc != 0 || got == 0)
+		return -1;
+
+	cfg[got] = '\0';
+	while (begin < got && fastboot_ascii_is_space(cfg[begin]))
+		begin++;
+	end = got;
+	while (end > begin && fastboot_ascii_is_space(cfg[end - 1u]))
+		end--;
+	if (end <= begin || end - begin > DEFAULT_ASD_NAME_MAX)
+		return -1;
+
+	name_len = end - begin;
+	for (i = 0; i < name_len; i++)
+		name[i] = cfg[begin + i];
+	name[name_len] = '\0';
+	if (!fastboot_valid_asd_name(name))
+		return -1;
+
+	if (DEFAULT_ASD_PREFIX_LEN + name_len + 1u > path_size)
+		return -1;
+	for (i = 0; i < DEFAULT_ASD_PREFIX_LEN; i++)
+		path[i] = DEFAULT_ASD_PREFIX[i];
+	for (i = 0; i < name_len; i++)
+		path[DEFAULT_ASD_PREFIX_LEN + i] = name[i];
+	path[DEFAULT_ASD_PREFIX_LEN + name_len] = '\0';
+	return 0;
+}
+
 static void jump_to_payload(const char *path)
 {
 	entry_fn entry = (entry_fn)ENTRY_ADDR;
@@ -519,10 +725,13 @@ static void jump_to_payload(const char *path)
 void stage1_main(void)
 {
 	char handoff_path[FASTBOOT_HANDOFF_PATH_BYTES];
+	char default_path[FASTBOOT_HANDOFF_PATH_BYTES];
+	uint32_t boot_override_keys;
 	int rc;
 
 	clear_bss();
 	disable_interrupts();
+	boot_override_keys = fastboot_scan_any_key();
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_START,
 		(unsigned int)(uintptr_t)FASTBOOT_STAGE1_ADDR, 0, 0);
 	fastboot_backlight_off();
@@ -539,7 +748,12 @@ void stage1_main(void)
 	if (rc != 0)
 		goto fail;
 
-	if (read_handoff_path(handoff_path, sizeof(handoff_path)) == 0) {
+	if (boot_override_keys != 0) {
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_INPUT_OVERRIDE,
+			boot_override_keys, 0, 0);
+		rom_printf("fastboot: input override keys=0x%08x\n",
+			(unsigned int)boot_override_keys);
+	} else if (read_handoff_path(handoff_path, sizeof(handoff_path)) == 0) {
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_HANDOFF_RESULT,
 			0, trace_path_hash(handoff_path), 0);
 		write_diag(FASTBOOT_DIAG_HANDOFF_FOUND, 0, handoff_path);
@@ -552,6 +766,20 @@ void stage1_main(void)
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_HANDOFF_RESULT,
 			(unsigned int)-1, 0, 0);
 		write_diag(FASTBOOT_DIAG_HANDOFF_MISSING, -1, "");
+	}
+
+	if (boot_override_keys == 0 &&
+			read_default_asd_path(default_path, sizeof(default_path)) == 0) {
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_DEFAULT_RESULT,
+			0, trace_path_hash(default_path), 0);
+		rom_printf("fastboot: default %s\n", default_path);
+		if (load_asd_staged(default_path) == 0)
+			jump_to_payload(default_path);
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_DEFAULT_RESULT,
+			(unsigned int)-1, trace_path_hash(default_path), 0);
+	} else if (boot_override_keys == 0) {
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_DEFAULT_RESULT,
+			(unsigned int)-1, 0, 0);
 	}
 
 	if (load_file("firmware/unifrog.bin", 0, RAW_LOAD_ADDR) == 0)

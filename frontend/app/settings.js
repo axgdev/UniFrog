@@ -73,6 +73,40 @@ function loadSettings() {
   }
 }
 
+function loadBootDefault() {
+  var text = JS2300.fs.readText ? JS2300.fs.readText(BOOT_ASD_CFG_PATH) : null;
+  var name;
+
+  if (!text) {
+    bootDefaultName = "";
+    return;
+  }
+  name = trimText(text);
+  bootDefaultName = isValidBootAsdName(name) ? name : "";
+}
+
+function writeBootDefault(name, now) {
+  var ret;
+
+  if (!JS2300.fs.writeText) {
+    showToast("Default write unavailable", now);
+    return -1;
+  }
+  if (name && !isValidBootAsdName(name)) {
+    showToast("Invalid firmware", now);
+    return -1;
+  }
+  ret = JS2300.fs.writeText(BOOT_ASD_CFG_PATH, name ? name + "\n" : "");
+  if (ret < 0) {
+    showToast("Default write failed", now);
+    return ret;
+  }
+  bootDefaultName = name ? name : "";
+  showToast(bootDefaultName ? "Default " + bootDefaultName : "Default UniFrog", now);
+  dirty = true;
+  return 0;
+}
+
 function loadThemeFile() {
   var text = JS2300.fs.readText ? JS2300.fs.readText(THEME_PATH) : null;
   var fontPath;

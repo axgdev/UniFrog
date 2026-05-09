@@ -319,6 +319,10 @@ function openEntry(now) {
   var full;
   if (entries.length === 0) return;
   entry = entries[selected];
+  if (filter === "firmware" && entry.bootUnset) {
+    writeBootDefault("", now);
+    return;
+  }
   full = joinPath(path, entry.name);
   if (entry.dir) {
     pushNav();
@@ -343,6 +347,19 @@ function openEntry(now) {
     runAction("script:" + full, now);
   } else {
     openGame(full, "", now);
+  }
+}
+
+function setSelectedFirmwareDefault(now) {
+  var entry;
+
+  if (view !== BROWSER || filter !== "firmware" || entries.length === 0)
+    return;
+  entry = entries[selected];
+  if (entry.bootUnset) {
+    writeBootDefault("", now);
+  } else if (!entry.dir && isValidBootAsdName(entry.name)) {
+    writeBootDefault(entry.name, now);
   }
 }
 
@@ -483,6 +500,7 @@ function handleInput(input, now) {
     if (pressed & BTN_LEFT) move(-8, entries.length);
     if (pressed & BTN_RIGHT) move(8, entries.length);
     if (pressed & BTN_A) openEntry(now);
+    if (pressed & BTN_SELECT) setSelectedFirmwareDefault(now);
   } else if (view === SYSTEMS) {
     if (repeated(input, BTN_UP, now, 360, 150)) move(-1, systems.length);
     else if (repeated(input, BTN_DOWN, now, 360, 150)) move(1, systems.length);

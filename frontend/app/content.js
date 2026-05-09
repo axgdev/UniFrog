@@ -85,6 +85,20 @@ function isAsd(name) {
   return endsWithCI(name, ".asd");
 }
 
+function isValidBootAsdName(name) {
+  var i;
+  if (!name || !isAsd(name) || name.charAt(0) === ".") return false;
+  if (name.length >= 64) return false;
+  for (i = 0; i < name.length; i++) {
+    if (name.charAt(i) === "/" || name.charAt(i) === "\\" ||
+        name.charAt(i) === ":" || name.charAt(i) === " " ||
+        name.charAt(i) === "\t" || name.charAt(i) === "\r" ||
+        name.charAt(i) === "\n")
+      return false;
+  }
+  return true;
+}
+
 function isScript(name) {
   return endsWithCI(name, ".js");
 }
@@ -208,6 +222,15 @@ function compareEntries(a, b) {
 function refreshBrowser() {
   var list = JS2300.fs.list(path);
   entries = sortEntries(list);
+  if (filter === "firmware") {
+    loadBootDefault();
+    entries.unshift({
+      name: "Use UniFrog by default",
+      dir: false,
+      bootUnset: true,
+      key: ""
+    });
+  }
   selected = 0;
   scroll = 0;
   showToast(String(entries.length) + " items", JS2300.now());

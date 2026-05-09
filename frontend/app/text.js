@@ -79,6 +79,27 @@ function containsCI(text, part) {
   return lowerAscii(text).indexOf(lowerAscii(part)) >= 0;
 }
 
+function trimText(text) {
+  var begin = 0;
+  var end;
+  var out = "";
+  var i;
+
+  if (!text) return "";
+  end = text.length;
+  while (begin < end && (text.charAt(begin) === " " ||
+      text.charAt(begin) === "\t" || text.charAt(begin) === "\r" ||
+      text.charAt(begin) === "\n"))
+    begin++;
+  while (end > begin && (text.charAt(end - 1) === " " ||
+      text.charAt(end - 1) === "\t" || text.charAt(end - 1) === "\r" ||
+      text.charAt(end - 1) === "\n"))
+    end--;
+  for (i = begin; i < end; i++)
+    out += String.fromCharCode(text.charCodeAt(i));
+  return out;
+}
+
 function readKey(text, key) {
   var i = 0;
   var line = "";

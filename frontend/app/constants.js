@@ -39,6 +39,7 @@ var INDEX_PATH = "/media/mmcblk0/unifrog/game-index.txt";
 var MEDIA_INDEX_PATH = "/media/mmcblk0/unifrog/media-index.txt";
 var SCRIPT_DIR = "/media/mmcblk0/unifrog/scripts";
 var SYSTEM_CHECK_REPORT_PATH = "/media/mmcblk0/unifrog/system-check.txt";
+var BOOT_ASD_CFG_PATH = "/media/mmcblk0/firmware/boot_asd.cfg";
 
 var backlightLevels = [1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 var launchGainOptions = [

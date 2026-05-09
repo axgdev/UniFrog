@@ -192,23 +192,42 @@ function drawBrowser(now) {
   var y;
   var entry;
   var label;
+  var detail;
   JS2300.video.clear(theme.colors.background);
   topBar(title);
-  JS2300.video.text(10, 30, path, theme.text.muted);
+  if (filter === "firmware")
+    JS2300.video.text(10, 30, "Default: " +
+      (bootDefaultName ? bootDefaultName : "UniFrog"), theme.text.muted);
+  else
+    JS2300.video.text(10, 30, path, theme.text.muted);
   drawRows(8, 50, 20, 18);
   for (i = 0; i < 8; i++) {
     idx = scroll + i;
     y = 55 + i * 20;
     if (idx < entries.length) {
       entry = entries[idx];
-      label = entry.dir ? "[" + entry.name + "]" : entry.name;
-      label = marqueeText(label, 46, idx === selected, now);
+      if (filter === "firmware" && entry.bootUnset) {
+        label = (bootDefaultName ? "Set default: UniFrog" : "* UniFrog default");
+      } else if (filter === "firmware" && entry.name === bootDefaultName) {
+        label = "* " + entry.name;
+      } else {
+        label = entry.dir ? "[" + entry.name + "]" : entry.name;
+      }
+      label = marqueeText(label, filter === "firmware" ? 34 : 46,
+        idx === selected, now);
       JS2300.video.text(16, y, label, idx === selected ? theme.text.selected : theme.text.primary);
+      if (filter === "firmware") {
+        detail = entry.bootUnset ? "A/SELECT" :
+          (entry.name === bootDefaultName ? "Default" : "SELECT");
+        JS2300.video.text(244, y, detail,
+          idx === selected ? theme.text.selectedMuted : theme.text.muted);
+      }
     }
   }
   if (entries.length === 0) JS2300.video.text(16, 96, "No matching files", theme.text.muted);
   drawToast(now);
-  footer("A open   B back   Y log");
+  footer(filter === "firmware" ? "A boot/unset   SELECT default   B back" :
+    "A open   B back   Y log");
   JS2300.video.present();
 }
 
