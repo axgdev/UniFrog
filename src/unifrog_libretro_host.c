@@ -66,6 +66,7 @@
 #define LIBRETRO_PACE_RESET_LATE_FRAMES 12u
 #define LIBRETRO_COUNT_CALIBRATE_US 20000u
 #define LIBRETRO_LOG_AUTO_FLUSH_BYTES (64u * 1024u)
+#define LIBRETRO_FAST_FORWARD_PRESENT_DIVISOR 4u
 #define LIBRETRO_LOAD_LOG_PERCENT_STEP 10u
 #define LIBRETRO_WATCHDOG_TICKS pdMS_TO_TICKS(100)
 #define LIBRETRO_WATCHDOG_LOAD_STALL_POLLS 600u
@@ -430,6 +431,7 @@ struct libretro_host {
    unsigned memory_autosave_frame;
    unsigned memory_autosaves;
    int fast_forward;
+   int fast_forward_force_present;
    int content_alloc_appmem;
    const struct libretro_core_api *quick_core;
    const char *quick_rom_path;
@@ -1835,8 +1837,15 @@ void unifrog_libretro_video_refresh_cb(const void *data, unsigned width,
    if (!data || width == 0 || height == 0)
       return;
    if (host.fast_forward) {
-      host.video_frames++;
-      return;
+      if (host.fast_forward_force_present) {
+         host.fast_forward_force_present = 0;
+      } else if ((host.video_frames % LIBRETRO_FAST_FORWARD_PRESENT_DIVISOR) !=
+          0) {
+         host.video_frames++;
+         if (host.presenter_open)
+            host.presenter.last_vsync_count = 0;
+         return;
+      }
    }
 
    if (host.pixel_format == RETRO_PIXEL_FORMAT_XRGB8888) {
@@ -2039,6 +2048,7 @@ static int quick_js_toggle_audio(void)
 static int quick_js_toggle_fast_forward(void)
 {
    host.fast_forward = host.fast_forward ? 0 : 1;
+   host.fast_forward_force_present = host.fast_forward ? 1 : 0;
    host.frame_deadline_us = host_time_us();
    host.audio_gate_open = 0;
    host.audio_quiet_batches = 0;
@@ -2451,6 +2461,8 @@ static int quick_js_run(const struct libretro_core_api *core,
 
    host.quick_js_frame_open = 0;
    host.presenter.cleared_buffer_mask = 0;
+   if (host.fast_forward)
+      host.fast_forward_force_present = 1;
    return host.quick_js_action == QUICK_JS_ACTION_RETURN_MENU ? 1 : 0;
 }
 
