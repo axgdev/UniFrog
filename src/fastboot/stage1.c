@@ -31,6 +31,8 @@
 #define FASTBOOT_BUTTON_SCAN_POLLS 3u
 #define FASTBOOT_SF2000_KEY_MASK ((1u << 12u) - 1u)
 #define FASTBOOT_GB300_KEY_MASK ((1u << FASTBOOT_KEY_SHIFTER_BITS) - 1u)
+#define FASTBOOT_SF2000_B_KEY_MASK (1u << 5u)
+#define FASTBOOT_GB300_B_KEY_MASK (1u << 6u)
 
 #define FA_READ 0x01u
 
@@ -263,7 +265,7 @@ static uint32_t fastboot_sanitize_sf2000_keys(uint32_t keys)
 	keys &= FASTBOOT_SF2000_KEY_MASK;
 	if (keys == FASTBOOT_SF2000_KEY_MASK)
 		return 0;
-	return keys;
+	return keys & FASTBOOT_SF2000_B_KEY_MASK;
 }
 
 static uint32_t fastboot_sanitize_gb300_keys(uint32_t keys)
@@ -271,7 +273,7 @@ static uint32_t fastboot_sanitize_gb300_keys(uint32_t keys)
 	keys &= FASTBOOT_GB300_KEY_MASK;
 	if (keys == FASTBOOT_GB300_KEY_MASK)
 		return 0;
-	return keys;
+	return keys & FASTBOOT_GB300_B_KEY_MASK;
 }
 
 static uint32_t fastboot_scan_any_key(void)
@@ -715,12 +717,18 @@ static int read_default_asd_path(char *path, unsigned int path_size)
 		return -1;
 
 	rc = rom_f_open(&file, BOOT_ASD_CFG_PATH, FA_READ);
-	if (rc != 0)
+	if (rc != 0) {
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_DEFAULT_RESULT,
+			(unsigned int)-2, (unsigned int)rc, 0);
 		return -1;
+	}
 	rc = rom_f_read(&file, cfg, DEFAULT_ASD_CFG_READ_MAX, &got);
 	rom_f_close(&file);
-	if (rc != 0 || got == 0)
+	if (rc != 0 || got == 0) {
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_DEFAULT_RESULT,
+			(unsigned int)-3, (unsigned int)rc, got);
 		return -1;
+	}
 
 	cfg[got] = '\0';
 	while (begin < got && fastboot_ascii_is_space(cfg[begin]))
@@ -728,15 +736,21 @@ static int read_default_asd_path(char *path, unsigned int path_size)
 	end = got;
 	while (end > begin && fastboot_ascii_is_space(cfg[end - 1u]))
 		end--;
-	if (end <= begin || end - begin > DEFAULT_ASD_NAME_MAX)
+	if (end <= begin || end - begin > DEFAULT_ASD_NAME_MAX) {
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_DEFAULT_RESULT,
+			(unsigned int)-4, got, end - begin);
 		return -1;
+	}
 
 	name_len = end - begin;
 	for (i = 0; i < name_len; i++)
 		name[i] = cfg[begin + i];
 	name[name_len] = '\0';
-	if (!fastboot_valid_asd_name(name))
+	if (!fastboot_valid_asd_name(name)) {
+		boot_trace_note(FASTBOOT_TRACE_STAGE1_DEFAULT_RESULT,
+			(unsigned int)-5, trace_path_hash(name), name_len);
 		return -1;
+	}
 
 	if (DEFAULT_ASD_PREFIX_LEN + name_len + 1u > path_size)
 		return -1;
