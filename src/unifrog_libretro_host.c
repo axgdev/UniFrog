@@ -1899,7 +1899,8 @@ bool unifrog_libretro_environment_cb(unsigned cmd, void *data)
       if (!data)
          return false;
       if (host.fast_forward) {
-         *(int *)data = 0;
+         *(int *)data = RETRO_AV_ENABLE_VIDEO |
+            RETRO_AV_ENABLE_HARD_DISABLE_AUDIO;
       } else {
          *(int *)data = RETRO_AV_ENABLE_VIDEO |
             (host.audio_enabled ? RETRO_AV_ENABLE_AUDIO :
