@@ -30,16 +30,12 @@ void frontend_configure_host(struct js2300_frontend *frontend,
 
 static int frontend_boot_read_profile_enabled(void)
 {
-   const char *profile = UNIFROG_SD_READ_MODE;
-
-   if (!profile || !profile[0])
-      return 0;
-   if (strcmp(profile, "boot") == 0 || strcmp(profile, "safe") == 0 ||
-       strcmp(profile, "off") == 0 || strcmp(profile, "none") == 0)
-      return 0;
-   if (strcmp(profile, UNIFROG_SD_MODE) == 0)
-      return 0;
-   return 1;
+   /*
+    * Keep JavaScript frontend startup on the boot profile. Fast SD profiles
+    * are still available through frontend_start_runtime_read_window() for
+    * ROM/core and native module loads.
+    */
+   return 0;
 }
 
 int frontend_start_boot_read_window(struct js2300_frontend *frontend,

@@ -8,6 +8,11 @@ var config = {
   display: 0,
   av: 0,
   autoIndex: 0,
+  romRoots: "/ROMS|/",
+  language: "en",
+  font: "builtin",
+  fontSize: 12,
+  fastSd: "uhs25",
   lastPath: "",
   lastCore: ""
 };

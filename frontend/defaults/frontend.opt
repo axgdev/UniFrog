@@ -1,0 +1,30 @@
+### [brightness] :[50] :[1|5|10|20|30|40|50|60|70|80|90|100]
+brightness=50
+### [audio] :[1] :[0|1]
+audio=1
+### [gain] :[2] :[0|2|4|8]
+gain=2
+### [cpu] :[918] :[198|297|396|594|702|756|810|864|918]
+cpu=918
+### [ge] :[0] :[0|1|2|3]
+ge=0
+### [frameskip] :[1] :[0|1|2|3]
+frameskip=1
+### [display] :[0] :[0|1|2]
+display=0
+### [av] :[0] :[0|1|2]
+av=0
+### [rom_roots] :[/ROMS|/] :[/ROMS|/|/ROMS]
+rom_roots=/ROMS|/
+### [auto_index] :[0] :[0|1]
+auto_index=0
+### [home_layout] :[grid] :[grid|systems_horizontal|systems_vertical|kiosk]
+home_layout=grid
+### [language] :[en] :[en|zh-Hans|hi|es|fr|ar|bn|pt|ru|ur|id|de|ja|sw|mr|te|tr|ta|vi|ko]
+language=en
+### [font] :[builtin] :[Bitmap5x7|Spleen6x12|Spleen8x16|NotoSans-Regular|ArabicFallback|DevanagariFallback|BengaliFallback|TamilFallback|TeluguFallback|CJKFallback|NotoSansArabic|NotoSansDevanagari|NotoSansBengali|NotoSansTamil|NotoSansTelugu|DroidSansFallback]
+font=builtin
+### [font_size] :[12] :[10|11|12|13|14|15]
+font_size=12
+### [fast_sd] :[uhs25] :[boot|hs1|wide50|wide|uhs12|uhs25|uhs]
+fast_sd=uhs25

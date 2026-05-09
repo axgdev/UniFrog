@@ -18,7 +18,7 @@ MQUICKJS_REF ?= ee50431eac9b14b99f722b537ec4cac0c8dd75ab
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 SD_MODE ?= safe
-SD_READ_MODE ?= $(if $(filter safe,$(SD_MODE)),uhs25,boot)
+SD_READ_MODE ?= uhs25
 HCRTOS_MEDIA ?= module
 
 -include config.mk

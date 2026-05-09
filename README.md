@@ -84,17 +84,34 @@ of the boot image and packages it as `/unifrog/modules/hcrtos-media.bin`; video
 actions load that native module from SD. Use `HCRTOS_MEDIA=firmware` only when
 you need the old fully linked boot image for diagnostics.
 
-SD builds boot with the reliable 1-bit profile. Frontend startup reads and ROM
-loads use a guarded `SD_READ_MODE=uhs25` read window by default, then restore
-the boot profile before normal UI writes or core init; use `SD_READ_MODE=boot`
-to disable it. In the safe build, Developer -> Storage test runs a quick
-guarded runtime sweep: it buffers logs, shows
-progress on screen, prefers `/ROMS/test.md` when present, verifies a safe
-remount first, switches profiles through the SD bus suspend/resume hooks, tries
-`hs1`, `wide50`, `uhs12`, `uhs25`, `wide`, and `uhs`, then restores the safe
-boot profile before writing `/unifrog/storage-test-result.txt` and the frontend
-report. Developer -> Storage full test uses `/ROMS/probes/test*.md`, restores
-the safe profile after each experimental read, and checkpoints
+The SD-card package also installs `LICENSE.txt` and `THIRD_PARTY.md` under
+`/unifrog`. Keep `THIRD_PARTY.md` current whenever adding, removing, or
+replacing fetched or vendored third-party code.
+
+Game discovery is directory based. The default frontend option
+`rom_roots=/ROMS|/` scans system folders directly under `/ROMS` and directly
+under the SD root, so both `/ROMS/gba` and `/gba` are valid. Files inside a
+recognized system folder are treated as games without guessing from their file
+extensions. Common retro-handheld folder aliases such as `gba`, `gb`, `gbc`,
+`nes`, `snes`, `megadrive`, `pcengine`, and `psx` are matched
+case-insensitively. Edit `/unifrog/user/frontend.opt` on the SD card to change
+ROM roots without modifying packaged defaults.
+
+SD builds boot with the reliable 1-bit profile. Frontend startup stays on that
+boot profile. Fast SD read windows are reserved for ROM and native
+module loading, and default to `uhs25`. The frontend `fast_sd` option exposes
+`boot`, `hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, and `uhs` because card
+behavior varies. If a ROM load
+stalls while using an experimental profile, the load watchdog attempts to
+restore the boot storage profile once before showing the core hang screen. In
+the safe build, Developer -> Storage test runs a quick guarded runtime sweep:
+it buffers logs, shows progress on screen, prefers `/ROMS/test.md` when
+present, verifies a safe remount first, switches profiles through the SD bus
+suspend/resume hooks, tries `hs1`, `wide50`, `uhs12`, `uhs25`, `wide`, and
+`uhs`, then restores the safe boot profile before writing
+`/unifrog/storage-test-result.txt` and the frontend report. Developer ->
+Storage full test uses `/ROMS/probes/test*.md`, restores the safe profile after
+each experimental read, and checkpoints
 `/unifrog/storage-full-test-result.txt` between modes. Developer -> Storage
 mode test selects one profile, switches once, runs all probes, then restores
 safe mode and writes `/unifrog/storage-mode-test-result.txt`. The on-screen

@@ -22,9 +22,10 @@ Keep this repository small and direct.
   switches once, reads all probes, then restores safe mode. Use the on-screen
   stage as the primary freeze clue; power cycles can overwrite warm reboot
   diagnostics.
-  Frontend startup reads and runtime ROM reads use `SD_READ_MODE=uhs25` by
-  default, then restore the boot profile before normal UI writes or core init.
-  Use `SD_READ_MODE=boot` to disable those windows.
+  Frontend startup stays on the safe boot profile. Runtime ROM and native
+  module reads use `SD_READ_MODE=uhs25` by default, then restore the boot
+  profile before normal UI writes or core init. Use `SD_READ_MODE=boot` to
+  disable those runtime windows.
   `SD_MODE=hs1|wide50|wide|uhs12|uhs25|uhs` are fixed-profile experimental
   boot builds.
 - Local overrides belong in untracked `config.mk`.
