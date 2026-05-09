@@ -258,6 +258,22 @@ static uint32_t fastboot_scan_gb300_keys(void)
 	return raw;
 }
 
+static uint32_t fastboot_sanitize_sf2000_keys(uint32_t keys)
+{
+	keys &= FASTBOOT_SF2000_KEY_MASK;
+	if (keys == FASTBOOT_SF2000_KEY_MASK)
+		return 0;
+	return keys;
+}
+
+static uint32_t fastboot_sanitize_gb300_keys(uint32_t keys)
+{
+	keys &= FASTBOOT_GB300_KEY_MASK;
+	if (keys == FASTBOOT_GB300_KEY_MASK)
+		return 0;
+	return keys;
+}
+
 static uint32_t fastboot_scan_any_key(void)
 {
 	uint32_t sf2000;
@@ -265,28 +281,28 @@ static uint32_t fastboot_scan_any_key(void)
 	unsigned int i;
 
 	sf2000 = FASTBOOT_SF2000_KEY_MASK;
-	gb300 = FASTBOOT_GB300_KEY_MASK;
-	for (i = 0; i < FASTBOOT_BUTTON_SCAN_POLLS; i++) {
+	for (i = 0; i < FASTBOOT_BUTTON_SCAN_POLLS; i++)
 		sf2000 &= fastboot_scan_sf2000_keys();
-		gb300 &= fastboot_scan_gb300_keys();
+	sf2000 = fastboot_sanitize_sf2000_keys(sf2000);
+	if (sf2000 != 0) {
+		fastboot_last_sf2000_keys = sf2000;
+		fastboot_last_gb300_keys = 0;
+		return sf2000;
 	}
 
-	sf2000 &= FASTBOOT_SF2000_KEY_MASK;
-	gb300 &= FASTBOOT_GB300_KEY_MASK;
+	gb300 = FASTBOOT_GB300_KEY_MASK;
+	for (i = 0; i < FASTBOOT_BUTTON_SCAN_POLLS; i++)
+		gb300 &= fastboot_scan_gb300_keys();
+	gb300 = fastboot_sanitize_gb300_keys(gb300);
 
 	/*
 	 * A saturated read means the scanned bus is not the active controller
 	 * matrix, or is floating/stuck low this early in boot. On SF2000 hardware
 	 * the GB300 pins commonly read as 0xffff before the OS takes ownership.
 	 */
-	if (sf2000 == FASTBOOT_SF2000_KEY_MASK)
-		sf2000 = 0;
-	if (gb300 == FASTBOOT_GB300_KEY_MASK)
-		gb300 = 0;
-
-	fastboot_last_sf2000_keys = sf2000;
+	fastboot_last_sf2000_keys = 0;
 	fastboot_last_gb300_keys = gb300;
-	return sf2000 | gb300;
+	return gb300;
 }
 
 static void fastboot_backlight_off(void)
