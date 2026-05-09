@@ -134,8 +134,9 @@ low-level exception vector.
 The SF2000 speaker gate must stay closed unless real audio is being produced.
 Videos with no audio track should keep the gate closed, otherwise the hardware
 background noise is audible even though the media file is silent. Emulator
-fast-forward also closes the gate while frames run uncapped; normal audio
-resumes when fast-forward is turned off and non-silent samples arrive again.
+fast-forward also closes the gate and tells cores to skip video work while
+frames run uncapped; normal audio resumes when fast-forward is turned off and
+non-silent samples arrive again.
 For streamed media, metadata can be late. Treat a zero audio-track count as
 silent, retry unknown metadata, and only fall back to audio output for files
 that are explicitly audio-only by extension. Unknown audio on video/image files

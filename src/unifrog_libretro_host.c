@@ -1834,6 +1834,10 @@ void unifrog_libretro_video_refresh_cb(const void *data, unsigned width,
    host_force_expected_gp();
    if (!data || width == 0 || height == 0)
       return;
+   if (host.fast_forward) {
+      host.video_frames++;
+      return;
+   }
 
    if (host.pixel_format == RETRO_PIXEL_FORMAT_XRGB8888) {
       present_data = host_convert_xrgb8888_to_rgb565(data, width, height,
@@ -1894,9 +1898,13 @@ bool unifrog_libretro_environment_cb(unsigned cmd, void *data)
    case RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE:
       if (!data)
          return false;
-      *(int *)data = RETRO_AV_ENABLE_VIDEO |
-         (host.audio_enabled && !host.fast_forward ? RETRO_AV_ENABLE_AUDIO :
-          RETRO_AV_ENABLE_HARD_DISABLE_AUDIO);
+      if (host.fast_forward) {
+         *(int *)data = 0;
+      } else {
+         *(int *)data = RETRO_AV_ENABLE_VIDEO |
+            (host.audio_enabled ? RETRO_AV_ENABLE_AUDIO :
+             RETRO_AV_ENABLE_HARD_DISABLE_AUDIO);
+      }
       return true;
    case RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE:
       if (!data)
@@ -2030,6 +2038,7 @@ static int quick_js_toggle_audio(void)
 static int quick_js_toggle_fast_forward(void)
 {
    host.fast_forward = host.fast_forward ? 0 : 1;
+   host.frame_deadline_us = host_time_us();
    host.audio_gate_open = 0;
    host.audio_quiet_batches = 0;
    if (host.audio_open)
@@ -2541,7 +2550,7 @@ static void host_pace_frame(void)
    uint64_t now_us;
    uint64_t after_us;
 
-   if (!host.frame_period_us)
+   if (!host.frame_period_us || host.fast_forward)
       return;
 
    now_us = host_time_us();
@@ -2595,6 +2604,8 @@ static void host_notify_audio_status(void)
    bool underrun_likely = false;
 
    if (!host.audio_status_enabled || !host.audio_status.callback)
+      return;
+   if (host.fast_forward)
       return;
 
    if (host.options.frameskip == UNIFROG_LIBRETRO_FRAMESKIP_AUTO &&
