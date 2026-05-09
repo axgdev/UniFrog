@@ -155,6 +155,10 @@ are intentionally outside individual core source changes:
   `gpsp_frameskip` variables. If audio is disabled or the driver cannot report
   delay, auto frameskip falls back to frontend lateness instead of reporting an
   unusable inactive buffer.
+- The in-game quick menu can change frameskip and fast-forward speed at runtime.
+  For gpSP and gpSP multicore, fast-forward speed maps to a temporary fixed
+  frameskip interval while fast-forward is active, so higher values reduce core
+  rendering work instead of only dropping already-rendered frames.
 - SCPU can be kept at the boot profile or switched to guarded known profiles
   at 198, 297, 396, 594, 702, 756, 810, 864, or 918 MHz. Runtime changes are
   captured before launch and restored after the core exits.

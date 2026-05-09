@@ -5,6 +5,8 @@ var quickStatus = JS2300.system.action("quick:status");
 var quickSlot = JS2300.system.action("quick:state-slot");
 var quickCpu = JS2300.system.action("quick:cpu");
 var quickFastForward = JS2300.system.action("quick:fast-forward-status");
+var quickFastForwardSpeed = JS2300.system.action("quick:fast-forward-speed");
+var quickFrameskip = JS2300.system.action("quick:frameskip");
 var quickToastText = "";
 var quickToastUntil = 0;
 var quickItems = [
@@ -14,6 +16,8 @@ var quickItems = [
   "Save slot",
   "CPU",
   "Fast forward",
+  "FF speed",
+  "Frameskip",
   "Audio",
   "Display",
   "Backlight",
@@ -44,6 +48,13 @@ function quickCpuLabel() {
   return "Default";
 }
 
+function quickFrameskipLabel() {
+  if (quickFrameskip === 1) return "Auto";
+  if (quickFrameskip === 2) return "1";
+  if (quickFrameskip === 3) return "2";
+  return "Off";
+}
+
 function quickDetail(index) {
   if (index === 0) return "B";
   if (index === 1) return "R slot " + String(quickSlot);
@@ -51,10 +62,12 @@ function quickDetail(index) {
   if (index === 3) return String(quickSlot);
   if (index === 4) return quickCpuLabel();
   if (index === 5) return quickFastForward ? "On" : "Off";
-  if (index === 6) return quickAudio() ? "On" : "Off";
-  if (index === 7) return quickDisplayLabel();
-  if (index === 8) return String(quickBacklight()) + "%";
-  if (index === 9) return "X";
+  if (index === 6) return String(quickFastForwardSpeed) + "x";
+  if (index === 7) return quickFrameskipLabel();
+  if (index === 8) return quickAudio() ? "On" : "Off";
+  if (index === 9) return quickDisplayLabel();
+  if (index === 10) return String(quickBacklight()) + "%";
+  if (index === 11) return "X";
   return "";
 }
 
@@ -84,12 +97,12 @@ function quickDraw() {
   JS2300.video.text(184, 10, "SELECT+START", 0xbdf7);
 
   for (i = 0; i < quickItems.length; i++) {
-    y = 44 + i * 17;
+    y = 42 + i * 14;
     if (i === quickSelected) {
       rowColor = 0xfda0;
       textColor = 0x0841;
       detailColor = 0x2945;
-      JS2300.video.rects([[32, y - 4, 256, 16, rowColor]]);
+      JS2300.video.rects([[32, y - 3, 256, 13, rowColor]]);
     } else {
       textColor = 0xffff;
       detailColor = 0xad55;
@@ -185,21 +198,31 @@ function quickActivate() {
     return 0;
   }
   if (quickSelected === 6) {
+    quickFastForwardSpeed = JS2300.system.action("quick:fast-forward-speed-next");
+    quickToast("FF speed " + String(quickFastForwardSpeed) + "x");
+    return 0;
+  }
+  if (quickSelected === 7) {
+    quickFrameskip = JS2300.system.action("quick:frameskip-next");
+    quickToast("Frameskip " + quickFrameskipLabel());
+    return 0;
+  }
+  if (quickSelected === 8) {
     quickStatus = JS2300.system.action("quick:audio");
     quickToast(quickAudio() ? "Audio on" : "Audio off");
     return 0;
   }
-  if (quickSelected === 7) {
+  if (quickSelected === 9) {
     quickStatus = JS2300.system.action("quick:display");
     quickToast("Display " + quickDisplayLabel());
     return 0;
   }
-  if (quickSelected === 8) {
+  if (quickSelected === 10) {
     quickStatus = JS2300.system.action("quick:backlight");
     quickToast("Backlight " + String(quickBacklight()) + "%");
     return 0;
   }
-  if (quickSelected === 9) {
+  if (quickSelected === 11) {
     quickReturnToMenu();
     return 1;
   }
@@ -209,6 +232,19 @@ function quickActivate() {
 function quickAdjust(delta) {
   if (quickSelected === 3) quickCycleSlot(delta);
   else if (quickSelected === 4) quickCycleCpu(delta);
+  else if (quickSelected === 6) {
+    if (delta < 0)
+      quickFastForwardSpeed = JS2300.system.action("quick:fast-forward-speed-prev");
+    else
+      quickFastForwardSpeed = JS2300.system.action("quick:fast-forward-speed-next");
+    quickToast("FF speed " + String(quickFastForwardSpeed) + "x");
+  } else if (quickSelected === 7) {
+    if (delta < 0)
+      quickFrameskip = JS2300.system.action("quick:frameskip-prev");
+    else
+      quickFrameskip = JS2300.system.action("quick:frameskip-next");
+    quickToast("Frameskip " + quickFrameskipLabel());
+  }
 }
 
 function quickWaitRelease() {

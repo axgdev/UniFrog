@@ -66,7 +66,7 @@
 #define LIBRETRO_PACE_RESET_LATE_FRAMES 12u
 #define LIBRETRO_COUNT_CALIBRATE_US 20000u
 #define LIBRETRO_LOG_AUTO_FLUSH_BYTES (64u * 1024u)
-#define LIBRETRO_FAST_FORWARD_PRESENT_DIVISOR 4u
+#define LIBRETRO_FAST_FORWARD_DEFAULT_MULTIPLIER 4u
 #define LIBRETRO_LOAD_LOG_PERCENT_STEP 10u
 #define LIBRETRO_WATCHDOG_TICKS pdMS_TO_TICKS(100)
 #define LIBRETRO_WATCHDOG_LOAD_STALL_POLLS 600u
@@ -417,6 +417,7 @@ struct libretro_host {
    int audio_status_enabled;
    int scpu_restore_valid;
    int scpu_apply_ret;
+   int variables_dirty;
    unsigned scpu_target_mhz;
    int backlight_restore_valid;
    int backlight_apply_ret;
@@ -432,6 +433,7 @@ struct libretro_host {
    unsigned memory_autosaves;
    int fast_forward;
    int fast_forward_force_present;
+   unsigned fast_forward_multiplier;
    int content_alloc_appmem;
    const struct libretro_core_api *quick_core;
    const char *quick_rom_path;
@@ -671,6 +673,19 @@ static int sanitize_display_mode(int display_mode)
    }
 }
 
+static unsigned sanitize_fast_forward_multiplier(unsigned multiplier)
+{
+   switch (multiplier) {
+   case 2:
+   case 4:
+   case 8:
+   case 16:
+      return multiplier;
+   default:
+      return LIBRETRO_FAST_FORWARD_DEFAULT_MULTIPLIER;
+   }
+}
+
 static const char *display_mode_label(int display_mode)
 {
    switch (display_mode) {
@@ -719,6 +734,7 @@ static void host_configure_options(
    host.audio_gain = host.options.audio_gain;
    host.scpu_target_mhz = host.options.scpu_mhz;
    host.display_mode = host.options.display_mode;
+   host.fast_forward_multiplier = LIBRETRO_FAST_FORWARD_DEFAULT_MULTIPLIER;
 }
 
 static uintptr_t host_read_gp(void)
@@ -1486,9 +1502,12 @@ static bool host_get_variable(struct retro_variable *var)
       printf("unifrog libretro variable %s=%s\n", var->key, var->value);
       return true;
    }
-   if (host.core_id && strcmp(host.core_id, "gpsp") == 0) {
+   if (host.core_id && (strcmp(host.core_id, "gpsp") == 0 ||
+       strcmp(host.core_id, "gpsp_multicore") == 0)) {
       if (strcmp(var->key, "gpsp_frameskip") == 0) {
-         if (host.options.frameskip == UNIFROG_LIBRETRO_FRAMESKIP_AUTO)
+         if (host.fast_forward && host.fast_forward_multiplier > 1)
+            var->value = "fixed_interval";
+         else if (host.options.frameskip == UNIFROG_LIBRETRO_FRAMESKIP_AUTO)
             var->value = "auto_threshold";
          else if (host.options.frameskip ==
                   UNIFROG_LIBRETRO_FRAMESKIP_FIXED_1 ||
@@ -1506,7 +1525,16 @@ static bool host_get_variable(struct retro_variable *var)
          return true;
       }
       if (strcmp(var->key, "gpsp_frameskip_interval") == 0) {
-         if (host.options.frameskip ==
+         static char fast_forward_interval[4];
+
+         if (host.fast_forward && host.fast_forward_multiplier > 1) {
+            unsigned interval = sanitize_fast_forward_multiplier(
+               host.fast_forward_multiplier) - 1u;
+
+            snprintf(fast_forward_interval, sizeof(fast_forward_interval),
+               "%u", interval);
+            var->value = fast_forward_interval;
+         } else if (host.options.frameskip ==
              UNIFROG_LIBRETRO_FRAMESKIP_FIXED_2)
             var->value = "2";
          else if (host.options.frameskip ==
@@ -1839,8 +1867,8 @@ void unifrog_libretro_video_refresh_cb(const void *data, unsigned width,
    if (host.fast_forward) {
       if (host.fast_forward_force_present) {
          host.fast_forward_force_present = 0;
-      } else if ((host.video_frames % LIBRETRO_FAST_FORWARD_PRESENT_DIVISOR) !=
-          0) {
+      } else if ((host.video_frames %
+          sanitize_fast_forward_multiplier(host.fast_forward_multiplier)) != 0) {
          host.video_frames++;
          if (host.presenter_open)
             host.presenter.last_vsync_count = 0;
@@ -1930,7 +1958,8 @@ bool unifrog_libretro_environment_cb(unsigned cmd, void *data)
    case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
       if (!data)
          return false;
-      *(bool *)data = false;
+      *(bool *)data = host.variables_dirty ? true : false;
+      host.variables_dirty = 0;
       return true;
    case RETRO_ENVIRONMENT_GET_VARIABLE:
       return host_get_variable((struct retro_variable *)data);
@@ -2049,6 +2078,7 @@ static int quick_js_toggle_fast_forward(void)
 {
    host.fast_forward = host.fast_forward ? 0 : 1;
    host.fast_forward_force_present = host.fast_forward ? 1 : 0;
+   host.variables_dirty = 1;
    host.frame_deadline_us = host_time_us();
    host.audio_gate_open = 0;
    host.audio_quiet_batches = 0;
@@ -2056,6 +2086,84 @@ static int quick_js_toggle_fast_forward(void)
       (void)unifrog_audio_set_output_enabled(&host.audio, 0);
    printf("unifrog quick_js fast_forward=%d\n", host.fast_forward);
    return host.fast_forward ? 1 : 0;
+}
+
+static const char *quick_js_frameskip_label(void)
+{
+   switch (host.options.frameskip) {
+   case UNIFROG_LIBRETRO_FRAMESKIP_AUTO:
+      return "Auto";
+   case UNIFROG_LIBRETRO_FRAMESKIP_FIXED_1:
+      return "1";
+   case UNIFROG_LIBRETRO_FRAMESKIP_FIXED_2:
+      return "2";
+   default:
+      return "Off";
+   }
+}
+
+static int quick_js_cycle_frameskip(int delta)
+{
+   static const int frameskip_values[] = {
+      UNIFROG_LIBRETRO_FRAMESKIP_OFF,
+      UNIFROG_LIBRETRO_FRAMESKIP_AUTO,
+      UNIFROG_LIBRETRO_FRAMESKIP_FIXED_1,
+      UNIFROG_LIBRETRO_FRAMESKIP_FIXED_2,
+   };
+   unsigned index = 0;
+
+   for (unsigned i = 0; i < ARRAY_SIZE(frameskip_values); i++) {
+      if (frameskip_values[i] == host.options.frameskip) {
+         index = i;
+         break;
+      }
+   }
+   if (delta < 0) {
+      if (index == 0)
+         index = ARRAY_SIZE(frameskip_values) - 1u;
+      else
+         index--;
+   } else {
+      index++;
+      if (index >= ARRAY_SIZE(frameskip_values))
+         index = 0;
+   }
+   host.options.frameskip = frameskip_values[index];
+   host.variables_dirty = 1;
+   printf("unifrog quick_js frameskip=%d label=%s\n",
+      host.options.frameskip, quick_js_frameskip_label());
+   return host.options.frameskip;
+}
+
+static int quick_js_cycle_fast_forward_multiplier(int delta)
+{
+   static const unsigned multipliers[] = { 2, 4, 8, 16 };
+   unsigned current = sanitize_fast_forward_multiplier(
+      host.fast_forward_multiplier);
+   unsigned index = 1;
+
+   for (unsigned i = 0; i < ARRAY_SIZE(multipliers); i++) {
+      if (multipliers[i] == current) {
+         index = i;
+         break;
+      }
+   }
+   if (delta < 0) {
+      if (index == 0)
+         index = ARRAY_SIZE(multipliers) - 1u;
+      else
+         index--;
+   } else {
+      index++;
+      if (index >= ARRAY_SIZE(multipliers))
+         index = 0;
+   }
+   host.fast_forward_multiplier = multipliers[index];
+   host.variables_dirty = 1;
+   host.fast_forward_force_present = host.fast_forward ? 1 : 0;
+   printf("unifrog quick_js fast_forward_multiplier=%u\n",
+      host.fast_forward_multiplier);
+   return (int)host.fast_forward_multiplier;
 }
 
 static int quick_js_cycle_display(void)
@@ -2362,6 +2470,19 @@ static int quick_js_action(void *opaque, const char *id)
       return quick_js_toggle_fast_forward();
    if (strcmp(id, "quick:fast-forward-status") == 0)
       return host.fast_forward ? 1 : 0;
+   if (strcmp(id, "quick:fast-forward-speed") == 0)
+      return (int)sanitize_fast_forward_multiplier(
+         host.fast_forward_multiplier);
+   if (strcmp(id, "quick:fast-forward-speed-next") == 0)
+      return quick_js_cycle_fast_forward_multiplier(1);
+   if (strcmp(id, "quick:fast-forward-speed-prev") == 0)
+      return quick_js_cycle_fast_forward_multiplier(-1);
+   if (strcmp(id, "quick:frameskip") == 0)
+      return host.options.frameskip;
+   if (strcmp(id, "quick:frameskip-next") == 0)
+      return quick_js_cycle_frameskip(1);
+   if (strcmp(id, "quick:frameskip-prev") == 0)
+      return quick_js_cycle_frameskip(-1);
    if (strcmp(id, "quick:display") == 0)
       return quick_js_cycle_display();
    if (strcmp(id, "quick:backlight") == 0)
@@ -2707,7 +2828,7 @@ static void host_report_perf(const char *core_id, int final)
    active_avg = host_avg_count(host.active_total_count, frames);
    frame_wall_avg_us = wall_us ? (unsigned)(wall_us / frames) : 0;
 
-   printf("unifrog perf core=%s final=%d frames=%u fps=%u actual_fps_x100=%u wall_ms=%u frame_wall_avg_us=%u options_audio=%d audio_gain=%u frameskip=%d display=%s fast_forward=%d scpu_target=%u scpu_now=%u ge_clock=%d backlight=%d pace_period_us=%u pace_wait=%u pace_wait_avg_us=%u pace_wait_max_us=%u pace_late=%u pace_reset=%u save_autosaves=%u\n",
+   printf("unifrog perf core=%s final=%d frames=%u fps=%u actual_fps_x100=%u wall_ms=%u frame_wall_avg_us=%u options_audio=%d audio_gain=%u frameskip=%d display=%s fast_forward=%d fast_forward_multiplier=%u scpu_target=%u scpu_now=%u ge_clock=%d backlight=%d pace_period_us=%u pace_wait=%u pace_wait_avg_us=%u pace_wait_max_us=%u pace_late=%u pace_reset=%u save_autosaves=%u\n",
       core_id ? core_id : "?",
       final ? 1 : 0,
       frames, host.fps, actual_fps_x100,
@@ -2718,6 +2839,7 @@ static void host_report_perf(const char *core_id, int final)
       host.options.frameskip,
       display_mode_label(host.display_mode),
       host.fast_forward,
+      sanitize_fast_forward_multiplier(host.fast_forward_multiplier),
       host.scpu_target_mhz,
       scpu_now,
       host.options.ge_clock,
