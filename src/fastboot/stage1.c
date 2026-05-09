@@ -29,6 +29,8 @@
 #define FASTBOOT_KEY_GB300_D0_PIN 27u
 #define FASTBOOT_KEY_SHIFTER_BITS 16u
 #define FASTBOOT_BUTTON_SCAN_POLLS 3u
+#define FASTBOOT_SF2000_KEY_MASK ((1u << 12u) - 1u)
+#define FASTBOOT_GB300_KEY_MASK ((1u << FASTBOOT_KEY_SHIFTER_BITS) - 1u)
 
 #define FA_READ 0x01u
 
@@ -135,6 +137,8 @@ static rom_cache_flush_fn const rom_cache_flush = (rom_cache_flush_fn)0x810032f4
 
 static FATFS fatfs;
 static FIL file;
+static uint32_t fastboot_last_sf2000_keys;
+static uint32_t fastboot_last_gb300_keys;
 
 extern uint8_t __bss_start;
 extern uint8_t __bss_end;
@@ -256,18 +260,33 @@ static uint32_t fastboot_scan_gb300_keys(void)
 
 static uint32_t fastboot_scan_any_key(void)
 {
-	uint32_t raw = 0;
+	uint32_t sf2000;
+	uint32_t gb300;
 	unsigned int i;
 
+	sf2000 = FASTBOOT_SF2000_KEY_MASK;
+	gb300 = FASTBOOT_GB300_KEY_MASK;
+	for (i = 0; i < FASTBOOT_BUTTON_SCAN_POLLS; i++) {
+		sf2000 &= fastboot_scan_sf2000_keys();
+		gb300 &= fastboot_scan_gb300_keys();
+	}
+
+	sf2000 &= FASTBOOT_SF2000_KEY_MASK;
+	gb300 &= FASTBOOT_GB300_KEY_MASK;
+
 	/*
-	 * Do not probe the GB300 matrix here yet. On SF2000 hardware the GB300
-	 * data pins can be low/floating this early, which looks like 0xffff and
-	 * would force UniFrog every boot. Enable GB300 only after adding a reliable
-	 * early board discriminator.
+	 * A saturated read means the scanned bus is not the active controller
+	 * matrix, or is floating/stuck low this early in boot. On SF2000 hardware
+	 * the GB300 pins commonly read as 0xffff before the OS takes ownership.
 	 */
-	for (i = 0; i < FASTBOOT_BUTTON_SCAN_POLLS; i++)
-		raw |= fastboot_scan_sf2000_keys();
-	return raw;
+	if (sf2000 == FASTBOOT_SF2000_KEY_MASK)
+		sf2000 = 0;
+	if (gb300 == FASTBOOT_GB300_KEY_MASK)
+		gb300 = 0;
+
+	fastboot_last_sf2000_keys = sf2000;
+	fastboot_last_gb300_keys = gb300;
+	return sf2000 | gb300;
 }
 
 static void fastboot_backlight_off(void)
@@ -756,9 +775,12 @@ void stage1_main(void)
 
 	if (boot_override_keys != 0) {
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_INPUT_OVERRIDE,
-			boot_override_keys, 0, 0);
-		rom_printf("fastboot: input override keys=0x%08x\n",
-			(unsigned int)boot_override_keys);
+			boot_override_keys, fastboot_last_sf2000_keys,
+			fastboot_last_gb300_keys);
+		rom_printf("fastboot: input override keys=0x%08x sf2000=0x%08x gb300=0x%08x\n",
+			(unsigned int)boot_override_keys,
+			(unsigned int)fastboot_last_sf2000_keys,
+			(unsigned int)fastboot_last_gb300_keys);
 	} else if (read_handoff_path(handoff_path, sizeof(handoff_path)) == 0) {
 		boot_trace_note(FASTBOOT_TRACE_STAGE1_HANDOFF_RESULT,
 			0, trace_path_hash(handoff_path), 0);
