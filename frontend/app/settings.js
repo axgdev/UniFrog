@@ -30,6 +30,7 @@ function writeSettings() {
   text += "display=" + String(config.display) + "\n";
   text += "av=" + String(config.av) + "\n";
   text += "auto_index=" + String(config.autoIndex) + "\n";
+  text += "rom_roots=" + config.romRoots + "\n";
   text += "last_path=" + config.lastPath + "\n";
   text += "last_core=" + config.lastCore + "\n";
   JS2300.fs.writeText(SETTINGS_PATH, text);
@@ -48,6 +49,7 @@ function loadSettings() {
     config.display = toInt(readKey(text, "display"), config.display);
     config.av = toInt(readKey(text, "av"), config.av);
     config.autoIndex = toInt(readKey(text, "auto_index"), config.autoIndex) ? 1 : 0;
+    config.romRoots = readKey(text, "rom_roots") || config.romRoots;
     config.lastPath = readKey(text, "last_path");
     config.lastCore = readKey(text, "last_core");
   }
@@ -162,7 +164,6 @@ function noteFrontendReady(now) {
   if (!frontendReadyLogged) {
     JS2300.log("frontend ready input_ms=" + String(now) + " view=" + String(view));
     frontendReadyLogged = true;
-    indexLoadDueMs = now + 1500;
   }
 }
 

@@ -217,6 +217,157 @@ function ensureIndexLoaded(now, quiet) {
     showToast(String(indexItems.length) + " games", now);
 }
 
+function pushUniquePath(out, pathText) {
+  var i;
+  if (!pathText) return;
+  for (i = 0; i < out.length; i++) {
+    if (out[i] === pathText) return;
+  }
+  out.push(pathText);
+}
+
+function trimFolderHint(folder) {
+  var start = 0;
+  var end;
+  var out = "";
+  var i;
+  if (!folder) return "";
+  end = folder.length;
+  while (start < end && folder.charAt(start) === "/") start++;
+  while (end > start && folder.charAt(end - 1) === "/") end--;
+  for (i = start; i < end; i++) out += folder.charAt(i);
+  return out;
+}
+
+function configuredRomBasePaths() {
+  var out = [];
+  var start = 0;
+  var end;
+  var part;
+  while (start <= config.romRoots.length) {
+    end = config.romRoots.indexOf("|", start);
+    if (end < 0) end = config.romRoots.length;
+    part = rangeText(config.romRoots, start, end);
+    if (part === "/") pushUniquePath(out, "/media/mmcblk0");
+    else if (part.charAt(0) === "/") pushUniquePath(out, "/media/mmcblk0" + part);
+    else if (part.length > 0) pushUniquePath(out, "/media/mmcblk0/" + part);
+    start = end + 1;
+    if (end === config.romRoots.length) break;
+  }
+  if (out.length === 0) {
+    pushUniquePath(out, "/media/mmcblk0/ROMS");
+    pushUniquePath(out, "/media/mmcblk0");
+  }
+  return out;
+}
+
+function systemCatalogEntries(system) {
+  var out = [];
+  var i;
+  for (i = 0; i < coreCatalog.length; i++) {
+    if (coreCatalog[i].system === system) out.push(coreCatalog[i]);
+  }
+  return out;
+}
+
+function systemSearchPaths(system) {
+  var bases = configuredRomBasePaths();
+  var cats = systemCatalogEntries(system);
+  var out = [];
+  var b;
+  var c;
+  var f;
+  var hint;
+  for (b = 0; b < bases.length; b++) {
+    for (c = 0; c < cats.length; c++) {
+      for (f = 0; f < cats[c].folders.length; f++) {
+        hint = trimFolderHint(cats[c].folders[f]);
+        if (hint) pushUniquePath(out, bases[b] + "/" + hint);
+      }
+      pushUniquePath(out, bases[b] + "/" + cats[c].value);
+    }
+  }
+  return out;
+}
+
+function itemAlreadyListed(out, pathText) {
+  var i;
+  for (i = 0; i < out.length; i++) {
+    if (out[i].path === pathText) return true;
+  }
+  return false;
+}
+
+function pushLazyItem(out, system, core, full, label) {
+  if (itemAlreadyListed(out, full)) return;
+  out.push({ system: system, core: core, path: full, label: label });
+}
+
+function scanSystemFolder(out, system, dir, cats) {
+  var list = JS2300.fs.list(dir);
+  var i;
+  var c;
+  var full;
+  for (i = 0; i < list.length; i++) {
+    if (list[i].dir || shouldHideFile(list[i].name, dir)) continue;
+    full = joinPath(dir, list[i].name);
+    for (c = 0; c < cats.length; c++) {
+      if (hasAnySuffix(catalogName(list[i].name), cats[c].suffixes)) {
+        pushLazyItem(out, system, cats[c].value, full, list[i].name);
+        break;
+      }
+    }
+  }
+}
+
+function loadSystemItems(system) {
+  var cats = systemCatalogEntries(system);
+  var paths = systemSearchPaths(system);
+  var out = [];
+  var i;
+  var start = JS2300.now();
+  for (i = 0; i < paths.length; i++)
+    scanSystemFolder(out, system, paths[i], cats);
+  JS2300.log("frontend lazy system=" + system + " roots=" +
+    String(paths.length) + " items=" + String(out.length) + " ms=" +
+    String(JS2300.now() - start));
+  return out;
+}
+
+function loadMediaItems() {
+  var paths = systemSearchPaths("Media");
+  var out = [];
+  var list;
+  var i;
+  var p;
+  var full;
+  var start = JS2300.now();
+  for (p = 0; p < paths.length; p++) {
+    list = JS2300.fs.list(paths[p]);
+    for (i = 0; i < list.length; i++) {
+      if (!list[i].dir && isVideo(list[i].name)) {
+        full = joinPath(paths[p], list[i].name);
+        pushLazyItem(out, "Media", "video", full, list[i].name);
+      }
+    }
+  }
+  JS2300.log("frontend lazy media roots=" + String(paths.length) +
+    " items=" + String(out.length) + " ms=" + String(JS2300.now() - start));
+  return out;
+}
+
+function buildSystemSummary() {
+  var i;
+  clearIndexData();
+  for (i = 0; i < homeItems.length; i++) {
+    if (startsWithText(homeItems[i].id, "system:")) {
+      systems.push(lineValue(homeItems[i].id, 7));
+      systemCounts.push(0);
+      systemItemLists.push([]);
+    }
+  }
+}
+
 function skipDir(name, full) {
   if (!name || name.charCodeAt(0) === 46) return true;
   if (full === "/media/mmcblk0/unifrog") return true;

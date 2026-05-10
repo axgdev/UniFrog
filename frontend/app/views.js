@@ -249,7 +249,7 @@ function drawSystems(now) {
         active ? theme.text.selectedMuted : theme.text.muted);
     }
   }
-  if (systems.length === 0) JS2300.video.text(16, 96, "Run Index games", theme.text.muted);
+  if (systems.length === 0) JS2300.video.text(16, 96, "No systems configured", theme.text.muted);
   drawToast(now);
   footer("A open   B back   Y log");
   JS2300.video.present();
@@ -272,7 +272,7 @@ function drawIndexList(now) {
         active ? theme.text.selected : theme.text.primary);
     }
   }
-  if (currentItems.length === 0) JS2300.video.text(16, 96, "No indexed files", theme.text.muted);
+  if (currentItems.length === 0) JS2300.video.text(16, 96, "No files in configured ROM folders", theme.text.muted);
   drawToast(now);
   footer("A open   B back   Y log");
   JS2300.video.present();

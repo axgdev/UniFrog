@@ -71,12 +71,12 @@ function repeated(mask, button, now, delay, interval) {
 }
 
 function openSystems(now) {
-  ensureIndexLoaded(now, 1);
+  buildSystemSummary();
   pushNav();
   selected = 0;
   scroll = 0;
   view = SYSTEMS;
-  showToast(String(indexItems.length) + " games", now);
+  showToast("ROM folders", now);
 }
 
 function openSystemIndex(index, now) {
@@ -84,7 +84,7 @@ function openSystemIndex(index, now) {
   pushNav();
   currentSystem = systems[index];
   currentListTitle = currentSystem;
-  currentItems = systemItemLists[index] ? systemItemLists[index] : [];
+  currentItems = loadSystemItems(currentSystem);
   selected = 0;
   scroll = 0;
   view = INDEX_LIST;
@@ -96,28 +96,25 @@ function openSystemList(now) {
 }
 
 function openSystemByName(name, now) {
-  var i;
-
-  ensureIndexLoaded(now, 1);
-  for (i = 0; i < systems.length; i++) {
-    if (systems[i] === name) {
-      openSystemIndex(i, now);
-      return;
-    }
-  }
-  showToast("Index library first", now);
+  pushNav();
+  currentSystem = name;
+  currentListTitle = name;
+  currentItems = loadSystemItems(name);
+  selected = 0;
+  scroll = 0;
+  view = INDEX_LIST;
+  showToast(String(currentItems.length) + " games", now);
 }
 
 function openMediaIndex(now) {
-  ensureIndexLoaded(now, 1);
-  if (mediaItems.length === 0) {
+  currentItems = loadMediaItems();
+  if (currentItems.length === 0) {
     openBrowser("Media", "/media/mmcblk0", "media");
     return;
   }
   pushNav();
   currentSystem = "Media";
   currentListTitle = "Media";
-  currentItems = mediaItems;
   selected = 0;
   scroll = 0;
   view = INDEX_LIST;
