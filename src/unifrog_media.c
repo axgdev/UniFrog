@@ -429,10 +429,20 @@ int unifrog_media_play_video_ex(const char *path,
       init_args.buffering_enable ? 1 : 0,
       (unsigned)VIDEO_STREAM_CACHE_BYTES, audio_only, image_file,
       force_no_audio);
+   (void)unifrog_log_flush();
+   printf("unifrog media hcplayer_init begin\n");
+   (void)unifrog_log_flush();
    hcplayer_init(LOG_INFO);
+   printf("unifrog media hcplayer_init done\n");
+   (void)unifrog_log_flush();
    unifrog_audio_set_system_output_enabled(0);
    unifrog_audio_debug_dump(NULL, "media_before_create");
+   printf("unifrog media hcplayer_create begin\n");
+   (void)unifrog_log_flush();
    player = hcplayer_create(&init_args);
+   printf("unifrog media hcplayer_create done player=0x%08lx\n",
+      (unsigned long)(uintptr_t)player);
+   (void)unifrog_log_flush();
    if (!player) {
       printf("unifrog media create failed path=%s\n", path);
       goto out;
@@ -466,7 +476,11 @@ int unifrog_media_play_video_ex(const char *path,
    if (!audio_only && fb_fd >= 0)
       (void)ioctl(fb_fd, FBIOBLANK, FB_BLANK_NORMAL);
    unifrog_audio_debug_dump(NULL, "media_before_play");
+   printf("unifrog media hcplayer_play begin\n");
+   (void)unifrog_log_flush();
    hcplayer_play(player);
+   printf("unifrog media hcplayer_play done\n");
+   (void)unifrog_log_flush();
    if (!force_no_audio && audio_probe < 0) {
       for (unsigned i = 0; i < 5u && audio_probe < 0; i++) {
          msleep(20);
