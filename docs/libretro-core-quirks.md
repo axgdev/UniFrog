@@ -140,11 +140,17 @@ frame: the screen can otherwise stay on the quick menu after resuming and look
 frozen even while the core runs. Keep the video bit advertised because some
 cores treat a zero A/V mask as permission to skip too much run-side work.
 Normal audio resumes when fast-forward is turned off and non-silent samples
-arrive again.
+arrive again. Keep the output sample rate at the core-reported rate whenever it
+is inside the safe hardware range; forcing every core through a fixed 32 kHz
+output rate causes audible drop/duplicate resampling artifacts.
 For streamed media, metadata can be late. Treat a zero audio-track count as
 silent, retry unknown metadata, and only fall back to audio output for files
 that are explicitly audio-only by extension. Unknown audio on video/image files
 should keep the speaker gate closed to avoid static on silent media.
+For native HCRTOS media playback, do not open the external speaker gate until
+after `hcplayer_play()` has started and the route has been selected; opening
+the gate during player creation exposes the analog path before the decoder and
+I2SO output are primed.
 
 ## SF2000 QPSX and PMP cores
 

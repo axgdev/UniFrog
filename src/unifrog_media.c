@@ -547,8 +547,6 @@ int unifrog_media_play_video_ex(const char *path,
 
    if (!audio_only && fb_fd >= 0)
       (void)ioctl(fb_fd, FBIOBLANK, FB_BLANK_NORMAL);
-   if (audio_output_enabled)
-      unifrog_audio_set_system_output_enabled(1);
    unifrog_audio_debug_dump(NULL, "media_before_play");
    printf("unifrog media hcplayer_play begin\n");
    (void)unifrog_log_flush();
@@ -569,8 +567,14 @@ int unifrog_media_play_video_ex(const char *path,
          printf("unifrog media stream audio fallback enabled after unknown probe\n");
       }
    }
-   if (!audio_output_enabled)
+   if (audio_output_enabled) {
+      (void)hcplayer_set_audio_output_dev(player, AUDDEV_I2SO);
+      msleep(60);
+      unifrog_audio_set_system_output_enabled(1);
+      printf("unifrog media audio gate enabled after player start\n");
+   } else {
       unifrog_audio_set_system_output_enabled(0);
+   }
    unifrog_audio_debug_dump(NULL, "media_after_play");
    printf("unifrog media playing path=%s\n", path);
    (void)unifrog_log_flush();

@@ -145,9 +145,11 @@ are intentionally outside individual core source changes:
   stereo-to-mono mixing. The default is `2` after `loghcrtos149` showed gain
   `4` clipping heavily. Gain `0` is a muted-output path that skips opening the
   audio device while still allowing the core to run with audio enabled.
-- Libretro audio is opened as mono PCM on the current SF2000-family route. The
-  AUDSINK duplicate path still feeds the speaker output, but the host no longer
-  sends an unused zero channel for every sample.
+- Libretro audio is opened at the core-reported sample rate when it is in the
+  safe 8-48 kHz hardware range. This avoids the old fixed-32 kHz
+  drop/duplicate resampling path for normal cores. Output is duplicated to both
+  I2SO channels after software mono mixing because the SF2000 speaker route is
+  effectively mono.
 - Frameskip can be left off, set to auto, or set to fixed intervals. UniFrog
   implements the standard libretro audio-buffer-status callback so upstream
   cores that already support frameskip can react without SF2000-specific core

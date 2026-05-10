@@ -46,11 +46,12 @@
 #define printf unifrog_log
 
 #define DEFAULT_SAMPLE_RATE 32000u
-#define LIBRETRO_AUDIO_OUTPUT_RATE 32000u
+#define LIBRETRO_AUDIO_MIN_OUTPUT_RATE 8000u
+#define LIBRETRO_AUDIO_MAX_OUTPUT_RATE 48000u
 #define LIBRETRO_AUDIO_DEFAULT_GAIN 2u
 #define LIBRETRO_AUDIO_MAX_GAIN 12u
 #define LIBRETRO_AUDIO_VOLUME 75u
-#define LIBRETRO_AUDIO_ROUTE "sf2000_stereo_safe"
+#define LIBRETRO_AUDIO_ROUTE "core_rate_stereo_safe"
 #define LIBRETRO_AUDIO_GATE_OPEN_LEVEL 256u
 #define LIBRETRO_AUDIO_GATE_CLOSE_LEVEL 96u
 #define LIBRETRO_AUDIO_GATE_CLOSE_BATCHES 45u
@@ -1677,6 +1678,14 @@ static unsigned host_audio_write_poll_ms(void)
    return LIBRETRO_AUDIO_WRITE_POLL_MS;
 }
 
+static unsigned host_audio_output_rate(unsigned input_rate)
+{
+   if (input_rate >= LIBRETRO_AUDIO_MIN_OUTPUT_RATE &&
+       input_rate <= LIBRETRO_AUDIO_MAX_OUTPUT_RATE)
+      return input_rate;
+   return DEFAULT_SAMPLE_RATE;
+}
+
 void unifrog_libretro_audio_sample_cb(int16_t left, int16_t right)
 {
    int sample = (left + right) / 2;
@@ -1700,7 +1709,14 @@ void unifrog_libretro_audio_sample_cb(int16_t left, int16_t right)
    if (host.audio_open) {
       uint32_t start = unifrog_perf_count();
       unsigned count;
+      unsigned abs_out = scaled < 0 ? (unsigned)-scaled : (unsigned)scaled;
 
+      if (abs_out >= LIBRETRO_AUDIO_GATE_OPEN_LEVEL &&
+          !host.audio_gate_open) {
+         (void)unifrog_audio_set_output_enabled(&host.audio, 1);
+         host.audio_gate_open = 1;
+         host.audio_quiet_batches = 0;
+      }
       (void)unifrog_audio_write_timeout(&host.audio, frame, 1,
          host_audio_write_attempts(), host_audio_write_poll_ms());
       count = unifrog_perf_elapsed(start, unifrog_perf_count());
@@ -5231,7 +5247,7 @@ out_content_prepare:
    printf("unifrog libretro step=audio_open\n");
    (void)unifrog_log_flush();
    host.audio_input_rate = sample_rate;
-   host.audio_output_rate = LIBRETRO_AUDIO_OUTPUT_RATE;
+   host.audio_output_rate = host_audio_output_rate(sample_rate);
    host.audio_gate_open = 0;
    host.audio_quiet_batches = 0;
    if (!host.audio_enabled) {
