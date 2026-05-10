@@ -1502,7 +1502,7 @@ static bool host_get_variable(struct retro_variable *var)
       return true;
    }
    if (host.core_id && (strcmp(host.core_id, "gpsp") == 0 ||
-       strcmp(host.core_id, "gpsp_multicore") == 0)) {
+       strcmp(host.core_id, "gpsp-gbac-prosty") == 0)) {
       if (strcmp(var->key, "gpsp_frameskip") == 0) {
          if (host.fast_forward && host.fast_forward_multiplier > 1)
             var->value = "fixed_interval";

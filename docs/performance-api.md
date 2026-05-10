@@ -159,7 +159,7 @@ are intentionally outside individual core source changes:
   unusable inactive buffer.
 - The in-game quick menu can change frameskip and fast-forward speed at runtime.
   Fast-forward speed defaults to off and can be set to 2x, 4x, 8x, or 16x. For
-  gpSP and gpSP multicore, enabled fast-forward speed maps to a temporary fixed
+  gpSP and gpsp-gbac-prosty, enabled fast-forward speed maps to a temporary fixed
   frameskip interval, so higher values reduce core rendering work instead of
   only dropping already-rendered frames.
 - SCPU can be kept at the boot profile or switched to guarded known profiles

@@ -45,8 +45,8 @@ var coreCatalog = [
     folders: ["/gba/", "/game boy advance/"]
   },
   {
-    label: "gpSP multicore",
-    value: "gpsp_multicore",
+    label: "gpsp-gbac-prosty",
+    value: "gpsp-gbac-prosty",
     system: "Game Boy Advance",
     suffixes: [".gba"],
     folders: ["/gba/", "/game boy advance/"]

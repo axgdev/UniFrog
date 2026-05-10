@@ -491,7 +491,7 @@ PACKAGE_LIBRETRO_CORE_LIBS := \
 JS2300_CORE_BIN := $(CORE_PACKAGE)/js2300.bin
 GAMBATTE_CORE_BIN := $(CORE_PACKAGE)/gambatte.bin
 GPSP_CORE_BIN := $(CORE_PACKAGE)/gpsp.bin
-GPSP_MULTICORE_CORE_BIN := $(CORE_PACKAGE)/gpsp_multicore.bin
+GPSP_MULTICORE_CORE_BIN := $(CORE_PACKAGE)/gpsp-gbac-prosty.bin
 PICODRIVE_CORE_BIN := $(CORE_PACKAGE)/picodrive.bin
 SNES9X2005_CORE_BIN := $(CORE_PACKAGE)/snes9x2005.bin
 SNES9X2002_CORE_BIN := $(CORE_PACKAGE)/snes9x2002.bin
@@ -536,7 +536,7 @@ LIBRETRO_CORE_BINS := \
 LIBRETRO_CORE_MODULE_OUTS := \
 	$(BUILD)/core_modules/gambatte.out \
 	$(BUILD)/core_modules/gpsp.out \
-	$(BUILD)/core_modules/gpsp_multicore.out \
+	$(BUILD)/core_modules/gpsp-gbac-prosty.out \
 	$(BUILD)/core_modules/picodrive.out \
 	$(BUILD)/core_modules/snes9x2005.out \
 	$(BUILD)/core_modules/snes9x2002.out \
@@ -566,7 +566,7 @@ FASTBOOT_CFLAGS := -EL $(ARCH_CFLAGS) -Os -pipe -msoft-float -fsigned-char -W \
 	-ffreestanding -fno-builtin -fno-pic -mno-abicalls \
 	-nostdinc -I$(GCC_LIBDIR)/include
 
-CORE_MODULE_IDS := gambatte gpsp gpsp_multicore picodrive snes9x2005 \
+CORE_MODULE_IDS := gambatte gpsp gpsp-gbac-prosty picodrive snes9x2005 \
 	snes9x2002 quicknes fceumm gearboy pce_fast qpsx pmp_video
 CORE_MODULE_ENTRY_OBJECTS := $(addprefix $(BUILD)/core_modules/,$(addsuffix _entry.o,$(CORE_MODULE_IDS)))
 CORE_MODULE_SUPPORT_OBJECT := $(BUILD)/core_modules/support.o
@@ -1013,7 +1013,7 @@ $(JS2300_CORE_BIN): $(LIBJS2300) | $(CORE_PACKAGE)
 
 $(BUILD)/core_modules/gambatte_entry.o: CORE_MODULE_DEFINES := -DUNIFROG_MODULE_CORE_ID=\"gambatte\" -DUNIFROG_MODULE_EXTENSIONS=\"gb\|gbc\"
 $(BUILD)/core_modules/gpsp_entry.o: CORE_MODULE_DEFINES := -DUNIFROG_MODULE_CORE_ID=\"gpsp\" -DUNIFROG_MODULE_EXTENSIONS=\"gba\" -DUNIFROG_MODULE_SYMBOL_PREFIX=gpsp
-$(BUILD)/core_modules/gpsp_multicore_entry.o: CORE_MODULE_DEFINES := -DUNIFROG_MODULE_CORE_ID=\"gpsp_multicore\" -DUNIFROG_MODULE_EXTENSIONS=\"gba\" -DUNIFROG_MODULE_SYMBOL_PREFIX=gpsp_multicore
+$(BUILD)/core_modules/gpsp-gbac-prosty_entry.o: CORE_MODULE_DEFINES := -DUNIFROG_MODULE_CORE_ID=\"gpsp-gbac-prosty\" -DUNIFROG_MODULE_EXTENSIONS=\"gba\" -DUNIFROG_MODULE_SYMBOL_PREFIX=gpsp_multicore
 PICODRIVE_CORE_SUPPORT_LIBS := $(CHD_SUPPORT_CORE_LIB)
 PCE_FAST_CORE_SUPPORT_LIBS := $(CHD_SUPPORT_CORE_LIB)
 
@@ -1079,7 +1079,7 @@ endef
 
 $(eval $(call CORE_MODULE_RULES,gambatte,GAMBATTE,$(GAMBATTE_CORE_BIN)))
 $(eval $(call CORE_MODULE_RULES,gpsp,GPSP,$(GPSP_CORE_BIN)))
-$(eval $(call CORE_MODULE_RULES,gpsp_multicore,GPSP_MULTICORE,$(GPSP_MULTICORE_CORE_BIN)))
+$(eval $(call CORE_MODULE_RULES,gpsp-gbac-prosty,GPSP_MULTICORE,$(GPSP_MULTICORE_CORE_BIN)))
 $(eval $(call CORE_MODULE_RULES,picodrive,PICODRIVE,$(PICODRIVE_CORE_BIN)))
 $(eval $(call CORE_MODULE_RULES,snes9x2005,SNES9X2005,$(SNES9X2005_CORE_BIN)))
 $(eval $(call CORE_MODULE_RULES,snes9x2002,SNES9X2002,$(SNES9X2002_CORE_BIN)))
