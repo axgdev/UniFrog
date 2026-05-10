@@ -41,6 +41,8 @@ int unifrog_audio_delay(struct unifrog_audio *audio, unsigned long *frames);
 int unifrog_audio_set_volume(struct unifrog_audio *audio, unsigned volume);
 int unifrog_audio_set_mute(struct unifrog_audio *audio, int mute);
 int unifrog_audio_set_output_enabled(struct unifrog_audio *audio, int enabled);
+int unifrog_audio_set_system_volume(unsigned volume);
+int unifrog_audio_set_system_mute(int mute);
 void unifrog_audio_set_system_output_enabled(int enabled);
 void unifrog_audio_debug_gate(uint32_t *l_dir, uint32_t *l_out,
    uint32_t *r_dir, uint32_t *r_out);

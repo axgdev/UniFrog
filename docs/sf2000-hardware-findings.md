@@ -230,12 +230,19 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
   - `LO_PWMLP`
   - `LO_PWMRP`
   - `VDDA_DAC`
+- The DB-B210 schematic shows the speaker amp is fed from the SoC analog/PWM
+  DAC left output (`LO_PWMLP`) through the MX2018A amplifier. The R07/L15 gate
+  only controls the downstream amp enable; it does not silence the DAC output.
+- Use `/dev/sndC0i2so` `SND_IOCTL_SET_VOLUME` and `SND_IOCTL_SET_MUTE` for the
+  low-level DAC path before opening the amp gate. Opening only the gate can
+  expose DAC idle noise, which is why raising software gain masked noise but
+  made audio crunchy.
 - HCRTOS audio driver and `hcplayer` can produce working audio. Current
   libretro logs show the AUDSINK volume ioctl returning unsupported, so UniFrog
-  treats software gain as the reliable emulator volume control. `loghcrtos148`
-  also showed audio writes are measurable but much smaller than gpSP core frame
-  time, and AUDSINK delay is not reliable enough to drive auto-frameskip
-  directly on this path.
+  also applies the SND volume/mute ioctls directly when using AUDSINK or
+  `hcplayer`. `loghcrtos148` also showed audio writes are measurable but much
+  smaller than gpSP core frame time, and AUDSINK delay is not reliable enough to
+  drive auto-frameskip directly on this path.
 
 ## Benchmark Findings
 

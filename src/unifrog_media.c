@@ -40,6 +40,7 @@
 #define VIDEO_STALL_LIMIT 8u
 #define VIDEO_LOG_AUTO_FLUSH_BYTES (64u * 1024u)
 #define UNIFROG_AVSEEK_SIZE 0x10000
+#define MEDIA_AUDIO_VOLUME 75u
 
 struct playback_preset {
    const char *name;
@@ -504,6 +505,8 @@ int unifrog_media_play_video_ex(const char *path,
    printf("unifrog media hcplayer_init done\n");
    (void)unifrog_log_flush();
    unifrog_audio_set_system_output_enabled(0);
+   (void)unifrog_audio_set_system_volume(MEDIA_AUDIO_VOLUME);
+   (void)unifrog_audio_set_system_mute(1);
    unifrog_audio_debug_dump(NULL, "media_before_create");
    printf("unifrog media hcplayer_create begin\n");
    (void)unifrog_log_flush();
@@ -569,6 +572,7 @@ int unifrog_media_play_video_ex(const char *path,
    }
    if (audio_output_enabled) {
       (void)hcplayer_set_audio_output_dev(player, AUDDEV_I2SO);
+      (void)unifrog_audio_set_system_volume(MEDIA_AUDIO_VOLUME);
       msleep(60);
       unifrog_audio_set_system_output_enabled(1);
       printf("unifrog media audio gate enabled after player start\n");

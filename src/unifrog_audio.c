@@ -28,6 +28,7 @@
 #define GPIO_R_DIR ((volatile uint32_t *)0xb88000f8u)
 #define GPIO_L15_MASK (1u << 15)
 #define GPIO_R07_MASK (1u << 7)
+#define SYSTEM_AUDIO_VOLUME 75u
 
 extern unsigned long sf2000_lcd_panel_id(void) __attribute__((weak));
 extern unsigned long PINMUXL;
@@ -125,6 +126,44 @@ static int ensure_audio_drivers(void)
          result = ret;
    }
    return result;
+}
+
+static int open_system_snd(void)
+{
+   return open("/dev/sndC0i2so", O_WRONLY);
+}
+
+int unifrog_audio_set_system_volume(unsigned volume)
+{
+   uint8_t value;
+   int ret;
+   int fd;
+
+   if (volume > 100)
+      volume = 100;
+   value = (uint8_t)volume;
+   fd = open_system_snd();
+   if (fd < 0)
+      return -1;
+   ret = ioctl(fd, SND_IOCTL_SET_VOLUME, &value);
+   close(fd);
+   printf("unifrog audio system_volume volume=%u ret=%d\n", volume, ret);
+   return ret;
+}
+
+int unifrog_audio_set_system_mute(int mute)
+{
+   int value = mute ? 1 : 0;
+   int ret;
+   int fd;
+
+   fd = open_system_snd();
+   if (fd < 0)
+      return -1;
+   ret = ioctl(fd, SND_IOCTL_SET_MUTE, value);
+   close(fd);
+   printf("unifrog audio system_mute mute=%d ret=%d\n", value, ret);
+   return ret;
 }
 
 static int open_audsink(struct unifrog_audio *audio,
@@ -278,6 +317,7 @@ void unifrog_audio_close(struct unifrog_audio *audio)
       printf("unifrog audio close backend=%d fd=%d mute_ret=%d drop_ret=%d free_ret=%d\n",
          audio->backend, audio->fd, mute_ret, drop_ret, free_ret);
       close(audio->fd);
+      (void)unifrog_audio_set_system_mute(1);
       set_stock_audio_output_gate(0);
    }
    clear_audio(audio);
@@ -374,8 +414,12 @@ int unifrog_audio_set_volume(struct unifrog_audio *audio, unsigned volume)
    if (volume > 100)
       volume = 100;
    value = (uint8_t)volume;
-   if (audio->backend == UNIFROG_AUDIO_BACKEND_AUDSINK)
-      return ioctl(audio->fd, AUDSINK_IOCTL_SET_VOLUME, &value);
+   if (audio->backend == UNIFROG_AUDIO_BACKEND_AUDSINK) {
+      int ret = ioctl(audio->fd, AUDSINK_IOCTL_SET_VOLUME, &value);
+      int system_ret = unifrog_audio_set_system_volume(volume);
+
+      return ret == 0 ? 0 : system_ret;
+   }
    return ioctl(audio->fd, SND_IOCTL_SET_VOLUME, &value);
 }
 
@@ -384,7 +428,7 @@ int unifrog_audio_set_mute(struct unifrog_audio *audio, int mute)
    if (!audio || audio->fd < 0)
       return -1;
    if (audio->backend == UNIFROG_AUDIO_BACKEND_AUDSINK)
-      return 0;
+      return unifrog_audio_set_system_mute(mute);
    return ioctl(audio->fd, SND_IOCTL_SET_MUTE, mute ? 1 : 0);
 }
 
@@ -392,13 +436,27 @@ int unifrog_audio_set_output_enabled(struct unifrog_audio *audio, int enabled)
 {
    if (!audio || audio->fd < 0)
       return -1;
-   set_stock_audio_output_gate(enabled != 0);
+   if (enabled) {
+      (void)unifrog_audio_set_volume(audio, SYSTEM_AUDIO_VOLUME);
+      (void)unifrog_audio_set_mute(audio, 0);
+      set_stock_audio_output_gate(1);
+   } else {
+      set_stock_audio_output_gate(0);
+      (void)unifrog_audio_set_mute(audio, 1);
+   }
    return 0;
 }
 
 void unifrog_audio_set_system_output_enabled(int enabled)
 {
-   set_stock_audio_output_gate(enabled != 0);
+   if (enabled) {
+      (void)unifrog_audio_set_system_volume(SYSTEM_AUDIO_VOLUME);
+      (void)unifrog_audio_set_system_mute(0);
+      set_stock_audio_output_gate(1);
+   } else {
+      set_stock_audio_output_gate(0);
+      (void)unifrog_audio_set_system_mute(1);
+   }
 }
 
 void unifrog_audio_debug_gate(uint32_t *l_dir, uint32_t *l_out,
