@@ -241,6 +241,16 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
   mono left-path output. Differential stereo and dual-mono experiments produced
   worse noise on device; the stable libretro path is mono PCM through AUDSINK's
   left-channel duplicate route with software gain defaulting to 1x.
+- Confirmed stable UniFrog route, May 2026:
+  - open AUDSINK as one-channel S16 PCM for libretro
+  - mix libretro stereo to mono in software
+  - keep software gain fixed at 1x; the device is already loud and higher gain
+    can clip
+  - set hardware DAC volume/mute through `/dev/sndC0i2so`
+  - keep the external amp gate closed while priming/starting audio
+  - open the amp gate only after the DAC path is configured and unmuted
+  Do not reintroduce duplicated stereo, differential drive, or gain-as-noise
+  masking without a device log proving the analog tone/noise issue stayed gone.
 - HCRTOS audio driver and `hcplayer` can produce working audio. Current
   libretro logs show the AUDSINK volume ioctl returning unsupported, so UniFrog
   also applies the SND volume/mute ioctls directly when using AUDSINK or

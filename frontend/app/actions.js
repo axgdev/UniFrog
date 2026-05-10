@@ -18,9 +18,13 @@ function marqueeActive() {
 
 function visibleRowsForView() {
   if (view === SETTINGS) return 9;
-  if (view === LAUNCH) return 9;
+  if (view === LAUNCH) return launchRows.length;
   if (view === SYSTEM_CHECK) return 5;
   return 8;
+}
+
+function launchStartRow() {
+  return launchRows.length - 1;
 }
 
 function move(delta, count) {
@@ -212,7 +216,7 @@ function applyLaunchDefaults(full, preferredCore) {
       if (launchCoreOptions[i].value === preferredCore) launchCoreIndex = i;
     }
   }
-  selected = 7;
+  selected = launchStartRow();
 }
 
 function openGame(full, preferredCore, now) {
@@ -535,7 +539,7 @@ function handleInput(input, now) {
     if (pressed & BTN_LEFT) cycleLaunch(-1);
     if (pressed & BTN_RIGHT) cycleLaunch(1);
     if (pressed & BTN_A) {
-      if (selected === 8) runLaunchGame(now);
+      if (selected === launchStartRow()) runLaunchGame(now);
       else cycleLaunch(1);
     }
     if (pressed & BTN_START) runLaunchGame(now);
