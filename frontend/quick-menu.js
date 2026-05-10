@@ -4,7 +4,6 @@ var quickSelected = 0;
 var quickStatus = JS2300.system.action("quick:status");
 var quickSlot = JS2300.system.action("quick:state-slot");
 var quickCpu = JS2300.system.action("quick:cpu");
-var quickFastForward = JS2300.system.action("quick:fast-forward-status");
 var quickFastForwardSpeed = JS2300.system.action("quick:fast-forward-speed");
 var quickFrameskip = JS2300.system.action("quick:frameskip");
 var quickToastText = "";
@@ -15,7 +14,6 @@ var quickItems = [
   "Load state",
   "Save slot",
   "CPU",
-  "Fast forward",
   "FF speed",
   "Frameskip",
   "Audio",
@@ -55,19 +53,23 @@ function quickFrameskipLabel() {
   return "Off";
 }
 
+function quickFastForwardLabel() {
+  if (quickFastForwardSpeed <= 0) return "Off";
+  return String(quickFastForwardSpeed) + "x";
+}
+
 function quickDetail(index) {
   if (index === 0) return "B";
   if (index === 1) return "R slot " + String(quickSlot);
   if (index === 2) return "L slot " + String(quickSlot);
   if (index === 3) return String(quickSlot);
   if (index === 4) return quickCpuLabel();
-  if (index === 5) return quickFastForward ? "On" : "Off";
-  if (index === 6) return String(quickFastForwardSpeed) + "x";
-  if (index === 7) return quickFrameskipLabel();
-  if (index === 8) return quickAudio() ? "On" : "Off";
-  if (index === 9) return quickDisplayLabel();
-  if (index === 10) return String(quickBacklight()) + "%";
-  if (index === 11) return "X";
+  if (index === 5) return quickFastForwardLabel();
+  if (index === 6) return quickFrameskipLabel();
+  if (index === 7) return quickAudio() ? "On" : "Off";
+  if (index === 8) return quickDisplayLabel();
+  if (index === 9) return String(quickBacklight()) + "%";
+  if (index === 10) return "X";
   return "";
 }
 
@@ -193,36 +195,31 @@ function quickActivate() {
     return 0;
   }
   if (quickSelected === 5) {
-    quickFastForward = JS2300.system.action("quick:fast-forward");
-    quickToast(quickFastForward ? "Fast forward on" : "Fast forward off");
+    quickFastForwardSpeed = JS2300.system.action("quick:fast-forward-speed-next");
+    quickToast("FF speed " + quickFastForwardLabel());
     return 0;
   }
   if (quickSelected === 6) {
-    quickFastForwardSpeed = JS2300.system.action("quick:fast-forward-speed-next");
-    quickToast("FF speed " + String(quickFastForwardSpeed) + "x");
-    return 0;
-  }
-  if (quickSelected === 7) {
     quickFrameskip = JS2300.system.action("quick:frameskip-next");
     quickToast("Frameskip " + quickFrameskipLabel());
     return 0;
   }
-  if (quickSelected === 8) {
+  if (quickSelected === 7) {
     quickStatus = JS2300.system.action("quick:audio");
     quickToast(quickAudio() ? "Audio on" : "Audio off");
     return 0;
   }
-  if (quickSelected === 9) {
+  if (quickSelected === 8) {
     quickStatus = JS2300.system.action("quick:display");
     quickToast("Display " + quickDisplayLabel());
     return 0;
   }
-  if (quickSelected === 10) {
+  if (quickSelected === 9) {
     quickStatus = JS2300.system.action("quick:backlight");
     quickToast("Backlight " + String(quickBacklight()) + "%");
     return 0;
   }
-  if (quickSelected === 11) {
+  if (quickSelected === 10) {
     quickReturnToMenu();
     return 1;
   }
@@ -232,13 +229,13 @@ function quickActivate() {
 function quickAdjust(delta) {
   if (quickSelected === 3) quickCycleSlot(delta);
   else if (quickSelected === 4) quickCycleCpu(delta);
-  else if (quickSelected === 6) {
+  else if (quickSelected === 5) {
     if (delta < 0)
       quickFastForwardSpeed = JS2300.system.action("quick:fast-forward-speed-prev");
     else
       quickFastForwardSpeed = JS2300.system.action("quick:fast-forward-speed-next");
-    quickToast("FF speed " + String(quickFastForwardSpeed) + "x");
-  } else if (quickSelected === 7) {
+    quickToast("FF speed " + quickFastForwardLabel());
+  } else if (quickSelected === 6) {
     if (delta < 0)
       quickFrameskip = JS2300.system.action("quick:frameskip-prev");
     else

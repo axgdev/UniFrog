@@ -66,7 +66,6 @@
 #define LIBRETRO_PACE_RESET_LATE_FRAMES 12u
 #define LIBRETRO_COUNT_CALIBRATE_US 20000u
 #define LIBRETRO_LOG_AUTO_FLUSH_BYTES (64u * 1024u)
-#define LIBRETRO_FAST_FORWARD_DEFAULT_MULTIPLIER 4u
 #define LIBRETRO_LOAD_LOG_PERCENT_STEP 10u
 #define LIBRETRO_WATCHDOG_TICKS pdMS_TO_TICKS(100)
 #define LIBRETRO_WATCHDOG_LOAD_STALL_POLLS 600u
@@ -676,13 +675,14 @@ static int sanitize_display_mode(int display_mode)
 static unsigned sanitize_fast_forward_multiplier(unsigned multiplier)
 {
    switch (multiplier) {
+   case 0:
    case 2:
    case 4:
    case 8:
    case 16:
       return multiplier;
    default:
-      return LIBRETRO_FAST_FORWARD_DEFAULT_MULTIPLIER;
+      return 0;
    }
 }
 
@@ -734,7 +734,7 @@ static void host_configure_options(
    host.audio_gain = host.options.audio_gain;
    host.scpu_target_mhz = host.options.scpu_mhz;
    host.display_mode = host.options.display_mode;
-   host.fast_forward_multiplier = LIBRETRO_FAST_FORWARD_DEFAULT_MULTIPLIER;
+   host.fast_forward_multiplier = 0;
 }
 
 static uintptr_t host_read_gp(void)
@@ -1525,15 +1525,22 @@ static bool host_get_variable(struct retro_variable *var)
          return true;
       }
       if (strcmp(var->key, "gpsp_frameskip_interval") == 0) {
-         static char fast_forward_interval[4];
-
          if (host.fast_forward && host.fast_forward_multiplier > 1) {
-            unsigned interval = sanitize_fast_forward_multiplier(
-               host.fast_forward_multiplier) - 1u;
-
-            snprintf(fast_forward_interval, sizeof(fast_forward_interval),
-               "%u", interval);
-            var->value = fast_forward_interval;
+            switch (sanitize_fast_forward_multiplier(
+               host.fast_forward_multiplier)) {
+            case 16:
+               var->value = "15";
+               break;
+            case 8:
+               var->value = "7";
+               break;
+            case 4:
+               var->value = "3";
+               break;
+            default:
+               var->value = "1";
+               break;
+            }
          } else if (host.options.frameskip ==
              UNIFROG_LIBRETRO_FRAMESKIP_FIXED_2)
             var->value = "2";
@@ -2074,9 +2081,11 @@ static int quick_js_toggle_audio(void)
    return quick_js_status_value();
 }
 
-static int quick_js_toggle_fast_forward(void)
+static void quick_js_apply_fast_forward_speed(unsigned multiplier)
 {
-   host.fast_forward = host.fast_forward ? 0 : 1;
+   multiplier = sanitize_fast_forward_multiplier(multiplier);
+   host.fast_forward_multiplier = multiplier;
+   host.fast_forward = multiplier > 0 ? 1 : 0;
    host.fast_forward_force_present = host.fast_forward ? 1 : 0;
    host.variables_dirty = 1;
    host.frame_deadline_us = host_time_us();
@@ -2084,8 +2093,8 @@ static int quick_js_toggle_fast_forward(void)
    host.audio_quiet_batches = 0;
    if (host.audio_open)
       (void)unifrog_audio_set_output_enabled(&host.audio, 0);
-   printf("unifrog quick_js fast_forward=%d\n", host.fast_forward);
-   return host.fast_forward ? 1 : 0;
+   printf("unifrog quick_js fast_forward=%d multiplier=%u\n",
+      host.fast_forward, host.fast_forward_multiplier);
 }
 
 static const char *quick_js_frameskip_label(void)
@@ -2137,10 +2146,10 @@ static int quick_js_cycle_frameskip(int delta)
 
 static int quick_js_cycle_fast_forward_multiplier(int delta)
 {
-   static const unsigned multipliers[] = { 2, 4, 8, 16 };
+   static const unsigned multipliers[] = { 0, 2, 4, 8, 16 };
    unsigned current = sanitize_fast_forward_multiplier(
       host.fast_forward_multiplier);
-   unsigned index = 1;
+   unsigned index = 0;
 
    for (unsigned i = 0; i < ARRAY_SIZE(multipliers); i++) {
       if (multipliers[i] == current) {
@@ -2158,11 +2167,7 @@ static int quick_js_cycle_fast_forward_multiplier(int delta)
       if (index >= ARRAY_SIZE(multipliers))
          index = 0;
    }
-   host.fast_forward_multiplier = multipliers[index];
-   host.variables_dirty = 1;
-   host.fast_forward_force_present = host.fast_forward ? 1 : 0;
-   printf("unifrog quick_js fast_forward_multiplier=%u\n",
-      host.fast_forward_multiplier);
+   quick_js_apply_fast_forward_speed(multipliers[index]);
    return (int)host.fast_forward_multiplier;
 }
 
@@ -2466,8 +2471,6 @@ static int quick_js_action(void *opaque, const char *id)
    }
    if (strcmp(id, "quick:audio") == 0)
       return quick_js_toggle_audio();
-   if (strcmp(id, "quick:fast-forward") == 0)
-      return quick_js_toggle_fast_forward();
    if (strcmp(id, "quick:fast-forward-status") == 0)
       return host.fast_forward ? 1 : 0;
    if (strcmp(id, "quick:fast-forward-speed") == 0)
