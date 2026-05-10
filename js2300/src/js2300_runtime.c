@@ -1,6 +1,7 @@
 #include <js2300/js2300.h>
 
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -152,6 +153,36 @@ static uint32_t host_millis(struct js2300_runtime *runtime)
    if (runtime && runtime->host.millis)
       return runtime->host.millis(runtime->host.opaque);
    return 0;
+}
+
+static void log_alignment_diag(struct js2300_runtime *runtime,
+                               const char *tag, const void *ptr,
+                               size_t bytes)
+{
+   uintptr_t addr = (uintptr_t)ptr;
+   char line[192];
+
+   snprintf(line, sizeof(line),
+      "js2300 align tag=%s ptr=0x%08lx bytes=%lu mod4=%lu mod8=%lu",
+      tag ? tag : "?", (unsigned long)addr, (unsigned long)bytes,
+      (unsigned long)(addr & 3u), (unsigned long)(addr & 7u));
+   host_log(runtime, line);
+}
+
+static void log_alignment_error(struct js2300_runtime *runtime,
+                                const char *tag, const void *ptr,
+                                size_t bytes)
+{
+   uintptr_t addr = (uintptr_t)ptr;
+
+   if (!ptr || (addr & 7u) != 0u) {
+      char line[192];
+
+      snprintf(line, sizeof(line),
+         "js2300 align_error tag=%s ptr=0x%08lx bytes=%lu",
+         tag ? tag : "?", (unsigned long)addr, (unsigned long)bytes);
+      host_log(runtime, line);
+   }
 }
 
 static void js2300_runtime_gc(struct js2300_runtime *runtime, const char *reason)
@@ -484,6 +515,10 @@ static int remember_bytecode_buffer(struct js2300_runtime *runtime, void *buf)
          return -1;
       runtime->bytecode_buffers = new_buffers;
       runtime->bytecode_buffer_capacity = new_capacity;
+      log_alignment_diag(runtime, "bytecode_table", runtime->bytecode_buffers,
+         (size_t)new_capacity * sizeof(runtime->bytecode_buffers[0]));
+      log_alignment_error(runtime, "bytecode_table", runtime->bytecode_buffers,
+         (size_t)new_capacity * sizeof(runtime->bytecode_buffers[0]));
    }
 
    runtime->bytecode_buffers[runtime->bytecode_buffer_count++] = buf;
@@ -674,6 +709,8 @@ static int preload_bytecode_path(struct js2300_runtime *runtime,
       free(bytecode_path);
       return -1;
    }
+   log_alignment_diag(runtime, "bytecode", bytecode, bytecode_len);
+   log_alignment_error(runtime, "bytecode", bytecode, bytecode_len);
 
    if (bytecode_len != entry->bytecode_size ||
        bytecode_hash != entry->bytecode_hash) {
@@ -1059,6 +1096,8 @@ int js2300_runtime_create(const struct js2300_config *config,
 
    runtime->config = *config;
    runtime->host = *host;
+   log_alignment_diag(runtime, "runtime", runtime, sizeof(*runtime));
+   log_alignment_error(runtime, "runtime", runtime, sizeof(*runtime));
    *out_runtime = runtime;
    return 0;
 }
@@ -1084,6 +1123,12 @@ int js2300_runtime_run(struct js2300_runtime *runtime)
       runtime->config.app_root ? runtime->config.app_root : "",
       runtime->config.entry_script ? runtime->config.entry_script : "");
    host_log(runtime, line);
+   snprintf(line, sizeof(line),
+      "js2300 align config heap_mod8=%lu stack_mod8=%lu bytecode_cache_mod8=%lu",
+      (unsigned long)(runtime->config.heap_bytes & 7u),
+      (unsigned long)(runtime->config.stack_bytes & 7u),
+      (unsigned long)(runtime->config.bytecode_cache_bytes & 7u));
+   host_log(runtime, line);
 
    phase_start_ms = host_millis(runtime);
    path = build_entry_path(&runtime->config);
@@ -1107,6 +1152,10 @@ int js2300_runtime_run(struct js2300_runtime *runtime)
       (unsigned long)(uintptr_t)runtime->heap,
       (unsigned long)runtime->config.heap_bytes);
    host_log(runtime, line);
+   log_alignment_diag(runtime, "heap", runtime->heap,
+      runtime->config.heap_bytes);
+   log_alignment_error(runtime, "heap", runtime->heap,
+      runtime->config.heap_bytes);
 
    phase_start_ms = host_millis(runtime);
    runtime->ctx = JS_NewContext(runtime->heap, runtime->config.heap_bytes,
@@ -1122,6 +1171,8 @@ int js2300_runtime_run(struct js2300_runtime *runtime)
       (unsigned long)(phase_done_ms - phase_start_ms),
       (unsigned long)(uintptr_t)runtime->ctx);
    host_log(runtime, line);
+   log_alignment_diag(runtime, "context", runtime->ctx, 0);
+   log_alignment_error(runtime, "context", runtime->ctx, 0);
 
    active_runtime = runtime;
    host_log(runtime, "js2300 eval start");

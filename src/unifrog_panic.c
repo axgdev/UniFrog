@@ -70,23 +70,15 @@ static void panic_reset_system(uint32_t buttons)
    unifrog_log("unifrog panic reset buttons=0x%08lx\n",
       (unsigned long)buttons);
    (void)unifrog_log_flush_force();
+   hw_watchdog_reset(1000);
    reset();
-   hw_watchdog_reset(10000);
    for (;;)
       ;
 }
 
 static uint32_t panic_poll_buttons(void)
 {
-   uint32_t buttons = unifrog_input_poll_local_direct_buttons();
-
-   if (unifrog_input_wireless_available()) {
-      unifrog_input_wireless_poll_once();
-      buttons |= unifrog_input_wireless_all_buttons();
-      unifrog_input_restore_local_bus();
-   }
-
-   return buttons;
+   return unifrog_input_poll_local_direct_buttons();
 }
 
 static void wait_for_start_reset(void)
