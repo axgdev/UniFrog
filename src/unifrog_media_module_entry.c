@@ -15,11 +15,6 @@ extern uintptr_t __init_array_start[];
 extern uintptr_t __init_array_end[];
 extern const struct unifrog_abi *unifrog_core_module_abi;
 
-extern int vidsink_init(void);
-extern int llav_dis_init(void);
-extern int viddec_driver_init(void);
-extern int llav_vdec_init(void);
-
 const struct unifrog_core_module_exports *unifrog_core_module_entry(
    const struct unifrog_abi *abi);
 
@@ -71,14 +66,6 @@ static void module_run_ctors(void)
    }
 }
 
-static void media_module_init_drivers(void)
-{
-   (void)vidsink_init();
-   (void)llav_dis_init();
-   (void)viddec_driver_init();
-   (void)llav_vdec_init();
-}
-
 const struct unifrog_core_module_exports *unifrog_core_module_entry(
    const struct unifrog_abi *abi)
 {
@@ -89,7 +76,6 @@ const struct unifrog_core_module_exports *unifrog_core_module_entry(
    unifrog_core_module_abi = abi;
    if (!initialized) {
       module_run_ctors();
-      media_module_init_drivers();
       initialized = 1;
    }
    return &exports;

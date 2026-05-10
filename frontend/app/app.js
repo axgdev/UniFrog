@@ -32,6 +32,7 @@ var systemCounts = [];
 var systemItemLists = [];
 var indexLoaded = false;
 var indexLoadPending = true;
+var indexLoadDueMs = 0;
 var currentItems = [];
 var currentSystem = "";
 var currentListTitle = "";
@@ -126,9 +127,8 @@ frontendPhase("settings_loaded");
 loadThemeFile();
 frontendPhase("theme_loaded");
 if (config.autoIndex) {
-  indexLoadPending = false;
-  indexGames(JS2300.now());
-  frontendPhase("auto_index_done");
+  JS2300.log("frontend auto_index deferred until menu is interactive");
+  frontendPhase("auto_index_deferred");
 }
 loadSystemCheckReport(JS2300.now());
 frontendPhase("system_check_loaded");
@@ -209,7 +209,8 @@ while (running) {
   } else {
     JS2300.sleep(16);
   }
-  if (indexLoadPending && frontendReadyLogged)
+  if (indexLoadPending && frontendReadyLogged && now >= indexLoadDueMs &&
+      rawInput === 0)
     ensureIndexLoaded(JS2300.now(), 1);
   prevInput = input;
 }

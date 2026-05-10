@@ -162,6 +162,7 @@ function noteFrontendReady(now) {
   if (!frontendReadyLogged) {
     JS2300.log("frontend ready input_ms=" + String(now) + " view=" + String(view));
     frontendReadyLogged = true;
+    indexLoadDueMs = now + 1500;
   }
 }
 

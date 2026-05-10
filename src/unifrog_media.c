@@ -34,6 +34,11 @@
 #define VIDEO_STALL_LIMIT 8u
 #define VIDEO_LOG_AUTO_FLUSH_BYTES (64u * 1024u)
 
+extern int vidsink_init(void);
+extern int llav_dis_init(void);
+extern int viddec_driver_init(void);
+extern int llav_vdec_init(void);
+
 struct playback_preset {
    const char *name;
    HCPlayerSyncType sync_type;
@@ -347,6 +352,30 @@ static int probe_audio_stream(void *player, const char *tag,
    return -1;
 }
 
+static void media_init_drivers_once(void)
+{
+   static int initialized;
+   int ret;
+
+   if (initialized)
+      return;
+
+   printf("unifrog media driver_init begin\n");
+   ret = vidsink_init();
+   printf("unifrog media driver_init vidsink ret=%d\n", ret);
+   (void)unifrog_log_flush();
+   ret = llav_dis_init();
+   printf("unifrog media driver_init llav_dis ret=%d\n", ret);
+   (void)unifrog_log_flush();
+   ret = viddec_driver_init();
+   printf("unifrog media driver_init viddec ret=%d\n", ret);
+   (void)unifrog_log_flush();
+   ret = llav_vdec_init();
+   printf("unifrog media driver_init llav_vdec ret=%d\n", ret);
+   (void)unifrog_log_flush();
+   initialized = 1;
+}
+
 int unifrog_media_play_video_ex(const char *path,
    const struct unifrog_media_video_options *options)
 {
@@ -378,6 +407,7 @@ int unifrog_media_play_video_ex(const char *path,
    printf("unifrog media start path=%s audio_only=%d image=%d\n",
       path, audio_only, image_file);
    (void)unifrog_log_flush();
+   media_init_drivers_once();
 
    if (open_stream(path) != 0)
       goto out;
