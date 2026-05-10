@@ -2,6 +2,8 @@
 /.deps/
 /output/
 /build/
+/sdcard-package/
+/toolchain/
 /cores/build/
 /cores/output/
 /frontend/output/
@@ -12,6 +14,8 @@
 /asdpack
 /bisrv*.asd
 /fastboot*.asd
+/UniFrog-*-sdcard.zip
+/Unifrog-sdcard-*.zip
 *.o
 *.d
 *.out

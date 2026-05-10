@@ -53,6 +53,7 @@ CI_SDCARD_PACKAGE_DIR ?= $(abspath sdcard-package)
 CI_SDZIP ?= $(abspath UniFrog-local-sdcard.zip)
 CI_ZIP_COMPRESSION ?= -1
 CI_SUBMODULE_JOBS ?= 8
+THIRD_PARTY_NOTICE ?= THIRD_PARTY.md
 SDCARD_BIOS_DIR := $(SDCARD)/bios
 SDCARD_FIRMWARE_DIR := $(SDCARD)/firmware
 ASDPACK := $(BUILD)/asdpack
@@ -957,7 +958,8 @@ frontend-check:
 frontend-package: $(FRONTEND_PACKAGE_STAMP)
 
 $(FRONTEND_PACKAGE_STAMP): $(FRONTEND_INPUTS) $(MQUICKJS_INPUTS) \
-	$(FRONTEND_CONFIG_STAMP) $(BUILD_IDENTITY_STAMP) | $(OUT)
+	$(FRONTEND_CONFIG_STAMP) $(BUILD_IDENTITY_STAMP) LICENSE \
+	$(THIRD_PARTY_NOTICE) | $(OUT)
 	$(Q)$(MAKE) -C $(FRONTEND) package OUT=$(abspath $(OUT))/frontend \
 		MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR)) HOSTCC=$(HOSTCC)
 	$(Q)mkdir -p $(FRONTEND_PACKAGE)
@@ -978,6 +980,8 @@ $(FRONTEND_PACKAGE_STAMP): $(FRONTEND_INPUTS) $(MQUICKJS_INPUTS) \
 		printf '%s\n' 'hcrtos_media=$(HCRTOS_MEDIA)'; \
 		printf '%s\n' "generated_utc=$$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
 	} > $(FRONTEND_MANIFEST)
+	$(Q)cp LICENSE $(FRONTEND_PACKAGE)/LICENSE.txt
+	$(Q)cp $(THIRD_PARTY_NOTICE) $(FRONTEND_PACKAGE)/THIRD_PARTY.md
 	$(Q)rm -f $(FRONTEND_PACKAGE)/.package.*.stamp
 	$(Q)touch $@
 
@@ -1289,6 +1293,8 @@ fastboot-check: sdcard-package
 	@test -s $(SDCARD_FIRMWARE_PACKAGE)
 	@test -s $(FRONTEND_PACKAGE)/main.js
 	@test -s $(FRONTEND_MANIFEST)
+	@test -s $(FRONTEND_PACKAGE)/LICENSE.txt
+	@test -s $(FRONTEND_PACKAGE)/THIRD_PARTY.md
 	@test -s $(JS2300_CORE_BIN)
 	@for bin in $(LIBRETRO_CORE_BINS); do test -s $$bin || exit 1; done
 	@test -z "$(HCRTOS_MEDIA_MODULE_BINS)" || for bin in $(HCRTOS_MEDIA_MODULE_BINS); do test -s $$bin || exit 1; done
@@ -1340,6 +1346,8 @@ check: $(ASD) sdcard-package layout-check
 	@test -s $(LIBUNIFROG)
 	@test -s $(FRONTEND_PACKAGE)/main.js
 	@test -s $(FRONTEND_MANIFEST)
+	@test -s $(FRONTEND_PACKAGE)/LICENSE.txt
+	@test -s $(FRONTEND_PACKAGE)/THIRD_PARTY.md
 	@test -s $(JS2300_CORE_BIN)
 	@for bin in $(LIBRETRO_CORE_BINS); do test -s $$bin || exit 1; done
 	@test -z "$(HCRTOS_MEDIA_MODULE_BINS)" || for bin in $(HCRTOS_MEDIA_MODULE_BINS); do test -s $$bin || exit 1; done
@@ -1364,6 +1372,8 @@ install: fastboot-check layout-check
 	@echo "  INSTALL $(SDCARD)/unifrog"
 	$(Q)rm -rf $(SDCARD)/unifrog
 	$(Q)cp -R $(FRONTEND_PACKAGE) $(SDCARD)/unifrog
+	$(Q)cp LICENSE $(SDCARD)/unifrog/LICENSE.txt
+	$(Q)cp $(THIRD_PARTY_NOTICE) $(SDCARD)/unifrog/THIRD_PARTY.md
 	$(Q)sync
 
 rebuild:
