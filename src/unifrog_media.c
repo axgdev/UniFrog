@@ -34,11 +34,6 @@
 #define VIDEO_STALL_LIMIT 8u
 #define VIDEO_LOG_AUTO_FLUSH_BYTES (64u * 1024u)
 
-extern int vidsink_init(void);
-extern int llav_dis_init(void);
-extern int viddec_driver_init(void);
-extern int llav_vdec_init(void);
-
 struct playback_preset {
    const char *name;
    HCPlayerSyncType sync_type;
@@ -355,23 +350,11 @@ static int probe_audio_stream(void *player, const char *tag,
 static void media_init_drivers_once(void)
 {
    static int initialized;
-   int ret;
 
    if (initialized)
       return;
 
-   printf("unifrog media driver_init begin\n");
-   ret = vidsink_init();
-   printf("unifrog media driver_init vidsink ret=%d\n", ret);
-   (void)unifrog_log_flush();
-   ret = llav_dis_init();
-   printf("unifrog media driver_init llav_dis ret=%d\n", ret);
-   (void)unifrog_log_flush();
-   ret = viddec_driver_init();
-   printf("unifrog media driver_init viddec ret=%d\n", ret);
-   (void)unifrog_log_flush();
-   ret = llav_vdec_init();
-   printf("unifrog media driver_init llav_vdec ret=%d\n", ret);
+   printf("unifrog media driver_init skipped explicit SDK init; hcplayer owns setup\n");
    (void)unifrog_log_flush();
    initialized = 1;
 }

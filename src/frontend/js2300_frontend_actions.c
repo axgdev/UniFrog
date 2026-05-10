@@ -699,8 +699,13 @@ static int play_video_media_module(struct js2300_frontend *frontend,
       return -1;
    }
 
+   host_video_clear(frontend, 0x0000);
+   host_video_text(frontend, 16, 46, "Loading video", 0xffff);
+   host_video_text(frontend, 16, 70, "B exits after playback starts", 0x7bef);
+   host_video_present(frontend);
+   (void)unifrog_log_flush();
+
    play_start_ms = unifrog_perf_time_ms();
-   unifrog_fb_close(&frontend->fb);
    ret = (int)unifrog_mips_call2(loaded.gp_addr,
       (uintptr_t)exports->native_media_play_video_ex,
       (uintptr_t)frontend->path, (uintptr_t)options);
