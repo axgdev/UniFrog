@@ -108,7 +108,6 @@ var settingRows = [
   { id: "ge", label: "GE" },
   { id: "av", label: "AV output" },
   { id: "frameskip", label: "Frameskip" },
-  { id: "auto_index", label: "Auto index boot" },
   { id: "index", label: "Index library" },
   { id: "system_check", label: "System check" },
   { id: "input", label: "Input monitor" },

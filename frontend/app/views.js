@@ -1,12 +1,12 @@
 function homeDetail(item) {
   if (startsWithText(item.id, "system:"))
-    return String(countForSystem(lineValue(item.id, 7))) + " games";
+    return indexLoaded ? String(countForSystem(lineValue(item.id, 7))) + " games" : item.detail;
   if (item.id === "last")
     return config.lastPath ? basename(config.lastPath) : "None";
   if (item.id === "games")
-    return String(indexItems.length) + " games";
+    return indexLoaded ? String(indexItems.length) + " games" : "ROM folders";
   if (item.id === "media")
-    return String(mediaItems.length) + " files";
+    return indexLoaded ? String(mediaItems.length) + " files" : item.detail;
   if (item.id === "settings")
     return String(config.brightness) + "%";
   return item.detail;
@@ -245,13 +245,17 @@ function drawSystems(now) {
     if (idx < systems.length) {
       active = idx === selected;
       JS2300.video.text(16, y, systems[idx], active ? theme.text.selected : theme.text.primary);
-      JS2300.video.text(248, y, String(systemCounts[idx]),
-        active ? theme.text.selectedMuted : theme.text.muted);
+      if (indexLoaded)
+        JS2300.video.text(248, y, String(systemCounts[idx]),
+          active ? theme.text.selectedMuted : theme.text.muted);
+      else
+        JS2300.video.text(226, y, "folder",
+          active ? theme.text.selectedMuted : theme.text.muted);
     }
   }
   if (systems.length === 0) JS2300.video.text(16, 96, "No systems configured", theme.text.muted);
   drawToast(now);
-  footer("A open   B back   Y log");
+  footer(indexLoaded ? "A open   B back   Y log" : "A lazy scan folder   B back");
   JS2300.video.present();
 }
 
@@ -422,7 +426,6 @@ function settingValue(id) {
   if (id === "av") return avOutputOptions[optionIndex(avOutputOptions, config.av, 0)].label;
   if (id === "frameskip")
     return launchFrameskipOptions[optionIndex(launchFrameskipOptions, config.frameskip, 1)].label;
-  if (id === "auto_index") return config.autoIndex ? "On" : "Off";
   if (id === "index") return "Scan";
   if (id === "system_check") return "Verify";
   if (id === "developer") return "Tools";
@@ -506,7 +509,7 @@ function drawAbout(now) {
   JS2300.video.text(16, 44, "UniFrog JS frontend", theme.text.primary);
   JS2300.video.text(16, 68, "Settings: /unifrog/settings.ini", theme.text.muted);
   JS2300.video.text(16, 86, "Theme: /unifrog/theme.ini", theme.text.muted);
-  JS2300.video.text(16, 110, "Games: indexed by system", theme.text.muted);
+  JS2300.video.text(16, 110, "Games: lazy folders, optional index", theme.text.muted);
   JS2300.video.text(16, 128, "Storage: /media/mmcblk0", theme.text.muted);
   drawToast(now);
   footer("B back   Y log");
