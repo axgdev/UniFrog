@@ -19,7 +19,7 @@ JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || ec
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 SD_MODE ?= safe
 SD_READ_MODE ?= uhs25
-HCRTOS_MEDIA ?= module
+HCRTOS_MEDIA ?= firmware
 
 -include config.mk
 
@@ -294,7 +294,8 @@ HCRTOS_MEDIA_LDLIBS := \
 	-lavformat \
 	-lavcodec \
 	-lavutil \
-	-lswscale
+	-lswscale \
+	-lntfs
 
 # Normal archives are pulled as needed by the linker.
 LDLIBS := \
@@ -318,8 +319,8 @@ CORE_WHOLE_LIBS := \
 	-lmmchosthc15 \
 	-lefuse
 
-# HCRTOS media plugins are large, so the default build links them into a
-# runtime-loaded native module instead of the boot firmware.
+# HCRTOS media plugins are large, but hcplayer_create is not safe from the
+# runtime-loaded native module on current SF2000 HCRTOS builds.
 HCRTOS_MEDIA_WHOLE_LIBS := \
 	-lffplayer \
 	-ldsc \

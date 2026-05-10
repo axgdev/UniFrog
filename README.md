@@ -79,10 +79,11 @@ to a full-screen 320x240 RGB565 RLE include during the build. The version text
 at the bottom is stamped from an exact git tag when available, otherwise from
 the current commit hash with a `revision` label.
 
-The default `HCRTOS_MEDIA=module` keeps the SDK FFmpeg/HCRTOS media player out
-of the boot image and packages it as `/unifrog/modules/hcrtos-media.bin`; video
-actions load that native module from SD. Use `HCRTOS_MEDIA=firmware` only when
-you need the old fully linked boot image for diagnostics.
+The default `HCRTOS_MEDIA=firmware` links the SDK FFmpeg/HCRTOS media player
+into the boot image. `HCRTOS_MEDIA=module` still packages
+`/unifrog/modules/hcrtos-media.bin` for loader diagnostics, but current SF2000
+HCRTOS media startup can stall inside `hcplayer_create()` when run from that
+runtime-loaded native module.
 
 The SD-card package also installs `LICENSE.txt` and `THIRD_PARTY.md` under
 `/unifrog`. Keep `THIRD_PARTY.md` current whenever adding, removing, or
