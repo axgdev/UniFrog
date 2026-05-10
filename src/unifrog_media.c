@@ -392,13 +392,8 @@ int unifrog_media_play_video_ex(const char *path,
    (void)unifrog_log_flush();
    media_init_drivers_once();
 
-   if (open_stream(path) != 0)
-      goto out;
-
    memset(&init_args, 0, sizeof(init_args));
-   init_args.readdata_callback = stream_read;
-   init_args.readdata_opaque = &video_stream;
-   init_args.seekdata_callback = stream_seek;
+   init_args.uri = (char *)path;
    init_args.sync_type = preset->sync_type;
    init_args.quick_mode = preset->quick_mode;
    init_args.qm_drop_thresh = preset->qm_drop_thresh;
@@ -427,7 +422,7 @@ int unifrog_media_play_video_ex(const char *path,
       init_args.img_alpha_mode = ALPHA_BLEND_UNIFORM;
    }
 
-   printf("unifrog media opts source=stream preset=%s sync=%d quick=%d drop=%d "
+   printf("unifrog media opts source=uri preset=%s sync=%d quick=%d drop=%d "
           "audio_flush=%d buffering=%d cache=%u audio_only=%d image=%d no_audio=%d\n",
       preset->name, init_args.sync_type, init_args.quick_mode ? 1 : 0,
       init_args.qm_drop_thresh, init_args.audio_flush_thres,

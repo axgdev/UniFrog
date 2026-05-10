@@ -107,7 +107,10 @@ function openSystemByName(name, now) {
 }
 
 function openMediaIndex(now) {
-  currentItems = loadMediaItems();
+  if (indexLoaded && mediaItems.length > 0)
+    currentItems = mediaItems;
+  else
+    currentItems = loadMediaItems();
   if (currentItems.length === 0) {
     openBrowser("Media", "/media/mmcblk0", "media");
     return;
