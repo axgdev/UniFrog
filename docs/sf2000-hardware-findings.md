@@ -237,6 +237,10 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
   low-level DAC path before opening the amp gate. Opening only the gate can
   expose DAC idle noise, which is why raising software gain masked noise but
   made audio crunchy.
+- Earlier audio diagnostics found that the SF2000 speaker route behaves as a
+  mono left-path output. Differential stereo and dual-mono experiments produced
+  worse noise on device; the stable libretro path is mono PCM through AUDSINK's
+  left-channel duplicate route with software gain defaulting to 1x.
 - HCRTOS audio driver and `hcplayer` can produce working audio. Current
   libretro logs show the AUDSINK volume ioctl returning unsupported, so UniFrog
   also applies the SND volume/mute ioctls directly when using AUDSINK or

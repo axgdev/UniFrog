@@ -1,7 +1,7 @@
 var config = {
   brightness: 50,
   audio: 1,
-  gain: 2,
+  gain: 1,
   cpu: 918,
   ge: 0,
   frameskip: 1,

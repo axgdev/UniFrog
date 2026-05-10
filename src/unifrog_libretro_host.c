@@ -51,11 +51,11 @@
 #define LIBRETRO_AUDIO_DEFAULT_GAIN 1u
 #define LIBRETRO_AUDIO_MAX_GAIN 12u
 #define LIBRETRO_AUDIO_VOLUME 75u
-#define LIBRETRO_AUDIO_ROUTE "core_rate_stereo_safe"
+#define LIBRETRO_AUDIO_ROUTE "sf2000_left_only"
 #define LIBRETRO_AUDIO_GATE_OPEN_LEVEL 256u
 #define LIBRETRO_AUDIO_GATE_CLOSE_LEVEL 96u
 #define LIBRETRO_AUDIO_GATE_CLOSE_BATCHES 45u
-#define LIBRETRO_AUDIO_CHANNELS 2u
+#define LIBRETRO_AUDIO_CHANNELS 1u
 #define LIBRETRO_AUDIO_PERIOD_BYTES 512u
 #define LIBRETRO_AUDIO_PERIODS 8u
 #define LIBRETRO_AUDIO_WRITE_CHUNK_FRAMES 256u
@@ -1705,7 +1705,6 @@ void unifrog_libretro_audio_sample_cb(int16_t left, int16_t right)
    if ((unsigned)(scaled < 0 ? -scaled : scaled) > host.audio_peak_max)
       host.audio_peak_max = (unsigned)(scaled < 0 ? -scaled : scaled);
    frame[0] = (int16_t)scaled;
-   frame[1] = (int16_t)scaled;
    if (host.audio_open) {
       uint32_t start = unifrog_perf_count();
       unsigned count;
@@ -1784,10 +1783,7 @@ size_t unifrog_libretro_audio_batch_cb(const int16_t *data, size_t frames)
             peak_out = abs_out;
          if (abs_out < LIBRETRO_AUDIO_GATE_CLOSE_LEVEL)
             scaled = 0;
-         audio_mix_buffer[out_frames * LIBRETRO_AUDIO_CHANNELS] =
-            (int16_t)scaled;
-         audio_mix_buffer[out_frames * LIBRETRO_AUDIO_CHANNELS + 1u] =
-            (int16_t)scaled;
+         audio_mix_buffer[out_frames] = (int16_t)scaled;
          out_frames++;
       }
       if (out_frames == 0)

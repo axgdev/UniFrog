@@ -142,9 +142,12 @@ int unifrog_audio_set_system_volume(unsigned volume)
    if (volume > 100)
       volume = 100;
    value = (uint8_t)volume;
+   (void)ensure_audio_drivers();
    fd = open_system_snd();
-   if (fd < 0)
+   if (fd < 0) {
+      printf("unifrog audio system_volume open_fail volume=%u\n", volume);
       return -1;
+   }
    ret = ioctl(fd, SND_IOCTL_SET_VOLUME, &value);
    close(fd);
    printf("unifrog audio system_volume volume=%u ret=%d\n", volume, ret);
@@ -158,8 +161,15 @@ int unifrog_audio_set_system_mute(int mute)
    int fd;
 
    fd = open_system_snd();
-   if (fd < 0)
+   if (fd < 0) {
+      static int logged_open_fail;
+
+      if (!logged_open_fail) {
+         logged_open_fail = 1;
+         printf("unifrog audio system_mute open_fail mute=%d\n", value);
+      }
       return -1;
+   }
    ret = ioctl(fd, SND_IOCTL_SET_MUTE, value);
    close(fd);
    printf("unifrog audio system_mute mute=%d ret=%d\n", value, ret);

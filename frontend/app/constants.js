@@ -44,6 +44,7 @@ var BOOT_ASD_CFG_PATH = "/media/mmcblk0/firmware/boot_asd.cfg";
 var backlightLevels = [1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 var launchGainOptions = [
   { label: "0", value: 0 },
+  { label: "1", value: 1 },
   { label: "2", value: 2 },
   { label: "4", value: 4 },
   { label: "8", value: 8 }
