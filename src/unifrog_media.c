@@ -25,10 +25,10 @@
 #define printf unifrog_log
 
 #define VIDEO_STREAM_CACHE_BYTES UNIFROG_APP_STREAM_BUFFER_DEFAULT_BYTES
-#define VIDEO_SOURCE_W 1920
-#define VIDEO_SOURCE_H 1080
-#define VIDEO_OUTPUT_W 1920
-#define VIDEO_OUTPUT_H 1080
+#define VIDEO_SOURCE_W 320
+#define VIDEO_SOURCE_H 240
+#define VIDEO_OUTPUT_W 320
+#define VIDEO_OUTPUT_H 240
 #define VIDEO_EXIT_HOLD_POLLS 12u
 #define VIDEO_MONITOR_POLLS 30u
 #define VIDEO_STALL_LIMIT 8u
@@ -99,6 +99,13 @@ struct media_stream {
 static struct media_stream video_stream;
 static int dis_fd = -1;
 static int fb_fd = -1;
+
+extern int auddec_driver_init(void);
+extern int audsink_driver_init(void);
+extern int avsync_driver_init(void);
+extern int llav_vdec_init(void);
+extern int viddec_driver_init(void);
+extern int vidsink_init(void);
 
 static void close_stream(void)
 {
@@ -245,15 +252,17 @@ static void open_display(void)
    }
 }
 
-static void set_video_layer_visible(int visible, int src_w, int src_h,
+static int set_video_layer_visible(int visible, int src_w, int src_h,
    int dst_w, int dst_h)
 {
    struct dis_layer_blend_order order;
    struct dis_zoom zoom;
+   int order_ret;
+   int zoom_ret;
 
    open_display();
    if (dis_fd < 0)
-      return;
+      return -1;
 
    memset(&order, 0, sizeof(order));
    order.distype = DIS_TYPE_HD;
@@ -268,7 +277,7 @@ static void set_video_layer_visible(int visible, int src_w, int src_h,
       order.gmas_layer = 2;
       order.gmaf_layer = 3;
    }
-   (void)ioctl(dis_fd, DIS_SET_LAYER_ORDER, &order);
+   order_ret = ioctl(dis_fd, DIS_SET_LAYER_ORDER, &order);
 
    memset(&zoom, 0, sizeof(zoom));
    zoom.distype = DIS_TYPE_HD;
@@ -281,11 +290,12 @@ static void set_video_layer_visible(int visible, int src_w, int src_h,
    zoom.dst_area.y = 0;
    zoom.dst_area.w = (uint16_t)(dst_w > 0 ? dst_w : VIDEO_OUTPUT_W);
    zoom.dst_area.h = (uint16_t)(dst_h > 0 ? dst_h : VIDEO_OUTPUT_H);
-   (void)ioctl(dis_fd, DIS_SET_ZOOM, &zoom);
+   zoom_ret = ioctl(dis_fd, DIS_SET_ZOOM, &zoom);
 
-   printf("unifrog media layer visible=%d src=%ux%u dst=%ux%u\n",
+   printf("unifrog media layer visible=%d src=%ux%u dst=%ux%u order_ret=%d zoom_ret=%d\n",
       visible, zoom.src_area.w, zoom.src_area.h,
-      zoom.dst_area.w, zoom.dst_area.h);
+      zoom.dst_area.w, zoom.dst_area.h, order_ret, zoom_ret);
+   return order_ret == 0 && zoom_ret == 0 ? 0 : -1;
 }
 
 static void close_display(void)
@@ -296,7 +306,7 @@ static void close_display(void)
       fb_fd = -1;
    }
    if (dis_fd >= 0) {
-      set_video_layer_visible(0, 0, 0, 0, 0);
+      (void)set_video_layer_visible(0, 0, 0, 0, 0);
       close(dis_fd);
       dis_fd = -1;
    }
@@ -355,11 +365,25 @@ static int probe_audio_stream(void *player, const char *tag,
 static void media_init_drivers_once(void)
 {
    static int initialized;
+   int ret_viddec;
+   int ret_llav;
+   int ret_vidsink;
+   int ret_auddec;
+   int ret_audsink;
+   int ret_avsync;
 
    if (initialized)
       return;
 
-   printf("unifrog media driver_init skipped explicit SDK init; hcplayer owns setup\n");
+   ret_viddec = viddec_driver_init();
+   ret_llav = llav_vdec_init();
+   ret_vidsink = vidsink_init();
+   ret_auddec = auddec_driver_init();
+   ret_audsink = audsink_driver_init();
+   ret_avsync = avsync_driver_init();
+   printf("unifrog media driver_init viddec=%d llav_vdec=%d vidsink=%d auddec=%d audsink=%d avsync=%d\n",
+      ret_viddec, ret_llav, ret_vidsink, ret_auddec, ret_audsink,
+      ret_avsync);
    (void)unifrog_log_flush();
    initialized = 1;
 }
@@ -475,11 +499,11 @@ int unifrog_media_play_video_ex(const char *path,
       printf("unifrog media stream video codec=0x%x %dx%d fps=%d\n",
          video_info.codec_id, video_info.width, video_info.height,
          (int)video_info.frame_rate);
-      set_video_layer_visible(1, video_info.width, video_info.height,
+      (void)set_video_layer_visible(1, video_info.width, video_info.height,
          VIDEO_OUTPUT_W, VIDEO_OUTPUT_H);
    } else if (!audio_only) {
       printf("unifrog media stream info unavailable\n");
-      set_video_layer_visible(1, VIDEO_SOURCE_W, VIDEO_SOURCE_H,
+      (void)set_video_layer_visible(1, VIDEO_SOURCE_W, VIDEO_SOURCE_H,
          VIDEO_OUTPUT_W, VIDEO_OUTPUT_H);
    } else {
       printf("unifrog media stream video disabled audio_only=1\n");

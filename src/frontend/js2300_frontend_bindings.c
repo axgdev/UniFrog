@@ -60,7 +60,7 @@ int frontend_fb_open(struct js2300_frontend *frontend)
       (void)unifrog_boot_logo_present(&frontend->fb, "frontend-preserve");
       printf("unifrog boot_logo preserved current=%u buffers=%u redrawn=1\n",
          frontend->fb.current_buffer, frontend->fb.buffer_count);
-   } else {
+   } else if (!frontend->relaunch) {
       (void)unifrog_boot_logo_present(&frontend->fb, "frontend");
    }
    printf("unifrog js fb ready %ux%u stride=%u buffers=%u\n",
