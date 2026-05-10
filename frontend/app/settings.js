@@ -23,7 +23,6 @@ function writeSettings() {
   if (!JS2300.fs.writeText) return;
   text += "brightness=" + String(config.brightness) + "\n";
   text += "audio=" + String(config.audio) + "\n";
-  text += "gain=" + String(config.gain) + "\n";
   text += "cpu=" + String(config.cpu) + "\n";
   text += "ge=" + String(config.ge) + "\n";
   text += "frameskip=" + String(config.frameskip) + "\n";
@@ -42,7 +41,6 @@ function loadSettings() {
   if (text) {
     config.brightness = toInt(readKey(text, "brightness"), config.brightness);
     config.audio = toInt(readKey(text, "audio"), config.audio) ? 1 : 0;
-    config.gain = toInt(readKey(text, "gain"), config.gain);
     config.cpu = toInt(readKey(text, "cpu"), config.cpu);
     config.ge = toInt(readKey(text, "ge"), config.ge);
     config.frameskip = toInt(readKey(text, "frameskip"), config.frameskip);
@@ -54,7 +52,6 @@ function loadSettings() {
     config.lastCore = readKey(text, "last_core");
   }
   config.brightness = backlightLevel(nearestBacklightIndex(config.brightness));
-  config.gain = launchGainOptions[optionIndex(launchGainOptions, config.gain, 1)].value;
   config.cpu = launchCpuOptions[optionIndex(launchCpuOptions, config.cpu, 8)].value;
   config.ge = launchGeOptions[optionIndex(launchGeOptions, config.ge, 0)].value;
   config.frameskip =

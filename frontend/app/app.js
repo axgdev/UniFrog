@@ -1,7 +1,6 @@
 var config = {
   brightness: 50,
   audio: 1,
-  gain: 1,
   cpu: 918,
   ge: 0,
   frameskip: 1,
@@ -54,7 +53,6 @@ var nextBatteryMs = 0;
 var pendingVideoPath = "";
 var pendingGamePath = "";
 var launchAudioIndex = 0;
-var launchGainIndex = 1;
 var launchCpuIndex = 8;
 var launchGeIndex = 0;
 var launchBacklightIndex = 6;

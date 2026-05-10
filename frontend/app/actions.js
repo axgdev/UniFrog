@@ -187,7 +187,6 @@ function runDeveloperCoreWithPath(full, now) {
   var options;
   if (!pendingDeveloperCore) return;
   options = "audio=" + String(config.audio ? 1 : 0) +
-    ",gain=" + String(config.gain) +
     ",cpu=" + String(config.cpu) +
     ",ge=" + String(config.ge) +
     ",backlight=" + String(config.brightness) +
@@ -200,7 +199,6 @@ function runDeveloperCoreWithPath(full, now) {
 
 function applyLaunchDefaults(full, preferredCore) {
   launchAudioIndex = config.audio ? 0 : 1;
-  launchGainIndex = optionIndex(launchGainOptions, config.gain, 1);
   launchCpuIndex = optionIndex(launchCpuOptions, config.cpu, 8);
   launchGeIndex = optionIndex(launchGeOptions, config.ge, 0);
   launchBacklightIndex = nearestBacklightIndex(config.brightness);
@@ -214,7 +212,7 @@ function applyLaunchDefaults(full, preferredCore) {
       if (launchCoreOptions[i].value === preferredCore) launchCoreIndex = i;
     }
   }
-  selected = 8;
+  selected = 7;
 }
 
 function openGame(full, preferredCore, now) {
@@ -287,7 +285,6 @@ function runAction(id, now) {
 
 function runLaunchGame(now) {
   var audio = launchAudioIndex === 0 ? 1 : 0;
-  var gain = launchGainOptions[launchGainIndex].value;
   var cpu = launchCpuOptions[launchCpuIndex].value;
   var ge = launchGeOptions[launchGeIndex].value;
   var backlight = backlightLevel(launchBacklightIndex);
@@ -295,12 +292,11 @@ function runLaunchGame(now) {
   var display = launchDisplayOptions[launchDisplayIndex].value;
   var core = launchCoreOptions[launchCoreIndex].value;
   var experimentalStorage = JS2300.system.action("storage:experimental") > 0;
-  var options = "audio=" + String(audio) + ",gain=" + String(gain) +
+  var options = "audio=" + String(audio) +
     ",cpu=" + String(cpu) + ",ge=" + String(ge) +
     ",backlight=" + String(backlight) + ",fs=" + String(fs) +
     ",display=" + String(display) + ",core=" + core;
   config.audio = audio;
-  config.gain = gain;
   config.cpu = cpu;
   config.ge = ge;
   config.brightness = backlight;
@@ -381,25 +377,22 @@ function cycleLaunch(delta) {
   if (selected === 0) {
     launchAudioIndex = (launchAudioIndex + 2 + delta) % 2;
   } else if (selected === 1) {
-    launchGainIndex =
-      (launchGainIndex + launchGainOptions.length + delta) % launchGainOptions.length;
-  } else if (selected === 2) {
     launchCpuIndex =
       (launchCpuIndex + launchCpuOptions.length + delta) % launchCpuOptions.length;
-  } else if (selected === 3) {
+  } else if (selected === 2) {
     launchGeIndex =
       (launchGeIndex + launchGeOptions.length + delta) % launchGeOptions.length;
-  } else if (selected === 4) {
+  } else if (selected === 3) {
     launchBacklightIndex = clampIndex(launchBacklightIndex + delta, backlightLevels.length);
-  } else if (selected === 5) {
+  } else if (selected === 4) {
     launchFrameskipIndex =
       (launchFrameskipIndex + launchFrameskipOptions.length + delta) %
       launchFrameskipOptions.length;
-  } else if (selected === 6) {
+  } else if (selected === 5) {
     launchDisplayIndex =
       (launchDisplayIndex + launchDisplayOptions.length + delta) %
       launchDisplayOptions.length;
-  } else if (selected === 7) {
+  } else if (selected === 6) {
     launchCoreIndex =
       (launchCoreIndex + launchCoreOptions.length + delta) % launchCoreOptions.length;
   }
@@ -419,10 +412,6 @@ function changeSetting(delta, now) {
       JS2300.system.backlight(config.brightness);
   } else if (id === "audio") {
     config.audio = config.audio ? 0 : 1;
-  } else if (id === "gain") {
-    config.gain =
-      launchGainOptions[(optionIndex(launchGainOptions, config.gain, 1) +
-      launchGainOptions.length + delta) % launchGainOptions.length].value;
   } else if (id === "cpu") {
     config.cpu =
       launchCpuOptions[(optionIndex(launchCpuOptions, config.cpu, 8) +

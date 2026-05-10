@@ -49,7 +49,6 @@
 #define LIBRETRO_AUDIO_MIN_OUTPUT_RATE 8000u
 #define LIBRETRO_AUDIO_MAX_OUTPUT_RATE 48000u
 #define LIBRETRO_AUDIO_DEFAULT_GAIN 1u
-#define LIBRETRO_AUDIO_MAX_GAIN 12u
 #define LIBRETRO_AUDIO_VOLUME 75u
 #define LIBRETRO_AUDIO_ROUTE "sf2000_left_only"
 #define LIBRETRO_AUDIO_GATE_OPEN_LEVEL 256u
@@ -719,8 +718,7 @@ static void host_configure_options(
       host.options = *options;
 
    host.options.audio_enabled = host.options.audio_enabled == 0 ? 0 : 1;
-   if (host.options.audio_gain > LIBRETRO_AUDIO_MAX_GAIN)
-      host.options.audio_gain = LIBRETRO_AUDIO_DEFAULT_GAIN;
+   host.options.audio_gain = LIBRETRO_AUDIO_DEFAULT_GAIN;
    if (!valid_scpu_mhz(host.options.scpu_mhz))
       host.options.scpu_mhz = 0;
    host.ge_clock = sanitize_ge_clock(host.options.ge_clock);
@@ -5248,9 +5246,6 @@ out_content_prepare:
    host.audio_quiet_batches = 0;
    if (!host.audio_enabled) {
       printf("unifrog libretro audio disabled rate=%u/%u\n",
-         host.audio_input_rate, host.audio_output_rate);
-   } else if (host.audio_gain == 0) {
-      printf("unifrog libretro audio muted rate=%u/%u gain=0\n",
          host.audio_input_rate, host.audio_output_rate);
    } else if (unifrog_audio_open(&host.audio, host.audio_output_rate,
        LIBRETRO_AUDIO_CHANNELS, LIBRETRO_AUDIO_PERIOD_BYTES,

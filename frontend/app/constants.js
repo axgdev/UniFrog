@@ -42,13 +42,6 @@ var SYSTEM_CHECK_REPORT_PATH = "/media/mmcblk0/unifrog/system-check.txt";
 var BOOT_ASD_CFG_PATH = "/media/mmcblk0/firmware/boot_asd.cfg";
 
 var backlightLevels = [1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
-var launchGainOptions = [
-  { label: "0", value: 0 },
-  { label: "1", value: 1 },
-  { label: "2", value: 2 },
-  { label: "4", value: 4 },
-  { label: "8", value: 8 }
-];
 var launchCpuOptions = [
   { label: "198", value: 198 },
   { label: "297", value: 297 },
@@ -98,12 +91,11 @@ var videoModes = [
   { id: 6, label: "Audio buffered", detail: "Audio with player buffer" }
 ];
 var launchRows = [
-  "Audio", "Gain", "CPU", "GE", "Backlight", "Frameskip", "Display", "Core", "Start"
+  "Audio", "CPU", "GE", "Backlight", "Frameskip", "Display", "Core", "Start"
 ];
 var settingRows = [
   { id: "brightness", label: "Backlight" },
   { id: "audio", label: "Audio" },
-  { id: "gain", label: "Gain" },
   { id: "cpu", label: "CPU" },
   { id: "ge", label: "GE" },
   { id: "av", label: "AV output" },

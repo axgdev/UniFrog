@@ -419,7 +419,6 @@ function drawSlider(x, y, w, value, min, max, active) {
 function settingValue(id) {
   if (id === "brightness") return String(config.brightness);
   if (id === "audio") return config.audio ? "On" : "Off";
-  if (id === "gain") return String(config.gain);
   if (id === "cpu")
     return launchCpuOptions[optionIndex(launchCpuOptions, config.cpu, 8)].label;
   if (id === "ge") return launchGeOptions[optionIndex(launchGeOptions, config.ge, 0)].label;
@@ -537,13 +536,12 @@ function drawVideoMode(now) {
 
 function launchValue(row) {
   if (row === 0) return launchAudioIndex === 0 ? "On" : "Off";
-  if (row === 1) return launchGainOptions[launchGainIndex].label;
-  if (row === 2) return launchCpuOptions[launchCpuIndex].label;
-  if (row === 3) return launchGeOptions[launchGeIndex].label;
-  if (row === 4) return String(backlightLevel(launchBacklightIndex));
-  if (row === 5) return launchFrameskipOptions[launchFrameskipIndex].label;
-  if (row === 6) return launchDisplayOptions[launchDisplayIndex].label;
-  if (row === 7) return launchCoreOptions[launchCoreIndex].label;
+  if (row === 1) return launchCpuOptions[launchCpuIndex].label;
+  if (row === 2) return launchGeOptions[launchGeIndex].label;
+  if (row === 3) return String(backlightLevel(launchBacklightIndex));
+  if (row === 4) return launchFrameskipOptions[launchFrameskipIndex].label;
+  if (row === 5) return launchDisplayOptions[launchDisplayIndex].label;
+  if (row === 6) return launchCoreOptions[launchCoreIndex].label;
   return "Run game";
 }
 
@@ -561,7 +559,7 @@ function drawLaunch(now) {
     y = rowTop + 5 + i * rowStep;
     active = i === selected;
     JS2300.video.text(16, y, launchRows[i], active ? theme.text.selected : theme.text.primary);
-    if (i === 4) {
+    if (i === 3) {
       drawSlider(148, y - 1, 106, backlightLevel(launchBacklightIndex), 1, 100, active);
       JS2300.video.text(270, y, launchValue(i), active ? theme.text.selectedMuted : theme.text.muted);
     } else {

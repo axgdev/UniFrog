@@ -106,8 +106,8 @@ Key fields:
 - `options_audio`, `audio_gain`, `frameskip`, `scpu_target`, `scpu_now`, `ge_clock`,
   `backlight`: launch options active for this run. `frameskip=0` means off,
   `1` means auto, and `2`/`3` mean fixed interval 1/2. `scpu_target=0` means
-  keep the boot clock. `audio_gain` is the software PCM gain used after the
-  current AUDSINK volume ioctl.
+  keep the boot clock. `audio_gain` is fixed at 1x on SF2000-family builds and
+  remains in logs only to catch accidental regressions.
 - `pace_wait`, `pace_wait_avg_us`, `pace_late`, `pace_reset`: how often the
   frontend had spare time to sleep, how much it slept, and whether the core
   missed real-time deadlines.
@@ -120,8 +120,8 @@ Key fields:
   `vsync` field means a caller explicitly requested synchronized pan.
 - `audio_delay`, `audio_fail`, `audio_write_avg`, `audio_write_max`, `gain`,
   `peak`, `clip`, `gate`, `quiet`: audio backlog, write-wait pressure,
-  software gain, output level, clipping, and silence-gate state for crackle or
-  analog-noise diagnosis.
+  fixed software gain, output level, clipping, and silence-gate state for
+  crackle or analog-noise diagnosis.
 - `status`, `status_active`, `status_under`, `occ_avg`, `occ_min`, `occ_max`:
   libretro audio-buffer-status callback activity. These fields show whether a
   core with upstream frameskip support is receiving enough information to skip
@@ -141,10 +141,10 @@ are intentionally outside individual core source changes:
   device and advertises disabled audio through
   `RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE` so cooperative cores can avoid
   synthesis work.
-- Audio gain is a generic software gain applied by the libretro host after
-  stereo-to-mono mixing. The default is `2` after `loghcrtos149` showed gain
-  `4` clipping heavily. Gain `0` is a muted-output path that skips opening the
-  audio device while still allowing the core to run with audio enabled.
+- Audio gain used to be a generic software multiplier after stereo-to-mono
+  mixing. The SF2000 output is already loud enough and higher gain can clip, so
+  UniFrog now fixes the libretro path at 1x and uses hardware volume/mute plus
+  the mono left route for quality.
 - Libretro audio is opened at the core-reported sample rate when it is in the
   safe 8-48 kHz hardware range. This avoids the old fixed-32 kHz
   drop/duplicate resampling path for normal cores. Output is duplicated to both
