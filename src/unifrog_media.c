@@ -13,6 +13,7 @@
 #include <kernel/fb.h>
 #include <kernel/delay.h>
 #include <hcuapi/dis.h>
+#include <hcuapi/viddec.h>
 #include <ffplayer.h>
 
 #include <unifrog/abi.h>
@@ -25,10 +26,15 @@
 #define printf unifrog_log
 
 #define VIDEO_STREAM_CACHE_BYTES UNIFROG_APP_STREAM_BUFFER_DEFAULT_BYTES
-#define VIDEO_SOURCE_W 320
-#define VIDEO_SOURCE_H 240
-#define VIDEO_OUTPUT_W 320
-#define VIDEO_OUTPUT_H 240
+/*
+ * The SF2000 LCD is 320x240, but HCRTOS routes decoded video through the HD
+ * video plane. The confirmed full-screen mode is a 1920x1080 display rect;
+ * using 320x240 leaves decoded video in a small top-left rectangle.
+ */
+#define VIDEO_SOURCE_W 1920
+#define VIDEO_SOURCE_H 1080
+#define VIDEO_OUTPUT_W 1920
+#define VIDEO_OUTPUT_H 1080
 #define VIDEO_EXIT_HOLD_POLLS 12u
 #define VIDEO_MONITOR_POLLS 30u
 #define VIDEO_STALL_LIMIT 8u
@@ -298,6 +304,32 @@ static int set_video_layer_visible(int visible, int src_w, int src_h,
    return order_ret == 0 && zoom_ret == 0 ? 0 : -1;
 }
 
+static int set_player_display_rect(void *player, int src_w, int src_h,
+   int dst_w, int dst_h)
+{
+   struct vdec_dis_rect rect;
+   int ret;
+
+   if (!player)
+      return -1;
+
+   memset(&rect, 0, sizeof(rect));
+   rect.src_rect.x = 0;
+   rect.src_rect.y = 0;
+   rect.src_rect.w = (uint16_t)(src_w > 0 ? src_w : VIDEO_SOURCE_W);
+   rect.src_rect.h = (uint16_t)(src_h > 0 ? src_h : VIDEO_SOURCE_H);
+   rect.dst_rect.x = 0;
+   rect.dst_rect.y = 0;
+   rect.dst_rect.w = (uint16_t)(dst_w > 0 ? dst_w : VIDEO_OUTPUT_W);
+   rect.dst_rect.h = (uint16_t)(dst_h > 0 ? dst_h : VIDEO_OUTPUT_H);
+
+   ret = hcplayer_set_display_rect(player, &rect);
+   printf("unifrog media display_rect src=%ux%u dst=%ux%u ret=%d\n",
+      rect.src_rect.w, rect.src_rect.h, rect.dst_rect.w, rect.dst_rect.h,
+      ret);
+   return ret;
+}
+
 static void close_display(void)
 {
    if (fb_fd >= 0) {
@@ -501,9 +533,13 @@ int unifrog_media_play_video_ex(const char *path,
          (int)video_info.frame_rate);
       (void)set_video_layer_visible(1, video_info.width, video_info.height,
          VIDEO_OUTPUT_W, VIDEO_OUTPUT_H);
+      (void)set_player_display_rect(player, VIDEO_SOURCE_W, VIDEO_SOURCE_H,
+         VIDEO_OUTPUT_W, VIDEO_OUTPUT_H);
    } else if (!audio_only) {
       printf("unifrog media stream info unavailable\n");
       (void)set_video_layer_visible(1, VIDEO_SOURCE_W, VIDEO_SOURCE_H,
+         VIDEO_OUTPUT_W, VIDEO_OUTPUT_H);
+      (void)set_player_display_rect(player, VIDEO_SOURCE_W, VIDEO_SOURCE_H,
          VIDEO_OUTPUT_W, VIDEO_OUTPUT_H);
    } else {
       printf("unifrog media stream video disabled audio_only=1\n");
@@ -511,6 +547,8 @@ int unifrog_media_play_video_ex(const char *path,
 
    if (!audio_only && fb_fd >= 0)
       (void)ioctl(fb_fd, FBIOBLANK, FB_BLANK_NORMAL);
+   if (audio_output_enabled)
+      unifrog_audio_set_system_output_enabled(1);
    unifrog_audio_debug_dump(NULL, "media_before_play");
    printf("unifrog media hcplayer_play begin\n");
    (void)unifrog_log_flush();
@@ -531,7 +569,8 @@ int unifrog_media_play_video_ex(const char *path,
          printf("unifrog media stream audio fallback enabled after unknown probe\n");
       }
    }
-   unifrog_audio_set_system_output_enabled(audio_output_enabled);
+   if (!audio_output_enabled)
+      unifrog_audio_set_system_output_enabled(0);
    unifrog_audio_debug_dump(NULL, "media_after_play");
    printf("unifrog media playing path=%s\n", path);
    (void)unifrog_log_flush();

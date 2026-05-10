@@ -51,7 +51,14 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 - UniFrog now exposes `/dev/fb0` through `unifrog/fb.h` so callers can map an
   RGB565 framebuffer, flush it explicitly, wait for vsync, and use y-pan
   buffering when the framebuffer allocation allows it.
-- The visible LCD is 320x240, but the display pipeline/video plane uses a larger internal representation. Hardware video required a specific display mode to show the full frame instead of a cropped/tiny region.
+- The visible LCD is 320x240, but the display pipeline/video plane uses a
+  larger internal representation. Hardware video required a specific display
+  mode to show the full frame instead of a cropped/tiny region.
+- Native HCRTOS video must use the HD video-plane geometry even on the 320x240
+  SF2000 LCD. The confirmed full-screen setup is `DIS_TYPE_HD` /
+  `DIS_LAYER_MAIN` with both `DIS_SET_ZOOM` and `hcplayer_set_display_rect()`
+  using a `1920x1080` destination rectangle. Programming a `320x240`
+  destination shows only a small top-left rectangle on the LCD.
 - Hardware video decode works through the HCRTOS `hcplayer`/viddec path:
   - `/dev/viddec` opens.
   - `/dev/vidsink` opens.
