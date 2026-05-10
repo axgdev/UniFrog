@@ -4,11 +4,14 @@
 #define FASTBOOT_CHUNK_ADDR 0x87fe7000u
 #define FASTBOOT_STAGE1_ADDR 0x87ff7000u
 #define FASTBOOT_STACK_ADDR 0x87fff000u
+#define FASTBOOT_EXCEPTION_BASE 0x87fff700u
 #define FASTBOOT_TRACE_BASE 0x87fff780u
 #define FASTBOOT_DIAG_BASE 0x87fffe00u
 #define FASTBOOT_HANDOFF_BASE 0x87ffff00u
 #define FASTBOOT_HANDOFF_MAGIC 0x55464248u
 #define FASTBOOT_DIAG_MAGIC 0x55464244u
+#define FASTBOOT_EXCEPTION_MAGIC 0x55464245u
+#define FASTBOOT_EXCEPTION_VERSION 1u
 #define FASTBOOT_TRACE_MAGIC 0x55464254u
 #define FASTBOOT_TRACE_VERSION 1u
 #define FASTBOOT_TRACE_ENTRIES 64u
@@ -86,6 +89,7 @@
 #define FASTBOOT_TRACE_ADDR ((volatile struct fastboot_trace *)FASTBOOT_TRACE_BASE)
 #define FASTBOOT_DIAG_ADDR ((volatile struct fastboot_diag *)FASTBOOT_DIAG_BASE)
 #define FASTBOOT_HANDOFF_ADDR ((volatile struct fastboot_handoff *)FASTBOOT_HANDOFF_BASE)
+#define FASTBOOT_EXCEPTION_ADDR ((volatile struct fastboot_exception_record *)FASTBOOT_EXCEPTION_BASE)
 
 struct fastboot_handoff {
    uint32_t magic;
@@ -115,6 +119,17 @@ struct fastboot_trace {
    uint32_t count;
    uint32_t dropped;
    struct fastboot_trace_entry entries[FASTBOOT_TRACE_ENTRIES];
+};
+
+struct fastboot_exception_record {
+   uint32_t magic;
+   uint32_t version;
+   uint32_t cause;
+   uint32_t epc;
+   uint32_t badvaddr;
+   uint32_t ra;
+   uint32_t count;
+   uint32_t checksum;
 };
 
 #endif

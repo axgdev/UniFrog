@@ -16,6 +16,7 @@
 #include <unifrog/boot_logo.h>
 #include <unifrog/boot_trace.h>
 #include <unifrog/diag.h>
+#include <unifrog/exception_record.h>
 #include <unifrog/log.h>
 #include <unifrog/perf.h>
 #include <unifrog/platform.h>
@@ -97,6 +98,7 @@ static void *frontend_thread(void *arg)
       unifrog_boot_trace_log("boot.after_log_reset");
       unifrog_log("unifrog log reset ret=%d path=%s\n",
          log_reset_ret, log_reset_path ? log_reset_path : "?");
+      unifrog_exception_record_log_and_clear("boot.after_log_reset");
       unifrog_log("unifrog boot_time stage=storage_ready total_ms=%lu board_ms=%lu storage_ms=%lu\n",
          (unsigned long)(storage_done_ms - thread_start_ms),
          (unsigned long)(board_ready_ms - thread_start_ms),

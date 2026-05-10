@@ -33,6 +33,7 @@
 #define VIDEO_MONITOR_POLLS 30u
 #define VIDEO_STALL_LIMIT 8u
 #define VIDEO_LOG_AUTO_FLUSH_BYTES (64u * 1024u)
+#define UNIFROG_AVSEEK_SIZE 0x10000
 
 struct playback_preset {
    const char *name;
@@ -211,6 +212,10 @@ static int64_t stream_seek(void *opaque, int64_t offset, int whence)
    if (!stream || !stream->active)
       return -1;
 
+   if (whence == UNIFROG_AVSEEK_SIZE)
+      return (int64_t)stream->size;
+
+   whence &= 0xffff;
    if (whence == SEEK_SET)
       base = 0;
    else if (whence == SEEK_CUR)
@@ -393,7 +398,13 @@ int unifrog_media_play_video_ex(const char *path,
    media_init_drivers_once();
 
    memset(&init_args, 0, sizeof(init_args));
-   init_args.uri = (char *)path;
+   if (open_stream(path) == 0) {
+      init_args.readdata_callback = stream_read;
+      init_args.readdata_opaque = &video_stream;
+      init_args.seekdata_callback = stream_seek;
+   } else {
+      init_args.uri = (char *)path;
+   }
    init_args.sync_type = preset->sync_type;
    init_args.quick_mode = preset->quick_mode;
    init_args.qm_drop_thresh = preset->qm_drop_thresh;
@@ -422,8 +433,9 @@ int unifrog_media_play_video_ex(const char *path,
       init_args.img_alpha_mode = ALPHA_BLEND_UNIFORM;
    }
 
-   printf("unifrog media opts source=uri preset=%s sync=%d quick=%d drop=%d "
+   printf("unifrog media opts source=%s preset=%s sync=%d quick=%d drop=%d "
           "audio_flush=%d buffering=%d cache=%u audio_only=%d image=%d no_audio=%d\n",
+      init_args.uri ? "uri" : "callback",
       preset->name, init_args.sync_type, init_args.quick_mode ? 1 : 0,
       init_args.qm_drop_thresh, init_args.audio_flush_thres,
       init_args.buffering_enable ? 1 : 0,
@@ -489,12 +501,10 @@ int unifrog_media_play_video_ex(const char *path,
       if (audio_probe > 0) {
          audio_output_enabled = 1;
          (void)hcplayer_set_audio_output_dev(player, AUDDEV_I2SO);
-      } else if (audio_probe < 0 && audio_only) {
+      } else if (audio_probe < 0) {
          audio_output_enabled = 1;
          (void)hcplayer_set_audio_output_dev(player, AUDDEV_I2SO);
-         printf("unifrog media stream audio fallback enabled for audio file after unknown probe\n");
-      } else if (audio_probe < 0) {
-         printf("unifrog media stream audio remains disabled after unknown probe\n");
+         printf("unifrog media stream audio fallback enabled after unknown probe\n");
       }
    }
    unifrog_audio_set_system_output_enabled(audio_output_enabled);
@@ -519,6 +529,11 @@ int unifrog_media_play_video_ex(const char *path,
          monitor_polls = 0;
          printf("unifrog media monitor pos=%lld dur=%lld stall=%u\n",
             pos, dur, stall_count);
+         if (pos < 0 || dur < 0) {
+            printf("unifrog media monitor query unsupported pos=%lld dur=%lld\n",
+               pos, dur);
+            continue;
+         }
          if (dur > 0 && pos >= dur - 250)
             break;
          if (pos == last_pos)
