@@ -82,8 +82,10 @@ the current commit hash with a `revision` label.
 The default `HCRTOS_MEDIA=firmware` links the SDK FFmpeg/HCRTOS media player
 into the boot image. `HCRTOS_MEDIA=module` still packages
 `/unifrog/modules/hcrtos-media.bin` for loader diagnostics, but current SF2000
-HCRTOS media startup can stall inside `hcplayer_create()` when run from that
-runtime-loaded native module.
+HCRTOS media startup can stall before driver init or inside `hcplayer_create()`
+when run from that runtime-loaded native module. Frontend video playback
+therefore fails safely in module builds and returns to the menu instead of
+entering the known black-screen path.
 
 The SD-card package also installs `LICENSE.txt` and `THIRD_PARTY.md` under
 `/unifrog`. Keep `THIRD_PARTY.md` current whenever adding, removing, or

@@ -675,6 +675,17 @@ static int play_video_media_module(struct js2300_frontend *frontend,
    int read_window;
    int ret = -1;
 
+   (void)options;
+   host_video_clear(frontend, 0x0000);
+   host_video_text(frontend, 16, 42, "Video module disabled", 0xffff);
+   host_video_text(frontend, 16, 66, "Use HCRTOS_MEDIA=firmware", 0xbdf7);
+   host_video_text(frontend, 16, 90, "Returning to menu", 0x7bef);
+   host_video_present(frontend);
+   printf("js2300 media module playback blocked path=%s reason=runtime_module_hangs_before_driver_init\n",
+      frontend->path);
+   (void)unifrog_log_flush();
+   return -1;
+
    memset(&loaded, 0, sizeof(loaded));
    load_start_ms = unifrog_perf_time_ms();
    read_window = frontend_start_runtime_read_window(frontend,
