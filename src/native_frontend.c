@@ -16,6 +16,7 @@
 #include <frontend/js2300_frontend.h>
 
 #include <unifrog/backlight.h>
+#include <unifrog/audio.h>
 #include <unifrog/battery.h>
 #include <unifrog/boot.h>
 #include <unifrog/boot_logo.h>
@@ -82,6 +83,7 @@ enum frontend_view {
    FRONTEND_VIEW_STORAGE_MODE,
    FRONTEND_VIEW_STORAGE_CONFIRM,
    FRONTEND_VIEW_ROM_SYSTEMS,
+   FRONTEND_VIEW_OPEN_WITH,
    FRONTEND_VIEW_THEME,
    FRONTEND_VIEW_LANGUAGE,
    FRONTEND_VIEW_FIRMWARE,
@@ -164,6 +166,8 @@ struct native_frontend {
    char current_dir[FRONTEND_MAX_PATH];
    char last_path[FRONTEND_MAX_PATH];
    char last_core[24];
+   struct frontend_item pending_open_item;
+   int pending_open_valid;
    char rom_root[FRONTEND_MAX_PATH];
    char rom_root_label[FRONTEND_ROM_ROOT_LABEL_MAX];
    char status[96];
@@ -205,6 +209,8 @@ struct native_frontend {
 };
 
 static void show_launch(struct native_frontend *fe);
+static void show_open_with(struct native_frontend *fe,
+   const struct frontend_item *item);
 static void draw(struct native_frontend *fe);
 static void set_status(struct native_frontend *fe, const char *fmt, ...);
 static void ensure_data_dirs(void);
@@ -784,6 +790,22 @@ static const struct frontend_catalog *catalog_for_path(const char *path)
 static int is_media_file(const char *path)
 {
    return ends_with_any(path, media_suffixes, ARRAY_SIZE(media_suffixes));
+}
+
+static int media_path_has_native_wav(const char *path)
+{
+   return path && unifrog_text_ends_with_ci(path, ".wav");
+}
+
+static int media_path_has_open_with_choices(const char *path)
+{
+   if (!path || !is_media_file(path))
+      return 0;
+#if UNIFROG_HCRTOS_MEDIA_FIRMWARE
+   return 1;
+#else
+   return media_path_has_native_wav(path);
+#endif
 }
 
 static int is_asd_file(const char *path)
@@ -1887,6 +1909,36 @@ static const char *safe_core_for_path(const char *path, const char *core)
    return cat ? cat->core : "";
 }
 
+static unsigned add_core_candidate(char ids[][UNIFROG_CORE_MODULE_ID_MAX],
+   unsigned count, const char *core)
+{
+   if (!core || !core[0])
+      return count;
+   for (unsigned i = 0; i < count; i++) {
+      if (strcmp(ids[i], core) == 0)
+         return count;
+   }
+   if (count >= 16u)
+      return count;
+   unifrog_text_copy(ids[count], UNIFROG_CORE_MODULE_ID_MAX, core);
+   return count + 1u;
+}
+
+static unsigned collect_core_candidates(const char *path,
+   char ids[][UNIFROG_CORE_MODULE_ID_MAX])
+{
+   const struct frontend_catalog *cat = catalog_for_path(path);
+   unsigned count = 0;
+
+   if (cat)
+      count = add_core_candidate(ids, count, cat->core);
+   if (!count && is_zip_file(path)) {
+      for (unsigned i = 0; i < ARRAY_SIZE(frontend_catalog); i++)
+         count = add_core_candidate(ids, count, frontend_catalog[i].core);
+   }
+   return count;
+}
+
 static int is_content_file(const char *path)
 {
    return catalog_for_path(path) != NULL || is_media_file(path);
@@ -1917,6 +1969,24 @@ static const char *display_label(int display_mode)
       return "stretch";
    case UNIFROG_LIBRETRO_DISPLAY_ORIGINAL:
       return "original";
+   default:
+      return "unknown";
+   }
+}
+
+static const char *input_profile_label(int profile)
+{
+   switch (profile) {
+   case UNIFROG_LIBRETRO_INPUT_DEFAULT:
+      return "default";
+   case UNIFROG_LIBRETRO_INPUT_RETROARCH:
+      return "retroarch";
+   case UNIFROG_LIBRETRO_INPUT_GENESIS:
+      return "genesis";
+   case UNIFROG_LIBRETRO_INPUT_SWAP_AB:
+      return "swap A/B";
+   case UNIFROG_LIBRETRO_INPUT_SWAP_XY:
+      return "swap X/Y";
    default:
       return "unknown";
    }
@@ -3531,6 +3601,7 @@ static void save_settings(struct native_frontend *fe)
    fprintf(file, "gain=%u\n", fe->run_options.audio_gain);
    fprintf(file, "ge_clock=%d\n", fe->run_options.ge_clock);
    fprintf(file, "backlight=%d\n", fe->run_options.backlight_level);
+   fprintf(file, "keymap=%d\n", fe->run_options.input_profile);
    fprintf(file, "sort_desc=%d\n", fe->sort_desc);
    fprintf(file, "show_hidden=%d\n", fe->show_hidden);
    fprintf(file, "folder_counts=%d\n", fe->folder_counts);
@@ -3595,6 +3666,9 @@ static void load_settings(struct native_frontend *fe)
       else if ((value = read_key_value(line, "backlight")) != NULL)
          fe->run_options.backlight_level = parse_int(value,
             fe->run_options.backlight_level);
+      else if ((value = read_key_value(line, "keymap")) != NULL)
+         fe->run_options.input_profile = parse_int(value,
+            fe->run_options.input_profile);
       else if ((value = read_key_value(line, "sort_desc")) != NULL)
          fe->sort_desc = parse_int(value, fe->sort_desc) ? 1 : 0;
       else if ((value = read_key_value(line, "show_hidden")) != NULL)
@@ -4227,6 +4301,46 @@ static void show_file_list(struct native_frontend *fe, const char *title,
    set_status(fe, "%u entries", fe->item_count ? fe->item_count - 1u : 0u);
 }
 
+static void show_open_with(struct native_frontend *fe,
+   const struct frontend_item *item)
+{
+   char title[96];
+
+   if (!fe || !item)
+      return;
+   fe->pending_open_item = *item;
+   fe->pending_open_valid = 1;
+   snprintf(title, sizeof(title), "Open:%.88s", item->name);
+   reset_items(fe, title);
+   fe->view = FRONTEND_VIEW_OPEN_WITH;
+   if (item->kind == FRONTEND_ITEM_GAME) {
+      char ids[16][UNIFROG_CORE_MODULE_ID_MAX];
+      unsigned count = collect_core_candidates(item->path, ids);
+
+      for (unsigned i = 0; i < count; i++)
+         add_item(fe, ids[i], i == 0 ? "default core" : "compatible core",
+            FRONTEND_ITEM_ACTION, "open_with_core", ids[i]);
+      if (!count)
+         add_item(fe, "Auto core", "launcher default",
+            FRONTEND_ITEM_ACTION, "open_with_core", NULL);
+   } else if (item->kind == FRONTEND_ITEM_MEDIA) {
+      if (media_path_has_native_wav(item->path))
+         add_item(fe, "Homemade WAV", "native low latency",
+            FRONTEND_ITEM_ACTION, "open_with_media_native", NULL);
+#if UNIFROG_HCRTOS_MEDIA_FIRMWARE
+      add_item(fe, "HCPlayer Auto", "quiet unless audio is verified",
+         FRONTEND_ITEM_ACTION, "open_with_media_hcplayer", NULL);
+      add_item(fe, "HCPlayer Audio", "force speaker output",
+         FRONTEND_ITEM_ACTION, "open_with_media_hcplayer_audio", NULL);
+      add_item(fe, "HCPlayer Muted", "video or preview only",
+         FRONTEND_ITEM_ACTION, "open_with_media_hcplayer_muted", NULL);
+#endif
+   }
+   add_item(fe, "Back", "launcher", FRONTEND_ITEM_ACTION, "back", NULL);
+   set_status(fe, "choose handler");
+   log_item_sample(fe, "open_with");
+}
+
 static void show_config(struct native_frontend *fe)
 {
    reset_items(fe, "Config");
@@ -4266,10 +4380,14 @@ static void show_launch_settings(struct native_frontend *fe)
       FRONTEND_ITEM_ACTION, "frameskip", NULL);
    add_item(fe, "Display", display_label(fe->run_options.display_mode),
       FRONTEND_ITEM_ACTION, "display", NULL);
+   add_item(fe, "Keymap", input_profile_label(fe->run_options.input_profile),
+      FRONTEND_ITEM_ACTION, "keymap", NULL);
    if (unifrog_backlight_get(&backlight) != 0)
       backlight = 0;
    snprintf(detail, sizeof(detail), "%u", backlight);
    add_item(fe, "Backlight", detail, FRONTEND_ITEM_ACTION, "backlight", NULL);
+   add_item(fe, "ROM Systems", "defaults", FRONTEND_ITEM_ACTION,
+      "rom_systems", NULL);
    add_item(fe, "Back", "config", FRONTEND_ITEM_ACTION, "back_config", NULL);
 }
 
@@ -4915,6 +5033,18 @@ static void browser_back(struct native_frontend *fe)
 
    if (fe->view == FRONTEND_VIEW_LAUNCH)
       return;
+   if (fe->view == FRONTEND_VIEW_OPEN_WITH) {
+      fe->pending_open_valid = 0;
+      if (fe->has_parent_view && fe->parent_view == FRONTEND_VIEW_EXPLORE) {
+         clear_parent_view(fe);
+         show_explore(fe, fe->current_dir[0] ? fe->current_dir :
+            frontend_rom_root(fe));
+         return;
+      }
+      clear_parent_view(fe);
+      show_launch(fe);
+      return;
+   }
    if (fe->view == FRONTEND_VIEW_SYSINFO || fe->view == FRONTEND_VIEW_CORES ||
        fe->view == FRONTEND_VIEW_PACKAGE_CHECK) {
       if (fe->has_parent_view && fe->parent_view == FRONTEND_VIEW_APPS) {
@@ -5160,6 +5290,11 @@ static void jump_selection_group(struct native_frontend *fe, int dir)
    set_status(fe, "jump %u", fe->selected + 1u);
 }
 
+static void frontend_sound_shutdown(void)
+{
+   unifrog_audio_set_system_output_enabled(0);
+}
+
 static void launch_game(struct native_frontend *fe, struct frontend_item *item)
 {
    const char *core;
@@ -5168,6 +5303,12 @@ static void launch_game(struct native_frontend *fe, struct frontend_item *item)
 
    if (!item || !item->path[0])
       return;
+   if (fe->view != FRONTEND_VIEW_OPEN_WITH &&
+       (!item->core[0] || is_zip_file(item->path))) {
+      set_parent_view(fe);
+      show_open_with(fe, item);
+      return;
+   }
    if (stat(item->path, &st) != 0) {
       set_status(fe, "missing: %s", item->name);
       unifrog_log("frontend launch missing path=%s errno=%d\n", item->path,
@@ -5198,6 +5339,7 @@ static void launch_game(struct native_frontend *fe, struct frontend_item *item)
       unifrog_ui_message(&fe->ui, fe->theme, "Launching", item->name,
          core[0] ? core : "auto core");
    unifrog_diag_memory_snapshot("native_frontend.launch");
+   frontend_sound_shutdown();
    (void)unifrog_log_flush();
    ret = unifrog_libretro_run_path_ex(item->path, &fe->run_options);
    record_history(fe, item->path, core);
@@ -5208,15 +5350,39 @@ static void launch_game(struct native_frontend *fe, struct frontend_item *item)
 
 static void launch_media(struct native_frontend *fe, struct frontend_item *item)
 {
+   struct unifrog_media_video_options options;
    int ret = -1;
 
    if (!item || !item->path[0])
       return;
+   if (fe->view != FRONTEND_VIEW_OPEN_WITH &&
+       media_path_has_open_with_choices(item->path)) {
+      set_parent_view(fe);
+      show_open_with(fe, item);
+      return;
+   }
    unifrog_log("frontend launch media path=%s\n", item->path);
    if (fe->launch_splash)
       unifrog_ui_message(&fe->ui, fe->theme, "Media", item->name, "playing");
+   memset(&options, 0, sizeof(options));
+   options.preset = -1;
+   if (strcmp(item->core, "native") == 0) {
+      options.force_native = 1;
+   } else if (strcmp(item->core, "hcplayer") == 0) {
+      options.force_hcplayer = 1;
+   } else if (strcmp(item->core, "hcplayer-audio") == 0) {
+      options.force_hcplayer = 1;
+      options.force_audio = 1;
+   } else if (strcmp(item->core, "hcplayer-muted") == 0) {
+      options.force_hcplayer = 1;
+      options.disable_audio = 1;
+   }
+   frontend_sound_shutdown();
+   (void)unifrog_log_flush();
 #if UNIFROG_HCRTOS_MEDIA_FIRMWARE
-   ret = unifrog_media_play_video(item->path);
+   ret = unifrog_media_play_video_ex(item->path, &options);
+#else
+   ret = unifrog_media_play_video_ex(item->path, &options);
 #endif
    set_status(fe, "media returned %d", ret);
    (void)unifrog_ui_open(&fe->ui, 0);
@@ -5241,8 +5407,8 @@ static void launch_script(struct native_frontend *fe, struct frontend_item *item
    unifrog_log("frontend script launch path=%s size=%ld\n",
       item->path, (long)st.st_size);
    if (fe->launch_splash)
-      unifrog_ui_message(&fe->ui, fe->theme, "JavaScript", item->name,
-         "running");
+      unifrog_ui_message(&fe->ui, fe->theme, "Script", item->name, "running");
+   frontend_sound_shutdown();
    (void)unifrog_log_flush();
    unifrog_ui_close(&fe->ui);
    ret = js2300_run_script_file(item->path);
@@ -5277,6 +5443,9 @@ static void change_config(struct native_frontend *fe, int dir)
       return;
    selected = fe->selected;
    item = &fe->items[fe->selected];
+   if (strcmp(item->path, "rom_systems") == 0 ||
+       strcmp(item->path, "back_config") == 0)
+      return;
    if (strcmp(item->path, "audio") == 0)
       fe->run_options.audio_enabled = !fe->run_options.audio_enabled;
    else if (strcmp(item->path, "gain") == 0) {
@@ -5327,6 +5496,25 @@ static void change_config(struct native_frontend *fe, int dir)
       fe->run_options.display_mode++;
       if (fe->run_options.display_mode > UNIFROG_LIBRETRO_DISPLAY_ORIGINAL)
          fe->run_options.display_mode = UNIFROG_LIBRETRO_DISPLAY_FIT;
+   } else if (strcmp(item->path, "keymap") == 0) {
+      static const int profiles[] = {
+         UNIFROG_LIBRETRO_INPUT_DEFAULT,
+         UNIFROG_LIBRETRO_INPUT_RETROARCH,
+         UNIFROG_LIBRETRO_INPUT_GENESIS,
+         UNIFROG_LIBRETRO_INPUT_SWAP_AB,
+         UNIFROG_LIBRETRO_INPUT_SWAP_XY,
+      };
+      unsigned index = 0;
+
+      for (unsigned i = 0; i < ARRAY_SIZE(profiles); i++) {
+         if (profiles[i] == fe->run_options.input_profile)
+            index = i;
+      }
+      if (dir < 0)
+         index = index == 0 ? ARRAY_SIZE(profiles) - 1u : index - 1u;
+      else
+         index = (index + 1u) % ARRAY_SIZE(profiles);
+      fe->run_options.input_profile = profiles[index];
    } else if (strcmp(item->path, "backlight") == 0) {
       if (unifrog_backlight_get(&backlight) != 0)
          backlight = 40;
@@ -5356,8 +5544,57 @@ static void activate(struct native_frontend *fe)
    unifrog_log("frontend activate view=%d selected=%u name=%s path=%s kind=%d\n",
       fe->view, selected, item.name, item.path, item.kind);
    if (fe->view == FRONTEND_VIEW_LAUNCH_SETTINGS) {
+      if (strcmp(item.path, "rom_systems") == 0) {
+         clear_parent_view(fe);
+         show_rom_systems(fe);
+         return;
+      }
+      if (strcmp(item.path, "back_config") == 0) {
+         show_config(fe);
+         return;
+      }
       change_config(fe, 1);
       return;
+   }
+   if (fe->view == FRONTEND_VIEW_OPEN_WITH) {
+      struct frontend_item pending = fe->pending_open_item;
+
+      if (strcmp(item.path, "open_with_core") == 0 &&
+          fe->pending_open_valid) {
+         unifrog_text_copy(pending.core, sizeof(pending.core), item.core);
+         launch_game(fe, &pending);
+         return;
+      }
+      if (strcmp(item.path, "open_with_media_native") == 0 &&
+          fe->pending_open_valid) {
+         unifrog_text_copy(pending.core, sizeof(pending.core), "native");
+         launch_media(fe, &pending);
+         return;
+      }
+      if (strcmp(item.path, "open_with_media_hcplayer") == 0 &&
+          fe->pending_open_valid) {
+         unifrog_text_copy(pending.core, sizeof(pending.core), "hcplayer");
+         launch_media(fe, &pending);
+         return;
+      }
+      if (strcmp(item.path, "open_with_media_hcplayer_audio") == 0 &&
+          fe->pending_open_valid) {
+         unifrog_text_copy(pending.core, sizeof(pending.core),
+            "hcplayer-audio");
+         launch_media(fe, &pending);
+         return;
+      }
+      if (strcmp(item.path, "open_with_media_hcplayer_muted") == 0 &&
+          fe->pending_open_valid) {
+         unifrog_text_copy(pending.core, sizeof(pending.core),
+            "hcplayer-muted");
+         launch_media(fe, &pending);
+         return;
+      }
+      if (strcmp(item.path, "back") == 0) {
+         browser_back(fe);
+         return;
+      }
    }
    if (item.kind == FRONTEND_ITEM_GAME) {
       launch_game(fe, &item);

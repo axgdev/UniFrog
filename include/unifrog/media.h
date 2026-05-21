@@ -10,6 +10,7 @@ struct unifrog_media_video_options {
    int disable_audio;
    int force_audio;
    int force_native;
+   int force_hcplayer;
 };
 
 int unifrog_media_play_video_ex(const char *path,
