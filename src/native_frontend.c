@@ -192,6 +192,7 @@ struct native_frontend {
    int log_flush_every;
    int language_index;
    char theme_name[48];
+   char loaded_theme_name[48];
    char resource_cache_key[64];
    char language_name[48];
    char scheme_name[FRONTEND_SCHEME_MAX][32];
@@ -204,6 +205,8 @@ struct native_frontend {
    int running;
    int needs_draw;
    int last_draw_valid;
+   int theme_loaded;
+   int loaded_theme_alternate;
    uint32_t last_draw_signature;
    unsigned nav_log_last_selected;
    enum frontend_view nav_log_last_view;
@@ -221,6 +224,18 @@ static int frontend_path_has_dir_prefix(const char *path, const char *root);
 static const char *const storage_config_profiles[] = {
    "boot", "wide1", "wide2", "wide4", "wide8", "wide10", "wide12",
    "wide14", "wide16", "wide18", "wide20", "wide22", "wide24", "wide25",
+};
+
+typedef void (*frontend_progress_cb)(void *userdata, const char *stage,
+   unsigned done, unsigned total);
+
+struct frontend_install_progress {
+   struct native_frontend *fe;
+   uint32_t start_ms;
+   uint32_t last_draw_ms;
+   unsigned last_percent;
+   char title[32];
+   char name[64];
 };
 
 static const struct unifrog_ui_theme frontend_theme = {
@@ -1354,7 +1369,8 @@ out:
 }
 
 static int install_theme_archive(const char *archive_path, char *installed_name,
-   size_t installed_name_size)
+   size_t installed_name_size, frontend_progress_cb progress,
+   void *progress_userdata)
 {
    FILE *zip_file = NULL;
    uint8_t *tail = NULL;
@@ -1396,6 +1412,8 @@ static int install_theme_archive(const char *archive_path, char *installed_name,
    }
    unifrog_log("frontend theme archive install begin path=%s name=%s dest=%s\n",
       archive_path, theme_name, dest_root);
+   if (progress)
+      progress(progress_userdata, "preparing", 0, 100);
    stage = "mkdir_dest";
    ensure_data_dirs();
    if (mkdir_p(dest_root) != 0) {
@@ -1407,11 +1425,15 @@ static int install_theme_archive(const char *archive_path, char *installed_name,
       stage = "cached";
       if (installed_name && installed_name_size)
          unifrog_text_copy(installed_name, installed_name_size, theme_name);
+      if (progress)
+         progress(progress_userdata, "cached", 100, 100);
       ret = 0;
       goto out;
    }
 
    stage = "open";
+   if (progress)
+      progress(progress_userdata, "opening", 2, 100);
    t0 = unifrog_perf_time_ms();
    zip_file = fopen(archive_path, "rb");
    if (!zip_file || file_size_fp(zip_file, &zip_size) != 0 || zip_size < 22u)
@@ -1437,6 +1459,8 @@ static int install_theme_archive(const char *archive_path, char *installed_name,
       goto out;
 
    stage = "central_directory";
+   if (progress)
+      progress(progress_userdata, "scanning", 10, 100);
    t0 = unifrog_perf_time_ms();
    archive_entries = calloc(entries ? entries : 1u, sizeof(*archive_entries));
    if (!archive_entries)
@@ -1476,6 +1500,10 @@ static int install_theme_archive(const char *archive_path, char *installed_name,
           (entry.method != 0 && entry.method != 8))
          continue;
       archive_entries[i] = entry;
+      if (progress && ((i & 15u) == 0 || i + 1u == entries))
+         progress(progress_userdata, "scanning",
+            10u + (entries ? ((unsigned)(i + 1u) * 30u / entries) : 30u),
+            100);
    }
    if (remove_tree(dest_root) != 0 && errno != ENOENT)
       unifrog_log("frontend theme archive cleanup warning dest=%s errno=%d\n",
@@ -1492,6 +1520,10 @@ static int install_theme_archive(const char *archive_path, char *installed_name,
 
       if (!entry->name[0])
          continue;
+      if (progress && ((i & 7u) == 0 || i + 1u == entries))
+         progress(progress_userdata, "extracting",
+            40u + (entries ? ((unsigned)(i + 1u) * 58u / entries) : 58u),
+            100);
       if (!theme_archive_entry_needed(archive_entries, entries, entry->name)) {
          skipped++;
          continue;
@@ -1559,6 +1591,8 @@ static int install_theme_archive(const char *archive_path, char *installed_name,
    ret = 0;
 
 out:
+   if (progress)
+      progress(progress_userdata, ret == 0 ? "done" : stage, 100, 100);
    free(archive_entries);
    free(tail);
    if (zip_file)
@@ -2522,6 +2556,47 @@ static void frontend_loading_show(struct native_frontend *fe, const char *title,
    unifrog_ui_present(&fe->ui);
 }
 
+static void frontend_install_progress_update(void *userdata, const char *stage,
+   unsigned done, unsigned total)
+{
+   struct frontend_install_progress *progress = userdata;
+   struct native_frontend *fe;
+   uint32_t now;
+   unsigned percent;
+   char detail[80];
+
+   if (!progress || !progress->fe)
+      return;
+   fe = progress->fe;
+   if (total == 0)
+      total = 1;
+   if (done > total)
+      done = total;
+   percent = done * 100u / total;
+   now = unifrog_perf_time_ms();
+   if (!progress->start_ms)
+      progress->start_ms = now;
+   if (percent < 100u && progress->last_draw_ms &&
+       now - progress->last_draw_ms < 120u &&
+       percent < progress->last_percent + 2u)
+      return;
+
+   if (percent > 0u && percent < 100u) {
+      uint32_t elapsed_ms = now - progress->start_ms;
+      uint32_t eta_ms = elapsed_ms * (100u - percent) / percent;
+
+      snprintf(detail, sizeof(detail), "%s %u%% eta %us",
+         stage && stage[0] ? stage : "working", percent,
+         (unsigned)((eta_ms + 999u) / 1000u));
+   } else {
+      snprintf(detail, sizeof(detail), "%s %u%%",
+         stage && stage[0] ? stage : "working", percent);
+   }
+   frontend_loading_show(fe, progress->title, progress->name, detail, percent);
+   progress->last_draw_ms = now;
+   progress->last_percent = percent;
+}
+
 static const char *item_glyph_key(const struct frontend_item *item)
 {
    if (!item)
@@ -3191,12 +3266,18 @@ static void load_theme(struct native_frontend *fe)
 
    if (!fe)
       return;
-   frontend_loading_show(fe, "Loading Theme",
-      fe->theme_name[0] ? fe->theme_name : "muos", "scheme", 5);
-   unifrog_frontend_lvgl_style_default(&style, &theme);
-   fe->scheme_count = 0;
    if (!fe->theme_name[0])
       unifrog_text_copy(fe->theme_name, sizeof(fe->theme_name), "muos");
+   if (fe->theme_loaded &&
+       strcmp(fe->loaded_theme_name, fe->theme_name) == 0 &&
+       fe->loaded_theme_alternate == (fe->theme_alternate ? 1 : 0)) {
+      unifrog_log("frontend theme load skipped name=%s alternate=%d\n",
+         fe->theme_name, fe->theme_alternate ? 1 : 0);
+      return;
+   }
+   frontend_loading_show(fe, "Loading Theme", fe->theme_name, "scheme", 5);
+   unifrog_frontend_lvgl_style_default(&style, &theme);
+   fe->scheme_count = 0;
    t0 = unifrog_perf_time_ms();
    if (strcmp(fe->theme_name, "muos") != 0 &&
        load_muos_theme_dir(fe->theme_name, NULL, &theme, &style) == 0) {
@@ -3341,6 +3422,11 @@ static void load_theme(struct native_frontend *fe)
       fe->active_style.list_focus_text_alpha, fe->list_style.list_text,
       fe->list_style.list_focus_text, fe->list_style.list_text_alpha,
       fe->list_style.list_focus_text_alpha);
+   unifrog_text_copy(fe->loaded_theme_name, sizeof(fe->loaded_theme_name),
+      fe->theme_name);
+   fe->loaded_theme_alternate = fe->theme_alternate ? 1 : 0;
+   fe->theme_loaded = 1;
+   frontend_invalidate_draw(fe);
 }
 
 static void ensure_data_dirs(void)
@@ -5709,17 +5795,24 @@ static void activate(struct native_frontend *fe)
    }
    if (item.kind == FRONTEND_ITEM_THEME_ARCHIVE) {
       char installed[96];
+      struct frontend_install_progress progress;
       int ret;
 
-      frontend_loading_show(fe, "Theme", item.name, "installing archive", 5);
+      memset(&progress, 0, sizeof(progress));
+      progress.fe = fe;
+      unifrog_text_copy(progress.title, sizeof(progress.title), "Theme");
+      unifrog_text_copy(progress.name, sizeof(progress.name), item.name);
+      frontend_install_progress_update(&progress, "installing", 0, 100);
       unifrog_log("frontend theme archive activate path=%s name=%s\n",
          item.path, item.name);
-      ret = install_theme_archive(item.path, installed, sizeof(installed));
+      ret = install_theme_archive(item.path, installed, sizeof(installed),
+         frontend_install_progress_update, &progress);
       unifrog_log("frontend theme archive activate done path=%s ret=%d installed=%s\n",
          item.path, ret, ret == 0 ? installed : "");
       if (ret == 0) {
          unifrog_text_copy(fe->theme_name, sizeof(fe->theme_name), installed);
          fe->resource_cache_key[0] = '\0';
+         fe->theme_loaded = 0;
          load_theme(fe);
          save_settings(fe);
          set_status(fe, "installed %s", installed);
