@@ -1969,7 +1969,8 @@ void unifrog_core_load_progress(const char *stage, unsigned current,
    } else {
       snprintf(detail, sizeof(detail), "CORE LOAD");
    }
-   loading_draw("LOADING GAME", detail, percent);
+   loading_draw(host.loading_title[0] ? host.loading_title : "LOADING GAME",
+      detail, percent);
 
    percent_bucket = total ? percent / LIBRETRO_LOAD_LOG_PERCENT_STEP : 0;
    if (stage_hash != host.loading_log_stage_hash ||

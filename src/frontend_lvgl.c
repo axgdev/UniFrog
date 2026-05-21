@@ -203,6 +203,20 @@ static const struct unifrog_frontend_lvgl_style *active_style(
    return &fallback;
 }
 
+static void clear_all_frame_buffers(struct unifrog_ui *ui, uint16_t color)
+{
+   if (!ui || ui->frame_open || !ui->fb.pixels)
+      return;
+   for (unsigned i = 0; i < ui->fb.buffer_count; i++) {
+      struct unifrog_surface surface =
+         unifrog_fb_surface_for_buffer(&ui->fb, i);
+
+      unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height,
+         color);
+      unifrog_fb_flush_buffer(&ui->fb, i);
+   }
+}
+
 static void draw_shell(struct unifrog_ui *ui,
    const struct unifrog_frontend_lvgl_style *style, const char *title,
    const char *detail, const char *status)
@@ -235,6 +249,7 @@ static void begin_frame(struct unifrog_ui *ui,
 {
    struct unifrog_surface surface;
 
+   clear_all_frame_buffers(ui, style->background);
    unifrog_ui_begin(ui, style->background);
    surface = unifrog_ui_surface(ui);
    if (style->wallpaper[0])

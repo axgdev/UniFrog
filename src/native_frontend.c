@@ -2450,6 +2450,17 @@ static void theme_try_launch_icon(struct unifrog_frontend_lvgl_style *style,
          sizeof(style->launch_icon[index]), path);
 }
 
+static void frontend_loading_show(struct native_frontend *fe, const char *title,
+   const char *name, const char *stage, unsigned percent)
+{
+   if (!fe)
+      return;
+   if (percent > 100u)
+      percent = 100u;
+   unifrog_ui_progress(&fe->ui, fe->theme, title ? title : "Loading",
+      name ? name : "", stage ? stage : "working", percent);
+}
+
 static const char *item_glyph_key(const struct frontend_item *item)
 {
    if (!item)
@@ -3119,6 +3130,8 @@ static void load_theme(struct native_frontend *fe)
 
    if (!fe)
       return;
+   frontend_loading_show(fe, "Loading Theme",
+      fe->theme_name[0] ? fe->theme_name : "muos", "scheme", 5);
    unifrog_frontend_lvgl_style_default(&style, &theme);
    fe->scheme_count = 0;
    if (!fe->theme_name[0])
@@ -3196,6 +3209,7 @@ static void load_theme(struct native_frontend *fe)
       }
    }
    dir_ms = unifrog_perf_time_ms() - t0;
+   frontend_loading_show(fe, "Loading Theme", fe->theme_name, "assets", 35);
    base_theme = theme;
    base_style = style;
    if (dir_theme_loaded) {
@@ -3235,6 +3249,7 @@ static void load_theme(struct native_frontend *fe)
       fe->view_style_valid[i] = dir_theme_loaded ? 0 : 1;
    }
    screens_ms = unifrog_perf_time_ms() - t0;
+   frontend_loading_show(fe, "Loading Theme", fe->theme_name, "cache", 65);
    t0 = unifrog_perf_time_ms();
    {
       char cache_key[64];
@@ -3252,6 +3267,7 @@ static void load_theme(struct native_frontend *fe)
    preload_ms = unifrog_perf_time_ms() - t0;
    fe->theme = &fe->active_theme;
    t0 = unifrog_perf_time_ms();
+   frontend_loading_show(fe, "Loading Theme", fe->theme_name, "apply", 90);
    apply_frontend_style(fe, -2, &fe->active_style);
    apply_ms = unifrog_perf_time_ms() - t0;
    unifrog_log("frontend theme load done name=%s dir=%d ms=%u dir_ms=%u list_ms=%u screens_ms=%u preload_ms=%u apply_ms=%u active_text=%04x/%04x active_alpha=%u/%u list_text=%04x/%04x list_alpha=%u/%u\n",
@@ -5336,8 +5352,8 @@ static void launch_game(struct native_frontend *fe, struct frontend_item *item)
       fe->run_options.core_id[0] = '\0';
    core = fe->run_options.core_id[0] ? fe->run_options.core_id : "";
    if (fe->launch_splash)
-      unifrog_ui_message(&fe->ui, fe->theme, "Launching", item->name,
-         core[0] ? core : "auto core");
+      frontend_loading_show(fe, "Launching", item->name,
+         core[0] ? core : "auto core", 8);
    unifrog_diag_memory_snapshot("native_frontend.launch");
    frontend_sound_shutdown();
    (void)unifrog_log_flush();
@@ -5363,7 +5379,7 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
    }
    unifrog_log("frontend launch media path=%s\n", item->path);
    if (fe->launch_splash)
-      unifrog_ui_message(&fe->ui, fe->theme, "Media", item->name, "playing");
+      frontend_loading_show(fe, "Media", item->name, "playing", 8);
    memset(&options, 0, sizeof(options));
    options.preset = -1;
    if (strcmp(item->core, "native") == 0) {
@@ -5407,7 +5423,7 @@ static void launch_script(struct native_frontend *fe, struct frontend_item *item
    unifrog_log("frontend script launch path=%s size=%ld\n",
       item->path, (long)st.st_size);
    if (fe->launch_splash)
-      unifrog_ui_message(&fe->ui, fe->theme, "Script", item->name, "running");
+      frontend_loading_show(fe, "Script", item->name, "running", 8);
    frontend_sound_shutdown();
    (void)unifrog_log_flush();
    unifrog_ui_close(&fe->ui);
@@ -5625,8 +5641,7 @@ static void activate(struct native_frontend *fe)
          set_status(fe, "unsupported .asd name");
          return;
       }
-      unifrog_ui_message(&fe->ui, fe->theme, "Firmware", item.name,
-         "rebooting");
+      frontend_loading_show(fe, "Firmware", item.name, "rebooting", 90);
       ret = unifrog_boot_asd_path(rel);
       set_status(fe, "firmware boot failed %d", ret);
       return;
@@ -5635,8 +5650,7 @@ static void activate(struct native_frontend *fe)
       char installed[96];
       int ret;
 
-      unifrog_ui_message(&fe->ui, fe->theme, "Theme", item.name,
-         "installing archive");
+      frontend_loading_show(fe, "Theme", item.name, "installing archive", 5);
       unifrog_log("frontend theme archive activate path=%s name=%s\n",
          item.path, item.name);
       ret = install_theme_archive(item.path, installed, sizeof(installed));
@@ -5658,8 +5672,7 @@ static void activate(struct native_frontend *fe)
       char slot[64];
       int ret;
 
-      unifrog_ui_message(&fe->ui, fe->theme, "Update", item.name,
-         "installing");
+      frontend_loading_show(fe, "Update", item.name, "installing", 5);
       ret = install_update_archive(item.path, slot, sizeof(slot));
       if (ret == 0)
          set_status(fe, "installed %s", slot);
@@ -5671,12 +5684,10 @@ static void activate(struct native_frontend *fe)
    if (item.kind == FRONTEND_ITEM_VERSION) {
       int ret;
 
-      unifrog_ui_message(&fe->ui, fe->theme, "Update", item.name,
-         "activating");
+      frontend_loading_show(fe, "Update", item.name, "activating", 50);
       ret = activate_installed_version(item.core[0] ? item.core : item.name);
       if (ret == 0) {
-         unifrog_ui_message(&fe->ui, fe->theme, "Update", item.name,
-            "rebooting");
+         frontend_loading_show(fe, "Update", item.name, "rebooting", 95);
          (void)unifrog_log_flush();
          unifrog_boot_reboot();
       }
@@ -5813,8 +5824,8 @@ static void activate(struct native_frontend *fe)
          fe->storage_profile);
       unifrog_text_copy(fe->storage_profile, sizeof(fe->storage_profile),
          fe->storage_pending_profile);
-      unifrog_ui_message(&fe->ui, fe->theme, "Storage",
-         fe->storage_profile, storage_profile_label(fe->storage_profile));
+      frontend_loading_show(fe, "Storage", fe->storage_profile,
+         storage_profile_label(fe->storage_profile), 20);
       ret = apply_storage_profile(fe, "menu");
       if (ret == 0) {
          save_settings(fe);
@@ -5832,8 +5843,8 @@ static void activate(struct native_frontend *fe)
       char summary[64];
       int ret;
 
-      unifrog_ui_message(&fe->ui, fe->theme, "Fast SD Probe",
-         "Testing profiles", "Report in /unifrog");
+      frontend_loading_show(fe, "Fast SD Probe", "Testing profiles",
+         "Report in /unifrog", 5);
       ret = unifrog_storage_fast_probe_run(fast_probe_progress_cb, fe,
          summary, sizeof(summary));
       set_status(fe, "fast SD probe %d  %s", ret, summary);
@@ -5977,19 +5988,17 @@ static void activate(struct native_frontend *fe)
    } else if (strcmp(item.path, "firmware") == 0) {
       show_firmware(fe);
    } else if (strcmp(item.path, "firmware_stock") == 0) {
-      unifrog_ui_message(&fe->ui, fe->theme, "Firmware", "stock",
-         "rebooting");
+      frontend_loading_show(fe, "Firmware", "stock", "rebooting", 90);
       (void)unifrog_log_flush();
       (void)unifrog_boot_firmware_asd("stock");
       set_status(fe, "firmware boot failed");
    } else if (strcmp(item.path, "firmware_unifrog") == 0) {
-      unifrog_ui_message(&fe->ui, fe->theme, "Firmware", "unifrog",
-         "rebooting");
+      frontend_loading_show(fe, "Firmware", "unifrog", "rebooting", 90);
       (void)unifrog_log_flush();
       (void)unifrog_boot_firmware_asd("unifrog");
       set_status(fe, "firmware boot failed");
    } else if (strcmp(item.path, "reboot") == 0) {
-      unifrog_ui_message(&fe->ui, fe->theme, "Reboot", "system", "rebooting");
+      frontend_loading_show(fe, "Reboot", "system", "rebooting", 90);
       (void)unifrog_log_flush();
       unifrog_boot_reboot();
    } else if (strcmp(item.path, "shutdown") == 0) {
