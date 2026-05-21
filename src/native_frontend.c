@@ -203,6 +203,8 @@ struct native_frontend {
    char storage_pending_profile[16];
    int running;
    int needs_draw;
+   int last_draw_valid;
+   uint32_t last_draw_signature;
    unsigned nav_log_last_selected;
    enum frontend_view nav_log_last_view;
    int applied_style_id;
@@ -230,6 +232,30 @@ static const struct unifrog_ui_theme frontend_theme = {
    UNIFROG_RGB565(238, 188, 70),
    UNIFROG_RGB565(214, 72, 77),
 };
+
+static uint32_t frontend_hash_u32(uint32_t hash, uint32_t value)
+{
+   hash ^= value;
+   hash *= 16777619u;
+   return hash;
+}
+
+static uint32_t frontend_hash_string(uint32_t hash, const char *text)
+{
+   const unsigned char *p = (const unsigned char *)(text ? text : "");
+
+   while (*p) {
+      hash ^= *p++;
+      hash *= 16777619u;
+   }
+   return hash;
+}
+
+static void frontend_invalidate_draw(struct native_frontend *fe)
+{
+   if (fe)
+      fe->last_draw_valid = 0;
+}
 
 static const struct frontend_catalog frontend_catalog[] = {
    { "gpsp", { ".gba" } },
@@ -2453,12 +2479,47 @@ static void theme_try_launch_icon(struct unifrog_frontend_lvgl_style *style,
 static void frontend_loading_show(struct native_frontend *fe, const char *title,
    const char *name, const char *stage, unsigned percent)
 {
+   struct unifrog_surface surface;
+   int bar_x;
+   int bar_y;
+   int bar_w;
+   int bar_h;
+   int fill_w;
+   char percent_text[16];
+
    if (!fe)
       return;
    if (percent > 100u)
       percent = 100u;
-   unifrog_ui_progress(&fe->ui, fe->theme, title ? title : "Loading",
-      name ? name : "", stage ? stage : "working", percent);
+   frontend_invalidate_draw(fe);
+   if (!fe->ui.fb.pixels)
+      return;
+
+   unifrog_ui_begin(&fe->ui, UNIFROG_RGB565(0, 0, 0));
+   surface = unifrog_ui_surface(&fe->ui);
+   unifrog_gfx_draw_text(&surface, 18, 54, title ? title : "LOADING",
+      UNIFROG_RGB565(236, 241, 246), 2);
+   if (name && name[0])
+      unifrog_gfx_draw_text(&surface, 18, 86, name,
+         UNIFROG_RGB565(160, 174, 188), 1);
+   if (stage && stage[0])
+      unifrog_gfx_draw_text(&surface, 18, 104, stage,
+         UNIFROG_RGB565(160, 174, 188), 1);
+
+   bar_x = 18;
+   bar_y = (int)surface.height - 54;
+   bar_w = (int)surface.width - 36;
+   bar_h = 14;
+   fill_w = (bar_w - 4) * (int)percent / 100;
+   snprintf(percent_text, sizeof(percent_text), "%u%%", percent);
+   unifrog_gfx_fill_rect(&surface, bar_x, bar_y, bar_w, bar_h,
+      UNIFROG_RGB565(42, 50, 60));
+   if (fill_w > 0)
+      unifrog_gfx_fill_rect(&surface, bar_x + 2, bar_y + 2, fill_w,
+         bar_h - 4, UNIFROG_RGB565(68, 188, 136));
+   unifrog_gfx_draw_text(&surface, 18, bar_y + 24, percent_text,
+      UNIFROG_RGB565(236, 241, 246), 1);
+   unifrog_ui_present(&fe->ui);
 }
 
 static const char *item_glyph_key(const struct frontend_item *item)
@@ -6066,6 +6127,24 @@ static void draw(struct native_frontend *fe)
          snprintf(with_storage, sizeof(with_storage), "SD:%s", sd);
       unifrog_text_copy(detail, sizeof(detail), with_storage);
    }
+   {
+      uint32_t signature = 2166136261u;
+
+      signature = frontend_hash_u32(signature, (uint32_t)fe->view);
+      signature = frontend_hash_u32(signature, (uint32_t)fe->selected);
+      signature = frontend_hash_u32(signature, (uint32_t)fe->scroll);
+      signature = frontend_hash_u32(signature, (uint32_t)fe->item_count);
+      signature = frontend_hash_u32(signature, fe->item_generation);
+      signature = frontend_hash_u32(signature, (uint32_t)fe->applied_style_id);
+      signature = frontend_hash_string(signature, fe->title);
+      signature = frontend_hash_string(signature, fe->status);
+      signature = frontend_hash_string(signature, detail);
+      signature = frontend_hash_string(signature, fe->resource_cache_key);
+      if (fe->last_draw_valid && fe->last_draw_signature == signature)
+         return;
+      fe->last_draw_signature = signature;
+      fe->last_draw_valid = 1;
+   }
    if (fe->view == FRONTEND_VIEW_LAUNCH) {
       apply_frontend_style(fe, (int)UNIFROG_FRONTEND_LVGL_LAUNCH,
          frontend_screen_style(fe, UNIFROG_FRONTEND_LVGL_LAUNCH));
@@ -6370,8 +6449,8 @@ int unifrog_native_frontend_main(void)
       UNIFROG_NATIVE_FRONTEND_GIT_COMMIT, UNIFROG_SDK_GIT_COMMIT,
       UNIFROG_CORES_GIT_COMMIT, UNIFROG_HCRTOS_MEDIA);
    if (strcmp(fe.storage_profile, "boot") != 0) {
-      unifrog_ui_message(&fe.ui, fe.theme, "Storage", fe.storage_profile,
-         storage_profile_label(fe.storage_profile));
+      frontend_loading_show(&fe, "Storage", fe.storage_profile,
+         storage_profile_label(fe.storage_profile), 20);
       (void)apply_storage_profile(&fe, "startup");
    }
    show_launch(&fe);

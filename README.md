@@ -99,7 +99,7 @@ and `psx` are matched case-insensitively. Edit
 `/unifrog_data/settings.ini` on the SD card to change user options without
 modifying packaged defaults.
 
-SD builds boot in `wide18` by default: 4-bit SD, 18 MHz, high-speed disabled,
+SD builds boot in `wide20` by default: 4-bit SD, 20 MHz, high-speed disabled,
 and no UHS/1.8 V negotiation. ROM and native module loading stay on that boot
 profile; the old runtime fast-read mount/remount windows are disabled by the
 default `SD_READ_MODE=boot`. The UHS profiles remain available as diagnostics,

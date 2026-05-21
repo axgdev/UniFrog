@@ -85,7 +85,7 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 ### Storage
 
 - The SD/MMC path is sensitive to signal integrity. A flat SD extender cable caused frequent CRC errors and automount churn.
-- The default build boots directly in `wide18`: 4-bit SD, 18 MHz,
+- The default build boots directly in `wide20`: 4-bit SD, 20 MHz,
   high-speed disabled, and no UHS/1.8 V negotiation. This keeps the 4-bit
   throughput benefit while avoiding high-speed/UHS negotiation on weak cards
   and SD extenders. Runtime fast-read mount/remount windows

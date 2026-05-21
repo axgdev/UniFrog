@@ -23,7 +23,7 @@ LVGL_URL ?= https://github.com/lvgl/lvgl.git
 LVGL_REF ?= 0019fc541f759b3323add63034502b0248afc58f
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
-SD_MODE ?= wide18
+SD_MODE ?= wide20
 SD_READ_MODE ?= boot
 SD_FORCE_PIO ?= 0
 SD_DMA_MODE ?= wrap
@@ -856,7 +856,7 @@ help:
 	@echo "Config:"
 	@echo "  make print-config  Show current paths and tools"
 	@echo "  make V=1           Show full compiler/linker commands"
-	@echo "  make SD_MODE=wide18  Use the default resilient 4-bit 18 MHz SD profile"
+	@echo "  make SD_MODE=wide20  Use the default resilient 4-bit 20 MHz SD profile"
 	@echo "  make SD_MODE=safe    Use 1-bit 25 MHz SD with DMA safety workarounds"
 	@echo "  make SD_FORCE_PIO=1  Enable the slow vendor PIO diagnostic path"
 	@echo "  make SD_DMA_MODE=wrap Observe stock DMA through linker wrappers"
@@ -872,8 +872,8 @@ help:
 	@echo "  make FRONTEND_IMPL=native   Build the native frontend (default)"
 	@echo "  make FRONTEND_IMPL=native   Build the native C frontend fallback"
 	@echo "  make SD_MODE=wide10 Diagnostic 4-bit 10 MHz SD build"
-	@echo "  make SD_MODE=wide18 Default resilient 4-bit 18 MHz SD build"
-	@echo "  make SD_MODE=wide20 Diagnostic 4-bit 20 MHz SD build"
+	@echo "  make SD_MODE=wide18 Diagnostic 4-bit 18 MHz SD build"
+	@echo "  make SD_MODE=wide20 Default resilient 4-bit 20 MHz SD build"
 	@echo "  make SD_MODE=wide25 Diagnostic 4-bit 25 MHz SD build"
 	@echo "  make SD_MODE=wide37 Diagnostic 4-bit 37 MHz SD build"
 	@echo "  make SD_MODE=hs1   Diagnostic 1-bit high-speed SD build"

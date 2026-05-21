@@ -45,8 +45,8 @@ working theories.
 ## Working Theory
 
 - Not every write is equally risky. Large sequential writes are relatively
-  stable. The default is currently `wide18` because the current recovered build
-  was unstable at `wide20`; nearby `wide14`, `wide20`, `wide22`, and `wide24`
+  stable. The default is currently `wide20` because `wide18` still showed
+  later frontend freezes; nearby `wide14`, `wide18`, `wide22`, and `wide24`
   profiles exist to locate the actual stability knee on weak cards or SD
   extenders.
 - Many small files stress FAT directory/FAT metadata more than sequential data
