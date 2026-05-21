@@ -30,6 +30,7 @@ void unifrog_gfx_draw_char(const struct unifrog_surface *surface,
 void unifrog_gfx_draw_text(const struct unifrog_surface *surface,
    int x, int y, const char *text, uint16_t color, int scale);
 int unifrog_gfx_load_font5x7_file(const char *path);
+void unifrog_gfx_reset_font5x7(void);
 
 #ifdef __cplusplus
 }

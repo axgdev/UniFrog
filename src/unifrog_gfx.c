@@ -482,3 +482,9 @@ int unifrog_gfx_load_font5x7_file(const char *path)
       ttf_clear();
    return (int)loaded;
 }
+
+void unifrog_gfx_reset_font5x7(void)
+{
+   memset(font5x7_custom_valid, 0, sizeof(font5x7_custom_valid));
+   ttf_clear();
+}

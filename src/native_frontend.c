@@ -193,6 +193,7 @@ struct native_frontend {
    int language_index;
    char theme_name[48];
    char loaded_theme_name[48];
+   char loaded_theme_language[48];
    char resource_cache_key[64];
    char language_name[48];
    char scheme_name[FRONTEND_SCHEME_MAX][32];
@@ -2052,6 +2053,19 @@ static const char *input_profile_label(int profile)
    }
 }
 
+static unsigned clamp_state_slot(unsigned slot)
+{
+   return slot < 10u ? slot : 0u;
+}
+
+static const char *state_slot_label(unsigned slot)
+{
+   static char label[16];
+
+   snprintf(label, sizeof(label), "slot %u", clamp_state_slot(slot));
+   return label;
+}
+
 static const char *ge_clock_label(int ge_clock)
 {
    switch (ge_clock) {
@@ -3245,6 +3259,59 @@ static const struct unifrog_frontend_lvgl_style *frontend_view_style(
    return &fe->list_style;
 }
 
+static int try_load_theme_font_path(const char *dir, const char *rel)
+{
+   char path[FRONTEND_MAX_PATH];
+   int ret;
+
+   if (!dir || !rel || path_join(path, sizeof(path), dir, rel) != 0 ||
+       !file_exists(path))
+      return -1;
+   ret = unifrog_gfx_load_font5x7_file(path);
+   unifrog_log("frontend theme font load path=%s ret=%d\n", path, ret);
+   return ret > 0 ? 0 : -1;
+}
+
+static void load_theme_font(struct native_frontend *fe)
+{
+   char dir[FRONTEND_MAX_PATH];
+   const char *language;
+   const char *module = "default";
+   char rel[128];
+   static const char *const exts[] = { ".ttf", ".otf", ".bin", ".font" };
+   static const char *const roots[] = {
+      "320x240/font",
+      "640x480/font",
+      "font",
+   };
+
+   unifrog_gfx_reset_font5x7();
+   if (!fe || !fe->theme_name[0] ||
+       path_join(dir, sizeof(dir), FRONTEND_THEME_ROOT, fe->theme_name) != 0)
+      return;
+   language = active_language_label(fe);
+   for (unsigned r = 0; r < ARRAY_SIZE(roots); r++) {
+      for (unsigned e = 0; e < ARRAY_SIZE(exts); e++) {
+         snprintf(rel, sizeof(rel), "%s/%s/%s%s", roots[r], language,
+            module, exts[e]);
+         if (try_load_theme_font_path(dir, rel) == 0)
+            return;
+         snprintf(rel, sizeof(rel), "%s/%s/default%s", roots[r], language,
+            exts[e]);
+         if (try_load_theme_font_path(dir, rel) == 0)
+            return;
+         snprintf(rel, sizeof(rel), "%s/%s%s", roots[r], module, exts[e]);
+         if (try_load_theme_font_path(dir, rel) == 0)
+            return;
+         snprintf(rel, sizeof(rel), "%s/default%s", roots[r], exts[e]);
+         if (try_load_theme_font_path(dir, rel) == 0)
+            return;
+      }
+   }
+   unifrog_log("frontend theme font skipped name=%s language=%s\n",
+      fe->theme_name, language);
+}
+
 static void load_theme(struct native_frontend *fe)
 {
    FILE *file;
@@ -3270,9 +3337,11 @@ static void load_theme(struct native_frontend *fe)
       unifrog_text_copy(fe->theme_name, sizeof(fe->theme_name), "muos");
    if (fe->theme_loaded &&
        strcmp(fe->loaded_theme_name, fe->theme_name) == 0 &&
+       strcmp(fe->loaded_theme_language, active_language_label(fe)) == 0 &&
        fe->loaded_theme_alternate == (fe->theme_alternate ? 1 : 0)) {
-      unifrog_log("frontend theme load skipped name=%s alternate=%d\n",
-         fe->theme_name, fe->theme_alternate ? 1 : 0);
+      unifrog_log("frontend theme load skipped name=%s language=%s alternate=%d\n",
+         fe->theme_name, active_language_label(fe),
+         fe->theme_alternate ? 1 : 0);
       return;
    }
    frontend_loading_show(fe, "Loading Theme", fe->theme_name, "scheme", 5);
@@ -3406,6 +3475,7 @@ static void load_theme(struct native_frontend *fe)
    }
    unifrog_frontend_lvgl_preload_style_images(&fe->active_style);
    unifrog_frontend_lvgl_preload_style_images(&fe->list_style);
+   load_theme_font(fe);
    preload_ms = unifrog_perf_time_ms() - t0;
    fe->theme = &fe->active_theme;
    t0 = unifrog_perf_time_ms();
@@ -3424,6 +3494,8 @@ static void load_theme(struct native_frontend *fe)
       fe->list_style.list_focus_text_alpha);
    unifrog_text_copy(fe->loaded_theme_name, sizeof(fe->loaded_theme_name),
       fe->theme_name);
+   unifrog_text_copy(fe->loaded_theme_language,
+      sizeof(fe->loaded_theme_language), active_language_label(fe));
    fe->loaded_theme_alternate = fe->theme_alternate ? 1 : 0;
    fe->theme_loaded = 1;
    frontend_invalidate_draw(fe);
@@ -3765,6 +3837,12 @@ static void save_settings(struct native_frontend *fe)
    fprintf(file, "ge_clock=%d\n", fe->run_options.ge_clock);
    fprintf(file, "backlight=%d\n", fe->run_options.backlight_level);
    fprintf(file, "keymap=%d\n", fe->run_options.input_profile);
+   fprintf(file, "state_slot=%u\n",
+      clamp_state_slot(fe->run_options.state_slot));
+   fprintf(file, "state_auto_load=%d\n",
+      fe->run_options.state_auto_load ? 1 : 0);
+   fprintf(file, "state_auto_save=%d\n",
+      fe->run_options.state_auto_save ? 1 : 0);
    fprintf(file, "sort_desc=%d\n", fe->sort_desc);
    fprintf(file, "show_hidden=%d\n", fe->show_hidden);
    fprintf(file, "folder_counts=%d\n", fe->folder_counts);
@@ -3832,6 +3910,15 @@ static void load_settings(struct native_frontend *fe)
       else if ((value = read_key_value(line, "keymap")) != NULL)
          fe->run_options.input_profile = parse_int(value,
             fe->run_options.input_profile);
+      else if ((value = read_key_value(line, "state_slot")) != NULL)
+         fe->run_options.state_slot = clamp_state_slot((unsigned)
+            parse_int(value, (int)fe->run_options.state_slot));
+      else if ((value = read_key_value(line, "state_auto_load")) != NULL)
+         fe->run_options.state_auto_load = parse_int(value,
+            fe->run_options.state_auto_load) ? 1 : 0;
+      else if ((value = read_key_value(line, "state_auto_save")) != NULL)
+         fe->run_options.state_auto_save = parse_int(value,
+            fe->run_options.state_auto_save) ? 1 : 0;
       else if ((value = read_key_value(line, "sort_desc")) != NULL)
          fe->sort_desc = parse_int(value, fe->sort_desc) ? 1 : 0;
       else if ((value = read_key_value(line, "show_hidden")) != NULL)
@@ -3909,6 +3996,7 @@ static void load_settings(struct native_frontend *fe)
          unifrog_text_copy(fe->last_core, sizeof(fe->last_core), value);
    }
    fclose(file);
+   fe->run_options.state_slot = clamp_state_slot(fe->run_options.state_slot);
    normalize_storage_profile(fe);
 }
 
@@ -4545,6 +4633,14 @@ static void show_launch_settings(struct native_frontend *fe)
       FRONTEND_ITEM_ACTION, "display", NULL);
    add_item(fe, "Keymap", input_profile_label(fe->run_options.input_profile),
       FRONTEND_ITEM_ACTION, "keymap", NULL);
+   add_item(fe, "State Slot", state_slot_label(fe->run_options.state_slot),
+      FRONTEND_ITEM_ACTION, "state_slot", NULL);
+   add_item(fe, "Auto Load State",
+      on_off_label(fe->run_options.state_auto_load), FRONTEND_ITEM_ACTION,
+      "state_auto_load", NULL);
+   add_item(fe, "Auto Save State",
+      on_off_label(fe->run_options.state_auto_save), FRONTEND_ITEM_ACTION,
+      "state_auto_save", NULL);
    if (unifrog_backlight_get(&backlight) != 0)
       backlight = 0;
    snprintf(detail, sizeof(detail), "%u", backlight);
@@ -5678,6 +5774,18 @@ static void change_config(struct native_frontend *fe, int dir)
       else
          index = (index + 1u) % ARRAY_SIZE(profiles);
       fe->run_options.input_profile = profiles[index];
+   } else if (strcmp(item->path, "state_slot") == 0) {
+      if (dir < 0)
+         fe->run_options.state_slot =
+            fe->run_options.state_slot == 0 ? 9u :
+            fe->run_options.state_slot - 1u;
+      else
+         fe->run_options.state_slot =
+            (fe->run_options.state_slot + 1u) % 10u;
+   } else if (strcmp(item->path, "state_auto_load") == 0) {
+      fe->run_options.state_auto_load = !fe->run_options.state_auto_load;
+   } else if (strcmp(item->path, "state_auto_save") == 0) {
+      fe->run_options.state_auto_save = !fe->run_options.state_auto_save;
    } else if (strcmp(item->path, "backlight") == 0) {
       if (unifrog_backlight_get(&backlight) != 0)
          backlight = 40;
@@ -5964,6 +6072,7 @@ static void activate(struct native_frontend *fe)
       if (strcmp(fe->language_name, "english") == 0)
          fe->language_index = 0;
       load_language(fe);
+      load_theme(fe);
       save_settings(fe);
       set_status(fe, "language %s", active_language_label(fe));
       show_config(fe);
