@@ -47,9 +47,9 @@ static const char *const launch_labels[FRONTEND_LVGL_LAUNCH_COUNT] = {
    "Shutdown",
 };
 
-static uint8_t alpha_or_opaque(uint8_t alpha)
+static uint8_t theme_alpha(uint8_t alpha)
 {
-   return alpha ? alpha : 255u;
+   return alpha;
 }
 
 static unsigned rgb565_luma(uint16_t c)
@@ -225,23 +225,25 @@ static void draw_shell(struct unifrog_ui *ui,
    int header_h = style->header_height > 0 ? style->header_height : 28;
    int footer_h = style->footer_height > 0 ? style->footer_height : 22;
    int footer_y = FRONTEND_LVGL_H - footer_h;
-   uint8_t header_alpha = alpha_or_opaque(style->header_alpha);
-   uint8_t footer_alpha = alpha_or_opaque(style->footer_alpha);
+   uint8_t header_alpha = theme_alpha(style->header_alpha);
+   uint8_t footer_alpha = theme_alpha(style->footer_alpha);
 
    fill_rect_alpha(&surface, 0, 0, FRONTEND_LVGL_W, header_h,
       style->header_background, header_alpha);
    fill_rect_alpha(&surface, 0, footer_y, FRONTEND_LVGL_W, footer_h,
       style->footer_background, footer_alpha);
-   unifrog_ui_text_clipped(ui, 10, 9, 30, title ? title : "UniFrog",
-      contrast_text(style->header_text, style->header_background,
-         header_alpha), 1);
-   if (detail && detail[0])
+   if (style->header_text_alpha)
+      unifrog_ui_text_clipped(ui, 10, 9, 30, title ? title : "UniFrog",
+         contrast_text(style->header_text, style->header_background,
+            header_alpha), 1);
+   if (style->header_text_alpha && detail && detail[0])
       unifrog_ui_text_clipped(ui, 214, 9, 16, detail,
          contrast_text(style->header_text, style->header_background,
             header_alpha), 1);
-   unifrog_ui_text_clipped(ui, 10, footer_y + 7, 30,
-      status ? status : "", contrast_text(style->footer_text,
-         style->footer_background, footer_alpha), 1);
+   if (style->footer_text_alpha)
+      unifrog_ui_text_clipped(ui, 10, footer_y + 7, 30,
+         status ? status : "", contrast_text(style->footer_text,
+            style->footer_background, footer_alpha), 1);
 }
 
 static void begin_frame(struct unifrog_ui *ui,
@@ -277,8 +279,13 @@ static void draw_row(struct unifrog_ui *ui,
    uint16_t fg = focused ? style->list_focus_text : style->list_text;
    uint16_t muted = focused ? style->list_focus_indicator :
       style->list_indicator;
-   uint8_t bg_alpha = focused ? alpha_or_opaque(style->list_focus_alpha) :
-      alpha_or_opaque(style->list_alpha);
+   uint8_t bg_alpha = focused ? theme_alpha(style->list_focus_alpha) :
+      theme_alpha(style->list_alpha);
+   uint8_t text_alpha = focused ? theme_alpha(style->list_focus_text_alpha) :
+      theme_alpha(style->list_text_alpha);
+   uint8_t indicator_alpha = focused ?
+      theme_alpha(style->list_focus_indicator_alpha) :
+      theme_alpha(style->list_indicator_alpha);
    int glyph_w = style->list_glyph_w > 0 ? style->list_glyph_w : 16;
    int glyph_h = style->list_glyph_h > 0 ? style->list_glyph_h : 16;
    int glyph_x = style->list_glyph_x >= 0 ? style->list_glyph_x : 5;
@@ -286,14 +293,16 @@ static void draw_row(struct unifrog_ui *ui,
    int value_w = style->value_w > 0 ? style->value_w : 90;
 
    fill_rect_alpha(&surface, x, y, w, h, bg, bg_alpha);
-   if (glyph && glyph[0])
+   if (glyph && glyph[0] &&
+       (focused ? style->list_focus_glyph_alpha : style->list_glyph_alpha))
       draw_image_path(&surface, glyph, x + glyph_x, y + (h - glyph_h) / 2,
          glyph_w, glyph_h);
    fg = contrast_text(fg, bg, bg_alpha);
    muted = contrast_text(muted, bg, bg_alpha);
-   unifrog_ui_text_clipped(ui, x + label_x, y + (h - 7) / 2,
-      ((w - label_x - value_w - 8) / 6), label, fg, 1);
-   if (value && value[0])
+   if (text_alpha)
+      unifrog_ui_text_clipped(ui, x + label_x, y + (h - 7) / 2,
+         ((w - label_x - value_w - 8) / 6), label, fg, 1);
+   if (indicator_alpha && value && value[0])
       unifrog_ui_text_clipped(ui, x + w - value_w, y + (h - 7) / 2,
          value_w / 6, value, muted, 1);
 }
@@ -380,8 +389,11 @@ static void draw_launcher_grid(struct unifrog_ui *ui,
       uint16_t bg = focused ? style->list_focus_background :
          style->list_background;
       uint16_t fg = focused ? style->list_focus_text : style->list_text;
-      uint8_t bg_alpha = focused ? alpha_or_opaque(style->list_focus_alpha) :
-         alpha_or_opaque(style->list_alpha);
+      uint8_t bg_alpha = focused ? theme_alpha(style->list_focus_alpha) :
+         theme_alpha(style->list_alpha);
+      uint8_t text_alpha = focused ?
+         theme_alpha(style->list_focus_text_alpha) :
+         theme_alpha(style->list_text_alpha);
 
       if (style->launch_wallpaper[i][0])
          draw_image_path(&surface, style->launch_wallpaper[i], x, y,
@@ -400,8 +412,10 @@ static void draw_launcher_grid(struct unifrog_ui *ui,
          unifrog_gfx_draw_text(&surface, x + tile_w / 2 - 3,
             y + 4 + icon_h / 2 - 4, glyph, style->background, 1);
       }
-      unifrog_ui_text_clipped(ui, x + 5, y + tile_h - 18, (tile_w - 10) / 6,
-         launch_labels[i], contrast_text(fg, bg, bg_alpha), 1);
+      if (text_alpha)
+         unifrog_ui_text_clipped(ui, x + 5, y + tile_h - 18,
+            (tile_w - 10) / 6, launch_labels[i],
+            contrast_text(fg, bg, bg_alpha), 1);
    }
 }
 
