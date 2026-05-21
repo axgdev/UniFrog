@@ -33,6 +33,8 @@ struct unifrog_presenter {
    uint64_t present_sync_count;
    uint64_t present_vsync_count;
    uint64_t present_pan_count;
+   unsigned blit_count;
+   unsigned stretch_count;
    unsigned present_max_count;
    unsigned last_vsync_count;
 };
@@ -44,6 +46,8 @@ struct unifrog_presenter_stats {
    uint64_t sync_count;
    uint64_t vsync_count;
    uint64_t pan_count;
+   unsigned blits;
+   unsigned stretches;
    unsigned max_count;
    int dst_x;
    int dst_y;
@@ -58,6 +62,8 @@ int unifrog_presenter_open(struct unifrog_presenter *presenter,
 void unifrog_presenter_close(struct unifrog_presenter *presenter);
 int unifrog_presenter_clear(struct unifrog_presenter *presenter, uint32_t argb);
 int unifrog_presenter_present_rgb565(struct unifrog_presenter *presenter,
+   const void *pixels, unsigned width, unsigned height, unsigned pitch_bytes);
+int unifrog_presenter_present_xrgb8888(struct unifrog_presenter *presenter,
    const void *pixels, unsigned width, unsigned height, unsigned pitch_bytes);
 void unifrog_presenter_take_stats(struct unifrog_presenter *presenter,
    struct unifrog_presenter_stats *stats);

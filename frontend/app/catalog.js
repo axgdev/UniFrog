@@ -28,6 +28,15 @@ var developerItems = [
 ];
 var storageModeItems = [
   { id: "safe", label: "safe", detail: "1-bit 25 MHz baseline" },
+  { id: "wide1", label: "wide1", detail: "4-bit 1 MHz" },
+  { id: "wide2", label: "wide2", detail: "4-bit 2 MHz" },
+  { id: "wide4", label: "wide4", detail: "4-bit 4 MHz" },
+  { id: "wide8", label: "wide8", detail: "4-bit 8 MHz" },
+  { id: "wide10", label: "wide10", detail: "4-bit 10 MHz" },
+  { id: "wide12", label: "wide12", detail: "4-bit 12 MHz" },
+  { id: "wide16", label: "wide16", detail: "4-bit 16 MHz" },
+  { id: "wide20", label: "wide20", detail: "4-bit 20 MHz" },
+  { id: "wide25", label: "wide25", detail: "4-bit 25 MHz" },
   { id: "hs1", label: "hs1", detail: "1-bit high speed" },
   { id: "uhs12", label: "uhs12", detail: "UHS SDR12" },
   { id: "uhs25", label: "uhs25", detail: "UHS SDR25" },

@@ -52,6 +52,7 @@ static unsigned input_source_log_wireless_count;
 static unsigned input_source_log_menu_count;
 static unsigned wireless_poll_phase;
 static unsigned local_menu_guard;
+static uint32_t local_menu_hold_buttons;
 static unsigned local_zero_probe_count;
 static unsigned local_zero_probe_poll_count;
 static int local_input_profile = -1;
@@ -309,6 +310,7 @@ void unifrog_input_clear(void)
    input_source_log_menu_count = 0;
    wireless_poll_phase = 0;
    local_menu_guard = 0;
+   local_menu_hold_buttons = 0;
    local_zero_probe_count = 0;
    local_zero_probe_poll_count = 0;
    unifrog_input_wireless_clear();
@@ -379,6 +381,7 @@ void unifrog_input_poll_with_wireless_divisor(unsigned wireless_divisor)
    uint32_t local_norm_before_wireless = 0;
    uint32_t local_norm_after_wireless = 0;
    uint32_t local_norm;
+   uint32_t local_menu_direct;
    uint32_t wireless_buttons = 0;
    int local_changed;
    int wireless_changed;
@@ -415,15 +418,18 @@ void unifrog_input_poll_with_wireless_divisor(unsigned wireless_divisor)
    local_norm = local_norm_before_wireless | local_norm_after_wireless;
    update_button_debounce(local_norm);
    local_buttons = buttons_from_state();
+   local_menu_direct = local_norm ? local_norm : local_buttons;
    buttons = local_buttons | wireless_buttons;
-   if (local_buttons) {
-      local_menu_guard = 8;
-      menu_buttons = local_buttons;
+   if (local_menu_direct) {
+      local_menu_guard = 1;
+      local_menu_hold_buttons = local_menu_direct;
+      menu_buttons = local_menu_direct;
       local_zero_probe_poll_count = 0;
    } else if (local_menu_guard) {
       local_menu_guard--;
-      menu_buttons = 0;
+      menu_buttons = local_menu_hold_buttons;
    } else {
+      local_menu_hold_buttons = 0;
       menu_buttons = buttons;
    }
 

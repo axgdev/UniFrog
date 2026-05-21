@@ -1,5 +1,6 @@
 #include <unifrog/audio.h>
 
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
@@ -14,6 +15,7 @@
 #include <hcuapi/snd.h>
 #include <kernel/module.h>
 
+#include <unifrog/backlight.h>
 #include <unifrog/log.h>
 
 #define printf unifrog_log
@@ -28,8 +30,13 @@
 #define GPIO_R_DIR ((volatile uint32_t *)0xb88000f8u)
 #define GPIO_L15_MASK (1u << 15)
 #define GPIO_R07_MASK (1u << 7)
-#define SYSTEM_AUDIO_VOLUME 75u
-
+#define SYSTEM_AUDIO_VOLUME 65u
+#define PWMCTRL_BASE ((volatile uint32_t *)0xb8818410u)
+#define SND0_BASE ((volatile uint32_t *)0xb880a000u)
+#define SND0_DAC_BASE ((volatile uint32_t *)0xb880b000u)
+#define SND0_UNDERRUN_FADE_REG (0x3cu / sizeof(uint32_t))
+#define SND0_UNDERRUN_FADE_BIT 0x40u
+#define SND0_FADE_REG (0x90u / sizeof(uint32_t))
 extern unsigned long sf2000_lcd_panel_id(void) __attribute__((weak));
 extern unsigned long PINMUXL;
 extern unsigned long PINMUXB;
@@ -49,6 +56,7 @@ static void clear_audio(struct unifrog_audio *audio)
       memset(audio, 0, sizeof(*audio));
       audio->fd = -1;
       audio->backend = UNIFROG_AUDIO_BACKEND_AUTO;
+      audio->muted = 1;
    }
 }
 
@@ -92,6 +100,29 @@ static void set_stock_audio_output_gate(int enabled)
    }
 }
 
+void unifrog_audio_set_output_gate_enabled(int enabled)
+{
+   set_stock_audio_output_gate(enabled);
+   printf("unifrog audio output_gate enabled=%d\n", enabled ? 1 : 0);
+}
+
+static void apply_stock_audio_silence_policy(const char *tag)
+{
+   uint32_t before;
+   uint32_t after;
+
+   before = SND0_BASE[SND0_UNDERRUN_FADE_REG];
+   after = before | SND0_UNDERRUN_FADE_BIT;
+   if (after != before) {
+      SND0_BASE[SND0_UNDERRUN_FADE_REG] = after;
+      printf("unifrog audio silence_policy tag=%s underrun_fade=%08lx->%08lx fade90=%08lx dac=%08lx\n",
+         tag ? tag : "?",
+         (unsigned long)before, (unsigned long)after,
+         (unsigned long)SND0_BASE[SND0_FADE_REG],
+         (unsigned long)SND0_DAC_BASE[0]);
+   }
+}
+
 static int ensure_audio_drivers(void)
 {
    static int initialized;
@@ -125,12 +156,42 @@ static int ensure_audio_drivers(void)
       if (ret != 0 && result == 0)
          result = ret;
    }
+   apply_stock_audio_silence_policy("drivers");
    return result;
 }
 
 static int open_system_snd(void)
 {
    return open("/dev/sndC0i2so", O_WRONLY);
+}
+
+static void configure_neutral_audio_controls_fd(int fd, const char *tag)
+{
+   struct snd_twotone twotone;
+   struct snd_audio_eq6 eq6;
+   struct snd_lr_balance balance;
+   int twotone_ret;
+   int eq_ret;
+   int balance_ret;
+   static unsigned log_count;
+
+   if (fd < 0)
+      return;
+   memset(&twotone, 0, sizeof(twotone));
+   memset(&eq6, 0, sizeof(eq6));
+   memset(&balance, 0, sizeof(balance));
+   twotone.tt_mode = SND_TWOTONE_MODE_USER;
+   balance.lr_balance_index = 0;
+   eq6.mode = SND_EQ6_MODE_OFF;
+   twotone_ret = ioctl(fd, SND_IOCTL_SET_TWOTONE, &twotone);
+   eq_ret = ioctl(fd, SND_IOCTL_SET_EQ6, &eq6);
+   balance_ret = ioctl(fd, SND_IOCTL_SET_LR_BALANCE, &balance);
+   if (log_count < 12 || twotone_ret != 0 || eq_ret != 0 ||
+       balance_ret != 0) {
+      log_count++;
+      printf("unifrog audio neutral_controls tag=%s fd=%d twotone=%d eq6=%d balance=%d\n",
+         tag ? tag : "?", fd, twotone_ret, eq_ret, balance_ret);
+   }
 }
 
 int unifrog_audio_set_system_volume(unsigned volume)
@@ -148,6 +209,7 @@ int unifrog_audio_set_system_volume(unsigned volume)
       printf("unifrog audio system_volume open_fail volume=%u\n", volume);
       return -1;
    }
+   configure_neutral_audio_controls_fd(fd, "system_volume");
    ret = ioctl(fd, SND_IOCTL_SET_VOLUME, &value);
    close(fd);
    printf("unifrog audio system_volume volume=%u ret=%d\n", volume, ret);
@@ -160,6 +222,7 @@ int unifrog_audio_set_system_mute(int mute)
    int ret;
    int fd;
 
+   (void)ensure_audio_drivers();
    fd = open_system_snd();
    if (fd < 0) {
       static int logged_open_fail;
@@ -170,6 +233,7 @@ int unifrog_audio_set_system_mute(int mute)
       }
       return -1;
    }
+   configure_neutral_audio_controls_fd(fd, "system_mute");
    ret = ioctl(fd, SND_IOCTL_SET_MUTE, value);
    close(fd);
    printf("unifrog audio system_mute mute=%d ret=%d\n", value, ret);
@@ -217,6 +281,7 @@ static int open_audsink(struct unifrog_audio *audio,
    audio->period_bytes = period_bytes;
    audio->periods = periods;
    audio->frame_bytes = channels * sizeof(int16_t);
+   audio->muted = 1;
    printf("unifrog audio open backend=audsink fd=%d rate=%u ch=%u period=%u periods=%u\n",
       fd, rate, channels, period_bytes, periods);
    return 0;
@@ -254,6 +319,7 @@ static int open_snd(struct unifrog_audio *audio,
       goto fail;
    avail_min = period_bytes;
    ioctl(fd, SND_IOCTL_AVAIL_MIN, &avail_min);
+   configure_neutral_audio_controls_fd(fd, "open_snd");
 
    audio->fd = fd;
    audio->backend = UNIFROG_AUDIO_BACKEND_SND;
@@ -262,6 +328,7 @@ static int open_snd(struct unifrog_audio *audio,
    audio->period_bytes = period_bytes;
    audio->periods = periods;
    audio->frame_bytes = channels * sizeof(int16_t);
+   audio->muted = 1;
    printf("unifrog audio open backend=snd fd=%d rate=%u ch=%u period=%u periods=%u\n",
       fd, rate, channels, period_bytes, periods);
    return 0;
@@ -293,9 +360,9 @@ int unifrog_audio_open_backend(struct unifrog_audio *audio,
    if (backend == UNIFROG_AUDIO_BACKEND_SND)
       return open_snd(audio, rate, channels, period_bytes, periods);
 
-   if (open_audsink(audio, rate, channels, period_bytes, periods) == 0)
+   if (open_snd(audio, rate, channels, period_bytes, periods) == 0)
       return 0;
-   return open_snd(audio, rate, channels, period_bytes, periods);
+   return open_audsink(audio, rate, channels, period_bytes, periods);
 }
 
 int unifrog_audio_open(struct unifrog_audio *audio,
@@ -337,6 +404,7 @@ int unifrog_audio_start(struct unifrog_audio *audio)
 {
    if (!audio || audio->fd < 0)
       return -1;
+   apply_stock_audio_silence_policy("start");
    if (audio->backend == UNIFROG_AUDIO_BACKEND_AUDSINK)
       return ioctl(audio->fd, AUDSINK_IOCTL_START, 0);
    return ioctl(audio->fd, SND_IOCTL_START, 0);
@@ -363,6 +431,26 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
       return -1;
    if (attempts == 0)
       attempts = 1;
+   if (audio->backend == UNIFROG_AUDIO_BACKEND_SND) {
+      int has_signal = 0;
+      unsigned channels = audio->channels ? audio->channels : 1u;
+      unsigned total = frames * channels;
+
+      for (unsigned i = 0; i < total; i++) {
+         int sample = samples[i];
+
+         if (sample < 0)
+            sample = -sample;
+         if (sample > 4) {
+            has_signal = 1;
+            break;
+         }
+      }
+      if (has_signal && audio->muted)
+         (void)unifrog_audio_set_mute(audio, 0);
+      else if (!has_signal && !audio->muted)
+         (void)unifrog_audio_set_mute(audio, 1);
+   }
 
    pollfd.fd = audio->fd;
    pollfd.events = POLLOUT | POLLWRNORM;
@@ -439,7 +527,10 @@ int unifrog_audio_set_mute(struct unifrog_audio *audio, int mute)
       return -1;
    if (audio->backend == UNIFROG_AUDIO_BACKEND_AUDSINK)
       return unifrog_audio_set_system_mute(mute);
-   return ioctl(audio->fd, SND_IOCTL_SET_MUTE, mute ? 1 : 0);
+   if (ioctl(audio->fd, SND_IOCTL_SET_MUTE, mute ? 1 : 0) != 0)
+      return -1;
+   audio->muted = mute ? 1 : 0;
+   return 0;
 }
 
 int unifrog_audio_set_output_enabled(struct unifrog_audio *audio, int enabled)
@@ -447,9 +538,13 @@ int unifrog_audio_set_output_enabled(struct unifrog_audio *audio, int enabled)
    if (!audio || audio->fd < 0)
       return -1;
    if (enabled) {
+      apply_stock_audio_silence_policy("enable");
       (void)unifrog_audio_set_volume(audio, SYSTEM_AUDIO_VOLUME);
-      (void)unifrog_audio_set_mute(audio, 0);
       set_stock_audio_output_gate(1);
+      if (audio->backend == UNIFROG_AUDIO_BACKEND_SND)
+         (void)unifrog_audio_set_mute(audio, 1);
+      else
+         (void)unifrog_audio_set_mute(audio, 0);
    } else {
       set_stock_audio_output_gate(0);
       (void)unifrog_audio_set_mute(audio, 1);
@@ -460,6 +555,8 @@ int unifrog_audio_set_output_enabled(struct unifrog_audio *audio, int enabled)
 void unifrog_audio_set_system_output_enabled(int enabled)
 {
    if (enabled) {
+      (void)ensure_audio_drivers();
+      apply_stock_audio_silence_policy("system_enable");
       (void)unifrog_audio_set_system_volume(SYSTEM_AUDIO_VOLUME);
       (void)unifrog_audio_set_system_mute(0);
       set_stock_audio_output_gate(1);
@@ -527,15 +624,33 @@ void unifrog_audio_debug_dump(struct unifrog_audio *audio, const char *tag)
       read_pinmux(PINPAD_L26), read_pinmux(PINPAD_L27),
       read_pinmux(PINPAD_L28), read_pinmux(PINPAD_L29),
       read_pinmux(PINPAD_R07));
+   {
+      unsigned backlight = 0;
+      int backlight_ret = unifrog_backlight_get(&backlight);
+
+      printf("unifrog audio pwm tag=%s r05_mux=%u backlight_ret=%d backlight=%u pwmctrl=%08lx %08lx %08lx %08lx %08lx %08lx\n",
+         tag ? tag : "?",
+         read_pinmux(PINPAD_R05), backlight_ret, backlight,
+         (unsigned long)PWMCTRL_BASE[0], (unsigned long)PWMCTRL_BASE[1],
+         (unsigned long)PWMCTRL_BASE[2], (unsigned long)PWMCTRL_BASE[3],
+         (unsigned long)PWMCTRL_BASE[4], (unsigned long)PWMCTRL_BASE[5]);
+   }
    printf("unifrog audio hw tag=%s backend=%d snd0=0x%08lx dac=0x%08lx hw_ret=%d dma=0x%08lx/%lu hw_rate=%u hw_ch=%u hw_fmt=%u hw_period=%lu hw_periods=%lu\n",
       tag ? tag : "?",
       audio ? audio->backend : 0,
-      (unsigned long)*(volatile uint32_t *)&SND0,
-      (unsigned long)*(volatile uint32_t *)&SND0_DAC,
+      (unsigned long)SND0_BASE[0],
+      (unsigned long)SND0_DAC_BASE[0],
       hw_ret,
       (unsigned long)hw.dma_addr, (unsigned long)hw.dma_size,
       hw.pcm_params.rate, hw.pcm_params.channels,
       (unsigned)hw.pcm_params.format,
       (unsigned long)hw.pcm_params.period_size,
       (unsigned long)hw.pcm_params.periods);
+   printf("unifrog audio i2s tag=%s ctrl3c=0x%08lx underrun_fade=%u fade90=0x%08lx dac0=0x%08lx dac1=0x%08lx\n",
+      tag ? tag : "?",
+      (unsigned long)SND0_BASE[SND0_UNDERRUN_FADE_REG],
+      (SND0_BASE[SND0_UNDERRUN_FADE_REG] & SND0_UNDERRUN_FADE_BIT) ? 1u : 0u,
+      (unsigned long)SND0_BASE[SND0_FADE_REG],
+      (unsigned long)SND0_DAC_BASE[0],
+      (unsigned long)SND0_DAC_BASE[1]);
 }

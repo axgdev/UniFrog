@@ -118,8 +118,9 @@ int unifrog_presenter_clear(struct unifrog_presenter *presenter, uint32_t argb)
    return ret;
 }
 
-int unifrog_presenter_present_rgb565(struct unifrog_presenter *presenter,
-   const void *pixels, unsigned width, unsigned height, unsigned pitch_bytes)
+static int unifrog_presenter_present_ge(struct unifrog_presenter *presenter,
+   const void *pixels, unsigned width, unsigned height, unsigned pitch_bytes,
+   enum unifrog_ge_format format)
 {
    struct unifrog_ge_surface src;
    struct unifrog_ge_surface dst;
@@ -129,7 +130,7 @@ int unifrog_presenter_present_rgb565(struct unifrog_presenter *presenter,
    uint32_t total_start;
    uint32_t ge_start;
    uint32_t sync_start;
-   uint32_t vsync_start;
+   uint32_t vsync_start = 0;
    uint32_t pan_start;
    unsigned total_count;
    unsigned vsync_count = 0;
@@ -148,7 +149,7 @@ int unifrog_presenter_present_rgb565(struct unifrog_presenter *presenter,
    src.width = width;
    src.height = height;
    src.pitch_bytes = pitch_bytes;
-   src.format = UNIFROG_GE_FORMAT_RGB565;
+   src.format = format;
    dst = unifrog_fb_ge_surface_for_buffer(&presenter->fb, next_buffer);
    src_rect = full_rect(width, height);
    dst_rect = scaled_rect(width, height,
@@ -176,28 +177,38 @@ int unifrog_presenter_present_rgb565(struct unifrog_presenter *presenter,
    }
 
    ge_start = unifrog_perf_count();
-   ret = unifrog_ge_stretch(&presenter->ge, &dst, &dst_rect,
-      &src, &src_rect, UNIFROG_GE_FLUSH_SOURCE);
+   if (src_rect.w == dst_rect.w && src_rect.h == dst_rect.h) {
+      ret = unifrog_ge_blit(&presenter->ge, &dst, dst_rect.x, dst_rect.y,
+         &src, &src_rect, UNIFROG_GE_FLUSH_SOURCE);
+      if (ret == 0)
+         presenter->blit_count++;
+   } else {
+      ret = unifrog_ge_stretch(&presenter->ge, &dst, &dst_rect,
+         &src, &src_rect, UNIFROG_GE_FLUSH_SOURCE);
+      if (ret == 0)
+         presenter->stretch_count++;
+   }
    presenter->present_ge_count +=
       (uint64_t)unifrog_perf_elapsed(ge_start, unifrog_perf_count());
    if (ret != 0)
       return ret;
+   if (presenter->flags & UNIFROG_PRESENT_VSYNC) {
+      vsync_start = unifrog_perf_count();
+   }
    sync_start = unifrog_perf_count();
    ret = unifrog_ge_sync(&presenter->ge);
    presenter->present_sync_count +=
       (uint64_t)unifrog_perf_elapsed(sync_start, unifrog_perf_count());
    if (ret != 0)
       return ret;
-   if (presenter->flags & UNIFROG_PRESENT_VSYNC) {
-      vsync_start = unifrog_perf_count();
-      unifrog_fb_wait_vsync(&presenter->fb);
-      vsync_count = unifrog_perf_elapsed(vsync_start, unifrog_perf_count());
-      presenter->present_vsync_count += (uint64_t)vsync_count;
-   }
    pan_start = unifrog_perf_count();
    ret = unifrog_fb_pan(&presenter->fb, next_buffer);
    presenter->present_pan_count +=
       (uint64_t)unifrog_perf_elapsed(pan_start, unifrog_perf_count());
+   if (presenter->flags & UNIFROG_PRESENT_VSYNC) {
+      vsync_count = unifrog_perf_elapsed(vsync_start, unifrog_perf_count());
+      presenter->present_vsync_count += (uint64_t)vsync_count;
+   }
    if (ret == 0)
       presenter->active_buffer = next_buffer;
    total_count = unifrog_perf_elapsed(total_start, unifrog_perf_count());
@@ -207,6 +218,20 @@ int unifrog_presenter_present_rgb565(struct unifrog_presenter *presenter,
       presenter->present_max_count = total_count;
    presenter->present_count++;
    return ret;
+}
+
+int unifrog_presenter_present_rgb565(struct unifrog_presenter *presenter,
+   const void *pixels, unsigned width, unsigned height, unsigned pitch_bytes)
+{
+   return unifrog_presenter_present_ge(presenter, pixels, width, height,
+      pitch_bytes, UNIFROG_GE_FORMAT_RGB565);
+}
+
+int unifrog_presenter_present_xrgb8888(struct unifrog_presenter *presenter,
+   const void *pixels, unsigned width, unsigned height, unsigned pitch_bytes)
+{
+   return unifrog_presenter_present_ge(presenter, pixels, width, height,
+      pitch_bytes, UNIFROG_GE_FORMAT_XRGB8888);
 }
 
 void unifrog_presenter_take_stats(struct unifrog_presenter *presenter,
@@ -224,6 +249,8 @@ void unifrog_presenter_take_stats(struct unifrog_presenter *presenter,
    stats->sync_count = presenter->present_sync_count;
    stats->vsync_count = presenter->present_vsync_count;
    stats->pan_count = presenter->present_pan_count;
+   stats->blits = presenter->blit_count;
+   stats->stretches = presenter->stretch_count;
    stats->max_count = presenter->present_max_count;
    stats->dst_x = presenter->last_dst_x;
    stats->dst_y = presenter->last_dst_y;
@@ -236,5 +263,7 @@ void unifrog_presenter_take_stats(struct unifrog_presenter *presenter,
    presenter->present_sync_count = 0;
    presenter->present_vsync_count = 0;
    presenter->present_pan_count = 0;
+   presenter->blit_count = 0;
+   presenter->stretch_count = 0;
    presenter->present_max_count = 0;
 }

@@ -44,10 +44,14 @@ static unsigned wireless_timeout[UNIFROG_INPUT_MAX_PORTS];
 static int wireless_initialized;
 static unsigned wireless_rf_channel_index;
 static unsigned wireless_rf_empty_polls;
+static unsigned wireless_rf_poll_count;
+static unsigned wireless_rf_status_log_count;
+static unsigned wireless_rf_state_log_count;
 static int wireless_rf_bus_ok;
 static uint8_t wireless_last_status;
 
-#define RF_IO_DELAY_US 1u
+#define RF_IO_DELAY_US 2u
+#define RF_IDLE_POLL_SUSPEND 32768u
 
 static void rf_stock_rx_reset(void);
 static void rf_stock_rx_ack(void);
@@ -523,6 +527,9 @@ void unifrog_input_wireless_reset(void)
    wireless_rf_bus_ok = 0;
    wireless_rf_channel_index = 0;
    wireless_rf_empty_polls = 0;
+   wireless_rf_poll_count = 0;
+   wireless_rf_status_log_count = 0;
+   wireless_rf_state_log_count = 0;
    wireless_last_status = 0;
 }
 
@@ -600,9 +607,6 @@ void unifrog_input_wireless_prepare_poll(void)
 
 void unifrog_input_wireless_poll_once(void)
 {
-   static unsigned poll_count;
-   static unsigned status_log_count;
-   static unsigned state_log_count;
    uint8_t status;
 
    if (!unifrog_input_wireless_available())
@@ -610,10 +614,11 @@ void unifrog_input_wireless_poll_once(void)
 
    status = rf_read_reg(0x07);
    wireless_last_status = status;
-   if ((poll_count++ % 8192) == 0 && status_log_count < 8) {
+   if ((wireless_rf_poll_count++ % 8192) == 0 &&
+       wireless_rf_status_log_count < 8) {
       printf("unifrog wireless poll status=0x%02x ch_index=%u count=%u\n",
-         (unsigned)status, wireless_rf_channel_index, poll_count);
-      status_log_count++;
+         (unsigned)status, wireless_rf_channel_index, wireless_rf_poll_count);
+      wireless_rf_status_log_count++;
    }
    if (status & 0x40) {
       uint8_t pkt[2] = {0, 0};
@@ -644,18 +649,27 @@ void unifrog_input_wireless_poll_once(void)
          wireless_rf_empty_polls = 0;
          rf_stock_next_channel();
       }
+      if (wireless_rf_poll_count >= RF_IDLE_POLL_SUSPEND &&
+          wireless_rf_status_log_count >= 8) {
+         printf("unifrog wireless suspend reason=idle_empty polls=%u status=0x%02x ch_index=%u\n",
+            wireless_rf_poll_count, (unsigned)status,
+            wireless_rf_channel_index);
+         wireless_rf_bus_ok = 0;
+         unifrog_input_restore_local_bus();
+         return;
+      }
    }
 
    for (unsigned port = 0; port < ARRAY_SIZE(wireless_state); port++) {
       if (wireless_state[port] != wireless_prev_state[port]) {
-         if (state_log_count < 16) {
+         if (wireless_rf_state_log_count < 16) {
          printf("unifrog wireless p%u raw=0x%04lx state=0x%08lx status=0x%02x pkt_timeout=%u\n",
             port + 1,
             (unsigned long)wireless_raw[port],
             (unsigned long)wireless_state[port],
             (unsigned)status,
             wireless_timeout[port]);
-            state_log_count++;
+            wireless_rf_state_log_count++;
          }
          wireless_prev_state[port] = wireless_state[port];
       }

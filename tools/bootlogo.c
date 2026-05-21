@@ -550,13 +550,200 @@ static int write_rgb565_inc(const char *path, const struct rgb *pixels)
    return 0;
 }
 
+static int write_le16(FILE *file, uint16_t value)
+{
+   return fputc((int)(value & 0xffu), file) == EOF ||
+      fputc((int)((value >> 8) & 0xffu), file) == EOF ? -1 : 0;
+}
+
+static int write_le32(FILE *file, uint32_t value)
+{
+   return write_le16(file, (uint16_t)(value & 0xffffu)) != 0 ||
+      write_le16(file, (uint16_t)((value >> 16) & 0xffffu)) != 0 ? -1 : 0;
+}
+
+static int write_bmp24(const char *path, const struct rgb *pixels)
+{
+   FILE *file;
+   const uint32_t row_bytes = ((LOGO_WIDTH * 3u) + 3u) & ~3u;
+   const uint32_t pixel_bytes = row_bytes * LOGO_HEIGHT;
+   const uint32_t file_bytes = 14u + 40u + pixel_bytes;
+   const uint8_t pad[3] = {0, 0, 0};
+
+   file = fopen(path, "wb");
+   if (!file) {
+      fprintf(stderr, "open %s: %s\n", path, strerror(errno));
+      return -1;
+   }
+
+   if (fputc('B', file) == EOF || fputc('M', file) == EOF ||
+       write_le32(file, file_bytes) != 0 ||
+       write_le16(file, 0) != 0 || write_le16(file, 0) != 0 ||
+       write_le32(file, 14u + 40u) != 0 ||
+       write_le32(file, 40u) != 0 ||
+       write_le32(file, LOGO_WIDTH) != 0 ||
+       write_le32(file, LOGO_HEIGHT) != 0 ||
+       write_le16(file, 1) != 0 ||
+       write_le16(file, 24) != 0 ||
+       write_le32(file, 0) != 0 ||
+       write_le32(file, pixel_bytes) != 0 ||
+       write_le32(file, 2835) != 0 ||
+       write_le32(file, 2835) != 0 ||
+       write_le32(file, 0) != 0 ||
+       write_le32(file, 0) != 0) {
+      fclose(file);
+      return -1;
+   }
+
+   for (unsigned y = 0; y < LOGO_HEIGHT; y++) {
+      const struct rgb *row = pixels + (LOGO_HEIGHT - 1u - y) * LOGO_WIDTH;
+
+      for (unsigned x = 0; x < LOGO_WIDTH; x++) {
+         if (fputc(row[x].b, file) == EOF ||
+             fputc(row[x].g, file) == EOF ||
+             fputc(row[x].r, file) == EOF) {
+            fclose(file);
+            return -1;
+         }
+      }
+      if (row_bytes > LOGO_WIDTH * 3u &&
+          fwrite(pad, 1, row_bytes - LOGO_WIDTH * 3u, file) !=
+             row_bytes - LOGO_WIDTH * 3u) {
+         fclose(file);
+         return -1;
+      }
+   }
+   if (fclose(file) != 0) {
+      fprintf(stderr, "close %s: %s\n", path, strerror(errno));
+      return -1;
+   }
+   return 0;
+}
+
+static int write_fourcc(FILE *file, const char *tag)
+{
+   return fwrite(tag, 1, 4, file) == 4 ? 0 : -1;
+}
+
+static int write_avi_bmp(const char *path, const struct rgb *pixels)
+{
+   FILE *file;
+   const uint32_t row_bytes = ((LOGO_WIDTH * 3u) + 3u) & ~3u;
+   const uint32_t frame_bytes = row_bytes * LOGO_HEIGHT;
+   const uint32_t movi_payload = 8u + frame_bytes;
+   const uint32_t hdrl_payload = 4u + (8u + 56u) + (8u + 116u);
+   const uint32_t riff_size = 4u + (8u + hdrl_payload) + (8u + movi_payload) +
+      (8u + 16u);
+   const uint8_t pad[3] = {0, 0, 0};
+
+   file = fopen(path, "wb");
+   if (!file) {
+      fprintf(stderr, "open %s: %s\n", path, strerror(errno));
+      return -1;
+   }
+
+   if (write_fourcc(file, "RIFF") != 0 || write_le32(file, riff_size) != 0 ||
+       write_fourcc(file, "AVI ") != 0 ||
+       write_fourcc(file, "LIST") != 0 || write_le32(file, hdrl_payload) != 0 ||
+       write_fourcc(file, "hdrl") != 0 ||
+       write_fourcc(file, "avih") != 0 || write_le32(file, 56u) != 0 ||
+       write_le32(file, 1000000u) != 0 ||
+       write_le32(file, frame_bytes) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_le32(file, 0x10u) != 0 ||
+       write_le32(file, 1u) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_le32(file, 1u) != 0 ||
+       write_le32(file, frame_bytes) != 0 ||
+       write_le32(file, LOGO_WIDTH) != 0 ||
+       write_le32(file, LOGO_HEIGHT) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_fourcc(file, "LIST") != 0 || write_le32(file, 116u) != 0 ||
+       write_fourcc(file, "strl") != 0 ||
+       write_fourcc(file, "strh") != 0 || write_le32(file, 56u) != 0 ||
+       write_fourcc(file, "vids") != 0 ||
+       write_fourcc(file, "DIB ") != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_le16(file, 0u) != 0 ||
+       write_le16(file, 0u) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_le32(file, 1u) != 0 ||
+       write_le32(file, 1u) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_le32(file, 1u) != 0 ||
+       write_le32(file, frame_bytes) != 0 ||
+       write_le32(file, 0xffffffffu) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_le16(file, 0u) != 0 ||
+       write_le16(file, 0u) != 0 ||
+       write_le16(file, LOGO_WIDTH) != 0 ||
+       write_le16(file, LOGO_HEIGHT) != 0 ||
+       write_fourcc(file, "strf") != 0 || write_le32(file, 40u) != 0 ||
+       write_le32(file, 40u) != 0 ||
+       write_le32(file, LOGO_WIDTH) != 0 ||
+       write_le32(file, LOGO_HEIGHT) != 0 ||
+       write_le16(file, 1u) != 0 ||
+       write_le16(file, 24u) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_le32(file, frame_bytes) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_le32(file, 0u) != 0 ||
+       write_fourcc(file, "LIST") != 0 ||
+       write_le32(file, movi_payload) != 0 ||
+       write_fourcc(file, "movi") != 0 ||
+       write_fourcc(file, "00db") != 0 ||
+       write_le32(file, frame_bytes) != 0) {
+      fclose(file);
+      return -1;
+   }
+
+   for (unsigned y = 0; y < LOGO_HEIGHT; y++) {
+      const struct rgb *row = pixels + (LOGO_HEIGHT - 1u - y) * LOGO_WIDTH;
+
+      for (unsigned x = 0; x < LOGO_WIDTH; x++) {
+         if (fputc(row[x].b, file) == EOF ||
+             fputc(row[x].g, file) == EOF ||
+             fputc(row[x].r, file) == EOF) {
+            fclose(file);
+            return -1;
+         }
+      }
+      if (row_bytes > LOGO_WIDTH * 3u &&
+          fwrite(pad, 1, row_bytes - LOGO_WIDTH * 3u, file) !=
+             row_bytes - LOGO_WIDTH * 3u) {
+         fclose(file);
+         return -1;
+      }
+   }
+
+   if (write_fourcc(file, "idx1") != 0 || write_le32(file, 16u) != 0 ||
+       write_fourcc(file, "00db") != 0 ||
+       write_le32(file, 0x10u) != 0 ||
+       write_le32(file, 4u) != 0 ||
+       write_le32(file, frame_bytes) != 0) {
+      fclose(file);
+      return -1;
+   }
+
+   if (fclose(file) != 0) {
+      fprintf(stderr, "close %s: %s\n", path, strerror(errno));
+      return -1;
+   }
+   return 0;
+}
+
 int main(int argc, char **argv)
 {
    struct rgb *pixels;
    int ret = 1;
 
-   if (argc != 5) {
-      fprintf(stderr, "usage: %s input.png|input.ppm version output.ppm output.inc\n",
+   if (argc < 5 || argc > 7) {
+      fprintf(stderr, "usage: %s input.png|input.ppm version output.ppm output.inc [output.bmp] [output.avi]\n",
          argv[0]);
       return 1;
    }
@@ -568,7 +755,9 @@ int main(int argc, char **argv)
    if (read_logo(argv[1], pixels) == 0) {
       draw_version(pixels, argv[2]);
       if (write_ppm(argv[3], pixels) == 0 &&
-          write_rgb565_inc(argv[4], pixels) == 0)
+          write_rgb565_inc(argv[4], pixels) == 0 &&
+          (argc < 6 || write_bmp24(argv[5], pixels) == 0) &&
+          (argc < 7 || write_avi_bmp(argv[6], pixels) == 0))
          ret = 0;
    }
    free(pixels);

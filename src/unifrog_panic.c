@@ -8,6 +8,7 @@
 #include <unifrog/gfx.h>
 #include <unifrog/input.h>
 #include <unifrog/log.h>
+#include <unifrog/perf.h>
 
 static char hex_digit(unsigned value)
 {
@@ -34,7 +35,7 @@ static void draw_label_hex(const struct unifrog_surface *surface, int y,
    unifrog_gfx_draw_text(surface, 98, y, hex, UNIFROG_RGB565(250, 246, 230), 1);
 }
 
-static void draw_panic_screen(const char *title, const char *label0,
+static int draw_panic_screen(const char *title, const char *label0,
    uint32_t value0, const char *label1, uint32_t value1, const char *label2,
    uint32_t value2, const char *label3, uint32_t value3)
 {
@@ -62,7 +63,11 @@ static void draw_panic_screen(const char *title, const char *label0,
          unifrog_fb_flush_buffer(&fb, i);
       }
       (void)unifrog_fb_pan(&fb, 0);
+      return 0;
    }
+   unifrog_log("unifrog panic screen open failed title=%s\n",
+      title ? title : "");
+   return -1;
 }
 
 static void panic_reset_system(uint32_t buttons)
@@ -82,13 +87,20 @@ static uint32_t panic_poll_buttons(void)
    return unifrog_input_poll_local_direct_buttons();
 }
 
-static void wait_for_start_reset(void)
+static void wait_for_start_reset(uint32_t timeout_ms)
 {
+   uint32_t start_ms = unifrog_perf_time_ms();
+
+   if (!timeout_ms)
+      timeout_ms = 5000u;
    unifrog_input_restore_local_bus();
    for (;;) {
       uint32_t buttons = panic_poll_buttons();
+      uint32_t now_ms = unifrog_perf_time_ms();
 
       if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_START))
+         panic_reset_system(buttons);
+      if (now_ms - start_ms > timeout_ms)
          panic_reset_system(buttons);
       for (volatile unsigned i = 0; i < 200000u; i++)
          __asm__ volatile("");
@@ -98,17 +110,17 @@ static void wait_for_start_reset(void)
 void unifrog_panic_screen(const char *title, uint32_t a, uint32_t b,
    uint32_t c, uint32_t d)
 {
-   draw_panic_screen(title, "A", a, "B", b, "C", c, "D", d);
-   wait_for_start_reset();
+   (void)draw_panic_screen(title, "A", a, "B", b, "C", c, "D", d);
+   wait_for_start_reset(5000u);
 }
 
 void unifrog_panic_screen_labeled(const char *title, const char *label0,
    uint32_t value0, const char *label1, uint32_t value1,
    const char *label2, uint32_t value2, const char *label3, uint32_t value3)
 {
-   draw_panic_screen(title, label0, value0, label1, value1, label2,
+   (void)draw_panic_screen(title, label0, value0, label1, value1, label2,
       value2, label3, value3);
-   wait_for_start_reset();
+   wait_for_start_reset(5000u);
 }
 
 void unifrog_exception_panic(uint32_t cause, uint32_t epc, uint32_t badvaddr,
@@ -119,9 +131,13 @@ void unifrog_exception_panic(uint32_t cause, uint32_t epc, uint32_t badvaddr,
       (unsigned long)cause, (unsigned long)epc, (unsigned long)badvaddr,
       (unsigned long)ra);
    (void)unifrog_log_flush_force();
-   draw_panic_screen("UNIFROG EXCEPTION", "CAUSE", cause, "EPC", epc,
-      "BADV", badvaddr, "RA", ra);
-   wait_for_start_reset();
+   if (draw_panic_screen("UNIFROG EXCEPTION", "CAUSE", cause, "EPC", epc,
+       "BADV", badvaddr, "RA", ra) == 0)
+      unifrog_log("unifrog exception screen shown autoreboot_ms=5000\n");
+   else
+      unifrog_log("unifrog exception screen unavailable autoreboot_ms=5000\n");
+   (void)unifrog_log_flush_force();
+   wait_for_start_reset(5000u);
 }
 
 void unifrog_panic_trigger_test_exception(void)

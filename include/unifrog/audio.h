@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 #define UNIFROG_AUDIO_DEFAULT_PERIOD_BYTES 512u
-#define UNIFROG_AUDIO_DEFAULT_PERIODS 4u
+#define UNIFROG_AUDIO_DEFAULT_PERIODS 8u
 #define UNIFROG_AUDIO_BACKEND_AUTO 0
 #define UNIFROG_AUDIO_BACKEND_SND 1
 #define UNIFROG_AUDIO_BACKEND_AUDSINK 2
@@ -21,6 +21,7 @@ struct unifrog_audio {
    unsigned period_bytes;
    unsigned periods;
    unsigned frame_bytes;
+   int muted;
 };
 
 int unifrog_audio_open(struct unifrog_audio *audio,
@@ -44,6 +45,7 @@ int unifrog_audio_set_output_enabled(struct unifrog_audio *audio, int enabled);
 int unifrog_audio_set_system_volume(unsigned volume);
 int unifrog_audio_set_system_mute(int mute);
 void unifrog_audio_set_system_output_enabled(int enabled);
+void unifrog_audio_set_output_gate_enabled(int enabled);
 void unifrog_audio_debug_gate(uint32_t *l_dir, uint32_t *l_out,
    uint32_t *r_dir, uint32_t *r_out);
 void unifrog_audio_debug_dump(struct unifrog_audio *audio, const char *tag);

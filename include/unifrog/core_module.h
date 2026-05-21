@@ -22,6 +22,14 @@ extern "C" {
 #define UNIFROG_CORE_MODULE_ID_MAX 32u
 #define UNIFROG_CORE_MODULE_EXTENSIONS_MAX 128u
 
+#ifndef UNIFROG_CORE_MODULE_REQUIRED_ABI_VERSION
+#define UNIFROG_CORE_MODULE_REQUIRED_ABI_VERSION UNIFROG_ABI_CORE_MIN_VERSION
+#endif
+
+#define UNIFROG_CORE_MODULE_REQUIRED_ABI_SIZE UNIFROG_ABI_CORE_MIN_SIZE
+#define UNIFROG_CORE_MODULE_EXPORTS_LIBRETRO_SIZE \
+   UNIFROG_ABI_MEMBER_END(struct unifrog_core_module_exports, retro_cheat_set)
+
 struct unifrog_media_video_options;
 
 struct unifrog_core_module_header {
@@ -42,7 +50,11 @@ struct unifrog_core_module_header {
 
    char core_id[UNIFROG_CORE_MODULE_ID_MAX];
    char extensions[UNIFROG_CORE_MODULE_EXTENSIONS_MAX];
-   uint32_t reserved[8];
+   uint32_t built_abi_version;
+   uint32_t required_abi_size;
+   uint32_t built_abi_size;
+   uint32_t exports_size;
+   uint32_t reserved[4];
 };
 
 struct unifrog_core_module_exports {

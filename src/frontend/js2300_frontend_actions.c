@@ -1,6 +1,4 @@
 #include "js2300_frontend_internal.h"
-#include "unifrog_core_module_loader.h"
-#include "unifrog_mips_call.h"
 
 static int action_key_equals(const char *begin, const char *end,
    const char *key)
@@ -53,6 +51,34 @@ static void action_copy_text(char *dst, size_t dst_size, const char *begin,
    dst[len] = '\0';
 }
 
+static void draw_native_toast(const char *message)
+{
+   struct unifrog_fb fb;
+   struct unifrog_surface surface;
+   unsigned buffer;
+   char text[72];
+
+   if (!message || !message[0])
+      return;
+   memset(&fb, 0, sizeof(fb));
+   if (unifrog_fb_open(&fb, UNIFROG_FB_OPEN_PRESERVE) != 0)
+      return;
+   buffer = fb.current_buffer;
+   surface = unifrog_fb_surface_for_buffer(&fb, buffer);
+   unifrog_text_copy(text, sizeof(text), message);
+   unifrog_gfx_fill_rect(&surface, 8, (int)surface.height - 42,
+      (int)surface.width - 16, 34, UNIFROG_RGB565(0, 0, 0));
+   unifrog_gfx_fill_rect(&surface, 10, (int)surface.height - 40,
+      (int)surface.width - 20, 30, UNIFROG_RGB565(22, 28, 34));
+   unifrog_gfx_fill_rect(&surface, 10, (int)surface.height - 40, 4, 30,
+      UNIFROG_RGB565(68, 188, 136));
+   unifrog_gfx_draw_text(&surface, 20, (int)surface.height - 31, text,
+      UNIFROG_RGB565(236, 241, 246), 1);
+   unifrog_fb_flush_buffer(&fb, buffer);
+   (void)unifrog_fb_pan(&fb, buffer);
+   unifrog_fb_close(&fb);
+}
+
 static void parse_run_option_list(struct unifrog_libretro_run_options *options,
    const char *begin, const char *end)
 {
@@ -97,6 +123,9 @@ static void parse_run_option_list(struct unifrog_libretro_run_options *options,
             options->frameskip = value;
          else if (action_key_equals(key_begin, key_end, "display"))
             options->display_mode = value;
+         else if (action_key_equals(key_begin, key_end, "frames") &&
+                  value >= 0)
+            options->max_frames = (unsigned)value;
       }
 
       if (cursor < end && *cursor == ',')
@@ -109,7 +138,7 @@ static const char *parse_run_action(struct js2300_frontend *frontend,
 {
    const char *path = NULL;
 
-   unifrog_libretro_run_options_init(&frontend->run_options);
+   js2300_frontend_default_run_options(&frontend->run_options);
    if (strncmp(id, "run:", 4) == 0) {
       path = id + 4;
    } else if (strncmp(id, "run+", 4) == 0) {
@@ -314,43 +343,7 @@ static int run_system_check(void)
    static const char *required_files[] = {
       "/media/mmcblk0/bios/bisrv.asd",
       "/media/mmcblk0/firmware/unifrog.bin",
-      JS2300_FRONTEND_APP_ROOT "/main.js",
-      JS2300_FRONTEND_APP_ROOT "/main.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/quick-menu.js",
-      JS2300_FRONTEND_APP_ROOT "/quick-menu.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/bytecode-manifest.txt",
-      JS2300_FRONTEND_APP_ROOT "/app/theme.js",
-      JS2300_FRONTEND_APP_ROOT "/app/theme.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/app/constants.js",
-      JS2300_FRONTEND_APP_ROOT "/app/constants.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/app/catalog.js",
-      JS2300_FRONTEND_APP_ROOT "/app/catalog.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/app/text.js",
-      JS2300_FRONTEND_APP_ROOT "/app/text.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/app/navigation.js",
-      JS2300_FRONTEND_APP_ROOT "/app/navigation.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/app/content.js",
-      JS2300_FRONTEND_APP_ROOT "/app/content.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/app/settings.js",
-      JS2300_FRONTEND_APP_ROOT "/app/settings.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/app/index.js",
-      JS2300_FRONTEND_APP_ROOT "/app/index.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/app/views.js",
-      JS2300_FRONTEND_APP_ROOT "/app/views.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/app/actions.js",
-      JS2300_FRONTEND_APP_ROOT "/app/actions.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/app/app.js",
-      JS2300_FRONTEND_APP_ROOT "/app/app.js.mqbc",
       JS2300_FRONTEND_APP_ROOT "/manifest.ini",
-      JS2300_FRONTEND_APP_ROOT "/scripts/smoke-test.js",
-      JS2300_FRONTEND_APP_ROOT "/scripts/smoke-test.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/scripts/perf-test.js",
-      JS2300_FRONTEND_APP_ROOT "/scripts/perf-test.js.mqbc",
-      JS2300_FRONTEND_APP_ROOT "/themes/default.ini",
-      JS2300_FRONTEND_APP_ROOT "/themes/system-icons/icons/gba.png",
-      JS2300_FRONTEND_APP_ROOT "/themes/system-icons/icons/snes.png",
-      JS2300_FRONTEND_APP_ROOT "/themes/system-icons/icons/settings.png",
-      JS2300_FRONTEND_APP_ROOT "/cores/js2300.bin",
       JS2300_FRONTEND_APP_ROOT "/cores/gpsp.bin",
       JS2300_FRONTEND_APP_ROOT "/cores/gambatte.bin",
       JS2300_FRONTEND_APP_ROOT "/cores/picodrive.bin",
@@ -425,19 +418,67 @@ int host_action(void *opaque, const char *id)
 
    if (!id || !*id)
       return -1;
-   if (frontend->action[0])
-      return 0;
 
    if (strcmp(id, "storage:experimental") == 0)
       return UNIFROG_SD_EXPERIMENTAL ? 1 : 0;
-   if (strcmp(id, "storage:fast-read-active") == 0)
-      return frontend->boot_read_active ? 1 : 0;
-   if (strcmp(id, "storage:restore-boot") == 0)
-      return frontend_restore_boot_read_window(frontend, "js_action", 1) == 0 ?
-         1 : -1;
    if (strcmp(id, "storage:recover") == 0)
       return unifrog_platform_recover_storage("js_action", 4, 100) == 0 ?
          1 : -1;
+   if (strncmp(id, "toast:", 6) == 0) {
+      draw_native_toast(id + 6);
+      printf("js2300 action toast message=%s\n", id + 6);
+      return 1;
+   }
+   if (strcmp(id, "developer:system_check") == 0) {
+      int ret = run_system_check();
+
+      printf("js2300 action developer system_check immediate ret=%d\n", ret);
+      return ret == 0 ? 1 : -1;
+   }
+   if (strcmp(id, "developer:display_benchmark") == 0) {
+      char summary[64];
+      int ret = unifrog_display_benchmark_run(summary, sizeof(summary));
+
+      printf("js2300 action developer display_benchmark immediate ret=%d summary=%s\n",
+         ret, summary);
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "display_benchmark_return");
+      return ret == 0 ? 1 : -1;
+   }
+   if (strcmp(id, "developer:display_color_test") == 0) {
+      char summary[64];
+      int ret = unifrog_display_color_test_run(summary, sizeof(summary));
+
+      printf("js2300 action developer display_color_test immediate ret=%d summary=%s\n",
+         ret, summary);
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "display_color_test_return");
+      return ret == 0 ? 1 : -1;
+   }
+   if (strncmp(id, "developer:storage_stress:", 25) == 0) {
+      const char *profile = id + 25;
+      int ret = run_storage_stress_test(frontend, profile);
+
+      printf("js2300 action developer storage_stress immediate profile=%s ret=%d\n",
+         profile, ret);
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "storage_stress_return");
+      return ret == 0 ? 1 : -1;
+   }
+   if (strcmp(id, "developer:storage_quick_benchmark") == 0) {
+      int ret = run_storage_quick_benchmark(frontend);
+
+      printf("js2300 action developer storage_quick_benchmark immediate ret=%d\n",
+         ret);
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "storage_quick_benchmark_return");
+      return ret == 0 ? 1 : -1;
+   }
+   if (frontend->action[0]) {
+      printf("js2300 action blocked pending=%s id=%s\n",
+         frontend->action, id);
+      return 0;
+   }
 
    run_path = parse_run_action(frontend, id);
    if (run_path) {
@@ -470,7 +511,9 @@ int host_action(void *opaque, const char *id)
       if (!UNIFROG_SD_EXPERIMENTAL)
          (void)unifrog_log_flush();
       start_ms = unifrog_perf_time_ms();
+      unifrog_platform_sd_debug_dump("frontend_warm_run_start");
       ret = unifrog_libretro_run_path_ex(path, &frontend->run_options);
+      unifrog_platform_sd_debug_dump("frontend_warm_run_return");
       printf("js2300 action run warm ret=%d ms=%lu path=%s\n",
          ret, (unsigned long)(unifrog_perf_time_ms() - start_ms), path);
       unifrog_diag_memory_snapshot("frontend.warm_run_return");
@@ -479,7 +522,8 @@ int host_action(void *opaque, const char *id)
          unifrog_log_defer_end();
          unifrog_log_set_auto_flush_bytes(old_auto_flush);
       }
-      frontend_fb_reopen(frontend, "warm_libretro_return");
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "warm_libretro_return");
       unifrog_input_clear();
       frontend->input_recovered = 1;
       return ret == 0 ? 1 : -1;
@@ -607,8 +651,7 @@ static int split_script_path(const char *path, char *root, size_t root_size,
    return 0;
 }
 
-static int run_js_script_file(struct js2300_frontend *frontend,
-   const char *path)
+int run_js_script_file(struct js2300_frontend *frontend, const char *path)
 {
    struct js2300_config config;
    struct js2300_host host;
@@ -630,8 +673,9 @@ static int run_js_script_file(struct js2300_frontend *frontend,
    config.heap_bytes = 8u * 1024u * 1024u;
    frontend_configure_host(frontend, &host);
    start_ms = unifrog_perf_time_ms();
-   printf("js2300 script launch root=%s script=%s heap=%u\n",
-      root, entry, (unsigned)config.heap_bytes);
+   printf("js2300 script launch root=%s script=%s heap=%u mode=%s\n",
+      root, entry, (unsigned)config.heap_bytes,
+      frontend->extension_mode ? "extension" : "standalone");
    unifrog_diag_memory_snapshot("script.launch");
    (void)unifrog_log_flush();
    create_start_ms = unifrog_perf_time_ms();
@@ -655,26 +699,9 @@ static int run_js_script_file(struct js2300_frontend *frontend,
    return ret;
 }
 
-static int media_module_export_available(
-   const struct unifrog_core_module_exports *exports)
-{
-   return exports &&
-      exports->size >= offsetof(struct unifrog_core_module_exports,
-         native_media_play_video_ex) +
-         sizeof(exports->native_media_play_video_ex) &&
-      exports->native_media_play_video_ex;
-}
-
 static int play_video_media_module(struct js2300_frontend *frontend,
    const struct unifrog_media_video_options *options)
 {
-   struct unifrog_core_module_loaded loaded;
-   const struct unifrog_core_module_exports *exports;
-   uint32_t load_start_ms;
-   uint32_t play_start_ms;
-   int read_window;
-   int ret = -1;
-
    (void)options;
    host_video_clear(frontend, 0x0000);
    host_video_text(frontend, 16, 42, "Video module disabled", 0xffff);
@@ -685,48 +712,6 @@ static int play_video_media_module(struct js2300_frontend *frontend,
       frontend->path);
    (void)unifrog_log_flush();
    return -1;
-
-   memset(&loaded, 0, sizeof(loaded));
-   load_start_ms = unifrog_perf_time_ms();
-   read_window = frontend_start_runtime_read_window(frontend,
-      "hcrtos_media_module");
-   ret = unifrog_core_module_load_file(JS2300_FRONTEND_HCRTOS_MEDIA_MODULE,
-      "hcrtos-media", &loaded);
-   if (read_window)
-      (void)frontend_restore_boot_read_window(frontend,
-         "hcrtos_media_module", 1);
-   printf("js2300 media module load ret=%d ms=%lu path=%s\n",
-      ret, (unsigned long)(unifrog_perf_time_ms() - load_start_ms),
-      JS2300_FRONTEND_HCRTOS_MEDIA_MODULE);
-   if (ret != 0)
-      return ret;
-
-   exports = loaded.exports;
-   if (!media_module_export_available(exports)) {
-      printf("js2300 media module missing native export id=%s size=%u\n",
-         exports && exports->core_id ? exports->core_id : "?",
-         exports ? (unsigned)exports->size : 0u);
-      unifrog_core_module_unload(&loaded);
-      return -1;
-   }
-
-   host_video_clear(frontend, 0x0000);
-   host_video_text(frontend, 16, 46, "Loading video", 0xffff);
-   host_video_text(frontend, 16, 70, "B exits after playback starts", 0x7bef);
-   host_video_present(frontend);
-   (void)unifrog_log_flush();
-
-   play_start_ms = unifrog_perf_time_ms();
-   unifrog_fb_close(&frontend->fb);
-   ret = (int)unifrog_mips_call2(loaded.gp_addr,
-      (uintptr_t)exports->native_media_play_video_ex,
-      (uintptr_t)frontend->path, (uintptr_t)options);
-   printf("js2300 media module play ret=%d ms=%lu path=%s\n",
-      ret, (unsigned long)(unifrog_perf_time_ms() - play_start_ms),
-      frontend->path);
-   unifrog_core_module_unload(&loaded);
-   frontend_fb_reopen(frontend, "video_return");
-   return ret;
 }
 
 int run_requested_action(struct js2300_frontend *frontend)
@@ -746,7 +731,8 @@ int run_requested_action(struct js2300_frontend *frontend)
          frontend->path);
       unifrog_diag_memory_snapshot("action.core_return");
       (void)unifrog_log_flush();
-      frontend_fb_reopen(frontend, "libretro_return");
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "libretro_return");
       unifrog_diag_memory_snapshot("action.fb_reopen");
       frontend->input_recovered = 1;
       return 0;
@@ -758,9 +744,11 @@ int run_requested_action(struct js2300_frontend *frontend)
       options.preset = frontend->video_preset;
       options.disable_audio = frontend->video_disable_audio;
 #if UNIFROG_HCRTOS_MEDIA_FIRMWARE
-      unifrog_fb_close(&frontend->fb);
+      if (frontend->owns_framebuffer)
+         unifrog_fb_close(&frontend->fb);
       (void)unifrog_media_play_video_ex(frontend->path, &options);
-      frontend_fb_reopen(frontend, "video_return");
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "video_return");
 #else
       (void)play_video_media_module(frontend, &options);
 #endif
@@ -769,7 +757,8 @@ int run_requested_action(struct js2300_frontend *frontend)
    if (strcmp(frontend->action, "continue") == 0) {
       printf("js2300 continue ignored: no explicit last-game path\n");
       (void)unifrog_log_flush();
-      frontend_fb_reopen(frontend, "continue_return");
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "continue_return");
       return 0;
    }
    if (strcmp(frontend->action, "firmware") == 0) {
@@ -797,39 +786,45 @@ int run_requested_action(struct js2300_frontend *frontend)
       ret = run_js_script_file(frontend, script_path);
       if (ret == 0 && frontend->action[0])
          return run_requested_action(frontend);
-      frontend_fb_reopen(frontend, "script_return");
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "script_return");
       return ret;
    }
    if (strcmp(frontend->action, "exception") == 0) {
       printf("js2300 developer trigger exception\n");
       (void)unifrog_log_flush();
-      unifrog_fb_close(&frontend->fb);
+      if (frontend->owns_framebuffer)
+         unifrog_fb_close(&frontend->fb);
       unifrog_panic_trigger_test_exception();
       return -1;
    }
    if (strcmp(frontend->action, "cpu_exception") == 0) {
       printf("js2300 developer trigger cpu_exception\n");
       (void)unifrog_log_flush();
-      unifrog_fb_close(&frontend->fb);
+      if (frontend->owns_framebuffer)
+         unifrog_fb_close(&frontend->fb);
       unifrog_panic_trigger_cpu_exception();
       return -1;
    }
    if (strcmp(frontend->action, "system_check") == 0) {
       int ret = run_system_check();
 
-      frontend_fb_reopen(frontend, "system_check_return");
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "system_check_return");
       return ret;
    }
    if (strcmp(frontend->action, "storage_test") == 0) {
       int ret = run_storage_test(frontend);
 
-      frontend_fb_reopen(frontend, "storage_test_return");
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "storage_test_return");
       return ret;
    }
    if (strcmp(frontend->action, "storage_full_test") == 0) {
       int ret = run_storage_full_test(frontend);
 
-      frontend_fb_reopen(frontend, "storage_full_test_return");
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "storage_full_test_return");
       return ret;
    }
    if (strcmp(frontend->action, "storage_mode_test") == 0) {
@@ -838,7 +833,8 @@ int run_requested_action(struct js2300_frontend *frontend)
 
       unifrog_text_copy(profile, sizeof(profile), frontend->path);
       ret = run_storage_mode_test(frontend, profile);
-      frontend_fb_reopen(frontend, "storage_mode_test_return");
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "storage_mode_test_return");
       return ret;
    }
    return -1;

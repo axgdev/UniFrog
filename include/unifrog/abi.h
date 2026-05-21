@@ -35,6 +35,14 @@ extern "C" {
                               UNIFROG_ABI_VERSION_MINOR_VALUE, \
                               UNIFROG_ABI_VERSION_PATCH_VALUE)
 
+/*
+ * Core modules should require the oldest ABI they actually need, not the ABI
+ * they were built with. New callbacks must be appended to struct unifrog_abi
+ * and treated as optional unless this floor is intentionally raised.
+ */
+#define UNIFROG_ABI_CORE_MIN_VERSION \
+   UNIFROG_ABI_VERSION_ENCODE(0u, 5u, 0u)
+
 #define UNIFROG_ABI_MEMORY_EXECUTABLE (1u << 0)
 #define UNIFROG_ABI_MEMORY_CACHEABLE (1u << 1)
 #define UNIFROG_ABI_MEMORY_RESERVED (1u << 2)
@@ -137,8 +145,23 @@ struct unifrog_abi {
    uint32_t (*input_menu_buttons)(void);
 };
 
+#define UNIFROG_ABI_MEMBER_END(type, member) \
+   (offsetof(type, member) + sizeof(((type *)0)->member))
+
+#define UNIFROG_ABI_CORE_MIN_SIZE \
+   offsetof(struct unifrog_abi, log_auto_flush_bytes)
+
+#define UNIFROG_ABI_HAS_MEMBER(abi, member) \
+   ((abi) && (abi)->size >= UNIFROG_ABI_MEMBER_END(struct unifrog_abi, member))
+
+#define UNIFROG_ABI_HAS_CORE_BASE(abi) \
+   ((abi) && (abi)->magic == UNIFROG_ABI_MAGIC && \
+    (abi)->size >= UNIFROG_ABI_CORE_MIN_SIZE)
+
 const struct unifrog_abi *unifrog_abi_get(void);
 int unifrog_abi_compatible(uint32_t required_version);
+int unifrog_abi_table_compatible(const struct unifrog_abi *abi,
+   uint32_t required_version, size_t required_size);
 int unifrog_abi_application_memory_slot(struct unifrog_abi_memory_slot *slot);
 int unifrog_abi_memory_layout(struct unifrog_abi_memory_layout *layout);
 int unifrog_abi_application_memory_reserve_top(size_t bytes,

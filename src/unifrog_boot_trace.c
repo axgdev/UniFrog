@@ -94,8 +94,8 @@ static const char *boot_trace_name(uint32_t event)
       return "unifrog.storage.done";
    case FASTBOOT_TRACE_UNIFROG_LOG_RESET_DONE:
       return "unifrog.log_reset.done";
-   case FASTBOOT_TRACE_UNIFROG_JS_BEGIN:
-      return "unifrog.js.begin";
+   case FASTBOOT_TRACE_UNIFROG_FRONTEND_BEGIN:
+      return "unifrog.frontend.begin";
    case FASTBOOT_TRACE_UNIFROG_FB_OPEN_BEGIN:
       return "unifrog.fb_open.begin";
    case FASTBOOT_TRACE_UNIFROG_FB_CLEAR_DONE:

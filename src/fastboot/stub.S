@@ -8,18 +8,22 @@
 	.globl _start
 	.ent _start
 _start:
-	/* Latch R05 high before muxing it to GPIO so the backlight cannot pulse on. */
+	/* Latch active-low gates high before muxing them to GPIO. */
 	li	$t4, FASTBOOT_GPIOR_OUTPUT_REG
 	lw	$t5, 0($t4)
 	ori	$t5, $t5, FASTBOOT_BACKLIGHT_R05_MASK
+	ori	$t5, $t5, FASTBOOT_SPEAKER_R07_MASK
 	sw	$t5, 0($t4)
 
 	li	$t4, FASTBOOT_GPIOR_DIR_REG
 	lw	$t5, 0($t4)
 	ori	$t5, $t5, FASTBOOT_BACKLIGHT_R05_MASK
+	ori	$t5, $t5, FASTBOOT_SPEAKER_R07_MASK
 	sw	$t5, 0($t4)
 
 	li	$t4, FASTBOOT_PINMUX_R05_ADDR
+	sb	$zero, 0($t4)
+	li	$t4, FASTBOOT_PINMUX_R07_ADDR
 	sb	$zero, 0($t4)
 
 	li	$t4, FASTBOOT_TRACE_BASE

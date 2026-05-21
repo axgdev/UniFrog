@@ -57,9 +57,11 @@ Transition diagnostics are intentionally bounded:
   or debounce is suppressing it.
 
 If a device log shows the firmware build commit and the libretro build commit do
-not match, treat the binary as stale. External core modules must relink whenever
-`libunifrog.a` or the build identity changes, otherwise the menu can run one input
-implementation while the core host runs another.
+not match, first check the module ABI line. External core modules are expected
+to keep working across releases when their logged required ABI version and table
+size fit the running firmware. Treat a binary as stale only when the loader
+reports `bad_abi`, `bad_exports`, or behavior clearly depends on a newer
+module-support helper.
 
 The first confirmed receive log after the stock reset-tail fix was
 `loghcrtos31.txt`: RF self-test passed as `stock_full_init`, `diag_after_init`

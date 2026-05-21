@@ -18,6 +18,9 @@ static int format_to_hcge(enum unifrog_ge_format format,
    case UNIFROG_GE_FORMAT_ARGB8888:
       *hcge_format = HCGE_DSPF_ARGB;
       return 0;
+   case UNIFROG_GE_FORMAT_XRGB8888:
+      *hcge_format = HCGE_DSPF_RGB32;
+      return 0;
    default:
       return -1;
    }
@@ -29,6 +32,7 @@ static unsigned format_bytes_per_pixel(enum unifrog_ge_format format)
    case UNIFROG_GE_FORMAT_RGB565:
       return 2;
    case UNIFROG_GE_FORMAT_ARGB8888:
+   case UNIFROG_GE_FORMAT_XRGB8888:
       return 4;
    default:
       return 0;

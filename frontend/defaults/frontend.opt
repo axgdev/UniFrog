@@ -24,5 +24,5 @@ language=en
 font=builtin
 ### [font_size] :[12] :[10|11|12|13|14|15]
 font_size=12
-### [fast_sd] :[uhs25] :[boot|hs1|wide50|wide|uhs12|uhs25|uhs]
-fast_sd=uhs25
+### [fast_sd] :[boot] :[boot|wide1|wide2|wide4|wide8|wide10|wide12|wide16|wide20|wide25|hs1|wide50|wide|uhs12|uhs25|uhs]
+fast_sd=boot

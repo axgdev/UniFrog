@@ -66,7 +66,7 @@ const struct unifrog_core_module_header unifrog_core_module_header
    .header_size = sizeof(struct unifrog_core_module_header),
    .format_version = UNIFROG_CORE_MODULE_FORMAT_VERSION,
    .endian_mark = UNIFROG_CORE_MODULE_ENDIAN_MARK,
-   .required_abi_version = UNIFROG_ABI_VERSION,
+   .required_abi_version = UNIFROG_CORE_MODULE_REQUIRED_ABI_VERSION,
    .flags = UNIFROG_CORE_MODULE_FLAG_FIXED_ADDRESS,
    .load_addr = (uintptr_t)__unifrog_module_start,
    .file_end_addr = (uintptr_t)__unifrog_module_file_end,
@@ -77,12 +77,16 @@ const struct unifrog_core_module_header unifrog_core_module_header
    .gp_addr = (uintptr_t)_gp,
    .core_id = UNIFROG_MODULE_CORE_ID,
    .extensions = UNIFROG_MODULE_EXTENSIONS,
+   .built_abi_version = UNIFROG_ABI_VERSION,
+   .required_abi_size = UNIFROG_CORE_MODULE_REQUIRED_ABI_SIZE,
+   .built_abi_size = sizeof(struct unifrog_abi),
+   .exports_size = sizeof(struct unifrog_core_module_exports),
 };
 
 static struct unifrog_core_module_exports exports = {
    .magic = UNIFROG_CORE_MODULE_EXPORTS_MAGIC,
    .size = sizeof(struct unifrog_core_module_exports),
-   .required_abi_version = UNIFROG_ABI_VERSION,
+   .required_abi_version = UNIFROG_CORE_MODULE_REQUIRED_ABI_VERSION,
    .flags = 0,
    .core_id = UNIFROG_MODULE_CORE_ID,
    .retro_set_environment = UF_RETRO(retro_set_environment),
@@ -136,7 +140,9 @@ const struct unifrog_core_module_exports *unifrog_core_module_entry(
 {
    static int initialized;
 
-   if (!abi || abi->magic != UNIFROG_ABI_MAGIC)
+   if (!unifrog_abi_table_compatible(abi,
+       UNIFROG_CORE_MODULE_REQUIRED_ABI_VERSION,
+       UNIFROG_CORE_MODULE_REQUIRED_ABI_SIZE))
       return NULL;
    unifrog_core_module_abi = abi;
    if (!initialized) {

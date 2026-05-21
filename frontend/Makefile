@@ -1,5 +1,6 @@
 APP_DIR := app
 THEME_DIR := themes
+LANGUAGE_DIR := languages
 SCRIPT_DIR := scripts
 OUT := output
 PACKAGE := $(OUT)/unifrog-frontend
@@ -15,6 +16,7 @@ BYTECODE_MANIFEST := $(OUT)/bytecode/bytecode-manifest.txt
 ENTRY_FILES := main.js quick-menu.js
 APP_FILES := $(sort $(wildcard $(APP_DIR)/*.js))
 THEME_FILES := $(shell find $(THEME_DIR) -type f 2>/dev/null)
+LANGUAGE_FILES := $(shell find $(LANGUAGE_DIR) -type f 2>/dev/null)
 JS_FILES := $(ENTRY_FILES) $(APP_FILES) \
 	$(filter %.js,$(THEME_FILES)) $(wildcard $(SCRIPT_DIR)/*.js)
 JS_BYTECODE := $(patsubst %.js,$(OUT)/lint/%.mqbc,$(JS_FILES))
@@ -49,13 +51,15 @@ check: $(JS_BYTECODE) $(JS_COMPAT_STAMP)
 	@test -f $(THEME_DIR)/default.ini
 	@echo "OK"
 
-package: check $(JS_PACKAGE_BYTECODE) $(BYTECODE_MANIFEST) $(THEME_FILES)
+package: check $(JS_PACKAGE_BYTECODE) $(BYTECODE_MANIFEST) $(THEME_FILES) $(LANGUAGE_FILES)
 	@rm -rf $(PACKAGE)
 	@mkdir -p $(PACKAGE)
 	@cp $(ENTRY_FILES) $(PACKAGE)/
-	@mkdir -p $(PACKAGE)/$(APP_DIR) $(PACKAGE)/$(THEME_DIR) $(PACKAGE)/$(SCRIPT_DIR)
+	@mkdir -p $(PACKAGE)/$(APP_DIR) $(PACKAGE)/$(THEME_DIR) \
+		$(PACKAGE)/$(LANGUAGE_DIR) $(PACKAGE)/$(SCRIPT_DIR)
 	@cp $(APP_FILES) $(PACKAGE)/$(APP_DIR)/
 	@cp -R $(THEME_DIR)/. $(PACKAGE)/$(THEME_DIR)/
+	@if test -d $(LANGUAGE_DIR); then cp -R $(LANGUAGE_DIR)/. $(PACKAGE)/$(LANGUAGE_DIR)/; fi
 	@cp $(SCRIPT_DIR)/*.js $(PACKAGE)/$(SCRIPT_DIR)/
 	@for f in $(JS_FILES); do \
 		mkdir -p "$(PACKAGE)/$$(dirname "$$f")"; \
@@ -99,7 +103,7 @@ $(BYTECODE_MANIFEST_TOOL): tools/bytecode_manifest.c
 	@mkdir -p $(@D)
 	@$(HOSTCC) $(HOST_NO_PIE) -O2 -Wall -Wextra $< -o $@
 
-$(BYTECODE_MANIFEST): $(JS_FILES) $(JS_PACKAGE_BYTECODE) $(BYTECODE_MANIFEST_TOOL)
+$(BYTECODE_MANIFEST): $(JS_FILES) $(JS_PACKAGE_BYTECODE) $(BYTECODE_MANIFEST_TOOL) $(LANGUAGE_FILES)
 	@mkdir -p $(@D)
 	@$(BYTECODE_MANIFEST_TOOL) "$(OUT)/bytecode" $@ $(JS_FILES)
 

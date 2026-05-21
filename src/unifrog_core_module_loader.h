@@ -17,6 +17,9 @@ struct unifrog_core_module_loaded {
 
 int unifrog_core_module_load_file(const char *path, const char *expected_id,
    struct unifrog_core_module_loaded *loaded);
+int unifrog_core_module_load_file_timeout(const char *path,
+   const char *expected_id, struct unifrog_core_module_loaded *loaded,
+   unsigned read_timeout_ms);
 void unifrog_core_module_unload(struct unifrog_core_module_loaded *loaded);
 
 #endif

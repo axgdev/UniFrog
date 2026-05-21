@@ -43,10 +43,51 @@ static int valid_firmware_name(const char *name)
    return 1;
 }
 
+static int valid_asd_path(const char *path)
+{
+   size_t len;
+   int at_component_start = 1;
+
+   if (!path || path[0] == '\0' || path[0] == '/' || path[0] == '.')
+      return 0;
+   if (!unifrog_text_ends_with_ci(path, ".asd"))
+      return 0;
+
+   len = strlen(path);
+   if (len >= FASTBOOT_HANDOFF_PATH_BYTES || len >= UNIFROG_BOOT_PATH_MAX)
+      return 0;
+
+   for (size_t i = 0; i < len; i++) {
+      char c = path[i];
+
+      if (c == '\\' || c == ':' || c == '\r' || c == '\n' ||
+          c == '\t' || c == ' ')
+         return 0;
+      if (c == '/') {
+         if (at_component_start)
+            return 0;
+         at_component_start = 1;
+         continue;
+      }
+      if (at_component_start && c == '.')
+         return 0;
+      at_component_start = 0;
+   }
+
+   return !at_component_start;
+}
+
 int unifrog_boot_firmware_name_supported(const char *name)
 {
    return valid_firmware_name(name);
 }
+
+int unifrog_boot_asd_path_supported(const char *path)
+{
+   return valid_asd_path(path);
+}
+
+int unifrog_boot_asd_path(const char *path);
 
 static void set_backlight_off(void)
 {
@@ -121,7 +162,7 @@ void unifrog_boot_reboot(void)
 
 int unifrog_boot_firmware_asd(const char *name)
 {
-   static const char prefix[] = "firmware/";
+   static const char prefix[] = "unifrog_data/firmware/";
    char path[FASTBOOT_HANDOFF_PATH_BYTES];
 
    printf("unifrog boot request name=%s supported=%d\n",
@@ -134,6 +175,18 @@ int unifrog_boot_firmware_asd(const char *name)
    memset(path, 0, sizeof(path));
    strcpy(path, prefix);
    strcat(path, name);
+   return unifrog_boot_asd_path(path);
+}
+
+int unifrog_boot_asd_path(const char *path)
+{
+   printf("unifrog boot request path=%s supported=%d\n",
+      path ? path : "", unifrog_boot_asd_path_supported(path));
+   (void)unifrog_log_flush();
+
+   if (!unifrog_boot_asd_path_supported(path))
+      return -1;
+
    boot_via_stage1_path(path);
    return 0;
 }

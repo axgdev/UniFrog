@@ -1,0 +1,87 @@
+#ifndef LV_CONF_H
+#define LV_CONF_H
+
+#include <stdint.h>
+
+uint64_t mux_tick(void);
+
+#define LV_COLOR_DEPTH 16
+#define LV_COLOR_16_SWAP 0
+#define LV_COLOR_SCREEN_TRANSP 0
+#define LV_COLOR_MIX_ROUND_OFS 128
+#define LV_COLOR_CHROMA_KEY lv_color_hex(0x00ff00)
+
+#define LV_MEM_CUSTOM 1
+#define LV_MEM_CUSTOM_INCLUDE <stdlib.h>
+#define LV_MEM_CUSTOM_ALLOC malloc
+#define LV_MEM_CUSTOM_FREE free
+#define LV_MEM_CUSTOM_REALLOC realloc
+#define LV_MEM_BUF_MAX_NUM 32
+#define LV_MEMCPY_MEMSET_STD 1
+
+#define LV_DISP_DEF_REFR_PERIOD 16
+#define LV_INDEV_DEF_READ_PERIOD 16
+#define LV_TICK_CUSTOM 1
+#define LV_TICK_CUSTOM_INCLUDE <stdint.h>
+#define LV_TICK_CUSTOM_SYS_TIME_EXPR (mux_tick())
+#define LV_DPI_DEF 120
+
+#define LV_DRAW_COMPLEX 1
+#define LV_SHADOW_CACHE_SIZE 8
+#define LV_CIRCLE_CACHE_SIZE 8
+#define LV_IMG_CACHE_DEF_SIZE 8
+#define LV_GRADIENT_MAX_STOPS 2
+#define LV_GRAD_CACHE_DEF_SIZE 0
+#define LV_DITHER_GRADIENT 0
+
+#define LV_USE_LOG 0
+#define LV_USE_ASSERT_NULL 0
+#define LV_USE_ASSERT_MALLOC 0
+#define LV_USE_ASSERT_STYLE 0
+#define LV_USE_ASSERT_MEM_INTEGRITY 0
+#define LV_USE_ASSERT_OBJ 0
+
+#define LV_USE_PERF_MONITOR 0
+#define LV_USE_MEM_MONITOR 0
+#define LV_USE_REFR_DEBUG 0
+
+#define LV_USE_ANIMATION 0
+#define LV_USE_GROUP 0
+#define LV_USE_GPU 0
+
+#define LV_USE_LABEL 1
+#define LV_LABEL_TEXT_SELECTION 0
+#define LV_LABEL_LONG_TXT_HINT 1
+#define LV_USE_IMG 1
+#define LV_USE_DROPDOWN 1
+#define LV_USE_BTNMATRIX 1
+#define LV_USE_FLEX 1
+#define LV_USE_GRID 1
+
+#define LV_FONT_MONTSERRAT_14 0
+#define LV_FONT_UNSCII_8 1
+#define LV_FONT_DEFAULT &lv_font_unscii_8
+#define LV_FONT_FMT_TXT_LARGE 0
+#define LV_USE_FONT_COMPRESSED 0
+#define LV_USE_BIDI 0
+#define LV_USE_ARABIC_PERSIAN_CHARS 0
+
+#define LV_USE_FS_STDIO 1
+#define LV_FS_STDIO_LETTER '\0'
+#define LV_FS_STDIO_PATH ""
+#define LV_FS_STDIO_CACHE_SIZE 0
+
+#define LV_USE_PNG 1
+#define LV_USE_GIF 1
+
+#define LV_THEME_DEFAULT_DARK 1
+#define LV_THEME_DEFAULT_GROW 0
+#define LV_THEME_DEFAULT_TRANSITION_TIME 0
+
+#define LV_USE_DEMO_WIDGETS 0
+#define LV_USE_DEMO_KEYPAD_AND_ENCODER 0
+#define LV_USE_DEMO_BENCHMARK 0
+#define LV_USE_DEMO_STRESS 0
+#define LV_USE_DEMO_MUSIC 0
+
+#endif

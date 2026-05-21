@@ -15,7 +15,7 @@
 #include <unifrog/log.h>
 
 #define BACKLIGHT_PWM_DEV "/dev/pwm2"
-#define BACKLIGHT_PWM_FREQ_HZ 10000u
+#define BACKLIGHT_PWM_FREQ_HZ 20000u
 #define BACKLIGHT_PWM_PERIOD_NS (1000000000u / BACKLIGHT_PWM_FREQ_HZ)
 
 static unsigned cached_level = 100;
@@ -87,9 +87,10 @@ static int set_direct_pwm(unsigned level)
    ret_start = ret_set == 0 ? ioctl(fd, PWMIOC_START, 0) : ret_set;
    close(fd);
 
-   unifrog_log("unifrog backlight direct level=%u duty_ns=%lu period_ns=%lu polarity=%d ret_set=%d ret_start=%d\n",
-      level, (unsigned long)info.duty_ns, (unsigned long)info.period_ns,
-      info.polarity ? 1 : 0, ret_set, ret_start);
+   unifrog_log("unifrog backlight direct level=%u freq_hz=%u duty_ns=%lu period_ns=%lu polarity=%d ret_set=%d ret_start=%d\n",
+      level, BACKLIGHT_PWM_FREQ_HZ, (unsigned long)info.duty_ns,
+      (unsigned long)info.period_ns, info.polarity ? 1 : 0,
+      ret_set, ret_start);
    if (ret_set != 0 || ret_start != 0)
       return -1;
 
@@ -106,11 +107,6 @@ int unifrog_backlight_set(unsigned level)
 
    if (level > 100)
       level = 100;
-
-   if (cached_level_valid && cached_level == level) {
-      unifrog_log("unifrog backlight direct level=%u cached=1\n", level);
-      return 0;
-   }
 
    if (set_direct_pwm(level) == 0)
       return 0;

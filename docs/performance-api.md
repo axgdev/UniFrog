@@ -133,9 +133,9 @@ stable nonzero `audio_delay` point in the right direction.
 
 ## Runtime Launch Options
 
-The JavaScript frontend opens a launch-options screen before starting a
-libretro game. These options are handled by UniFrog's generic libretro host and
-are intentionally outside individual core source changes:
+The native frontend opens launch and pause options around libretro games.
+These options are handled by UniFrog's generic libretro host and are
+intentionally outside individual core source changes:
 
 - Audio can be disabled for CPU-bound tests. UniFrog skips opening the audio
   device and advertises disabled audio through
@@ -184,10 +184,12 @@ are intentionally outside individual core source changes:
   the measured workloads, so `UNIFROG_GE_CLOCK_FAST` intentionally selects 198.
 - Display controller: `/dev/dis` supports layer ordering and zoom used by the
   hardware video plane.
-- Video: HCRTOS `hcplayer`/viddec path can decode media through hardware.
+- Video: HCRTOS `/dev/viddec` can decode media through hardware when the board
+  DTS reserves a nonzero MMZ media heap and `viddec.kshm_size`.
 - Audio: `/dev/sndC0i2so` supports DMA-style PCM output.
-- Storage: SD/MMC is functional; current board DTS keeps the reliable 1-bit
-  mode.
+- Storage: SD/MMC is functional; current board DTS defaults to a resilient
+  4-bit 16 MHz boot profile, with 1-bit safe mode and faster profiles available
+  as explicit diagnostics.
 - Analog/power: PWM backlight and standby-related control are present in the
   current image. `/dev/adc` and `/dev/queryadc0` were missing in
   `loghcrtos38.txt`, so battery sampling still uses the direct fallback path.

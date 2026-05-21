@@ -10,6 +10,7 @@ extern "C" {
 enum unifrog_ge_format {
    UNIFROG_GE_FORMAT_RGB565 = 0,
    UNIFROG_GE_FORMAT_ARGB8888 = 1,
+   UNIFROG_GE_FORMAT_XRGB8888 = 2,
 };
 
 enum unifrog_ge_clock {

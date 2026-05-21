@@ -80,7 +80,7 @@ In-game saves are libretro memory blocks and should use
 `retro_get_memory_data()` plus `retro_get_memory_size()`.
 
 UniFrog auto-loads and auto-saves `RETRO_MEMORY_SAVE_RAM` and
-`RETRO_MEMORY_RTC` under `/media/mmcblk0/unifrog/saves`. The runtime loads
+`RETRO_MEMORY_RTC` under `/media/mmcblk0/unifrog_data/saves`. The runtime loads
 them right after `retro_load_game()`, periodically hashes the exposed memory
 while the core runs, writes changed save memory in the background, and writes
 again on clean core exit.
@@ -148,9 +148,9 @@ silent, retry unknown metadata, and only fall back to audio output for files
 that are explicitly audio-only by extension. Unknown audio on video/image files
 should keep the speaker gate closed to avoid static on silent media.
 For native HCRTOS media playback, do not open the external speaker gate until
-after `hcplayer_play()` has started and the route has been selected; opening
-the gate during player creation exposes the analog path before the decoder and
-I2SO output are primed.
+after `/dev/auddec` or the PCM sink has started and the route has been selected;
+opening the gate during decoder creation exposes the analog path before I2SO
+output is primed.
 
 ## SF2000 QPSX and PMP cores
 

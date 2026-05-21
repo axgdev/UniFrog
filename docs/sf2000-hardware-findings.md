@@ -56,10 +56,11 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
   mode to show the full frame instead of a cropped/tiny region.
 - Native HCRTOS video must use the HD video-plane geometry even on the 320x240
   SF2000 LCD. The confirmed full-screen setup is `DIS_TYPE_HD` /
-  `DIS_LAYER_MAIN` with both `DIS_SET_ZOOM` and `hcplayer_set_display_rect()`
-  using a `1920x1080` destination rectangle. Programming a `320x240`
-  destination shows only a small top-left rectangle on the LCD.
-- Hardware video decode works through the HCRTOS `hcplayer`/viddec path:
+  `DIS_LAYER_MAIN` with `DIS_SET_ZOOM` using a `1920x1080` destination
+  rectangle. Programming a `320x240` destination shows only a small top-left
+  rectangle on the LCD.
+- Hardware video decode works through the HCRTOS `/dev/viddec` path when the
+  board DTS reserves MMZ media memory and `viddec.kshm_size`:
   - `/dev/viddec` opens.
   - `/dev/vidsink` opens.
   - `/dev/dis` opens.
@@ -84,48 +85,62 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 ### Storage
 
 - The SD/MMC path is sensitive to signal integrity. A flat SD extender cable caused frequent CRC errors and automount churn.
-- The default build boots with the reliable 1-bit SD profile and uses guarded
-  `uhs25` windows for frontend startup reads and read-to-memory ROM loads.
-  The frontend restores the safe boot profile before normal UI writes. Developer
-  -> Storage test can run a quick guarded runtime sweep from that safe boot: it
+- The default build boots directly in `wide18`: 4-bit SD, 18 MHz,
+  high-speed disabled, and no UHS/1.8 V negotiation. This keeps the 4-bit
+  throughput benefit while avoiding high-speed/UHS negotiation on weak cards
+  and SD extenders. Runtime fast-read mount/remount windows
+  are disabled by the default `SD_READ_MODE=boot`; ROM and native module reads
+  stay on the boot profile. Developer -> Storage test can run a guarded runtime
+  sweep from that boot profile: it
   buffers logs, shows progress on screen, prefers `/ROMS/test.md` when present,
   verifies a safe remount first, switches profiles through the SD bus
   suspend/resume hooks, records host caps/timing/mount status, restores the
-  safe boot profile, then writes the report. The screen shows the most reliable
+  boot profile, then writes the report. The screen shows the most reliable
   freeze stage; warm reboot diagnostics are secondary because full power cycles
   can overwrite them before UniFrog starts.
-- `SD_MODE=hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, and `uhs` remain
-  fixed-profile diagnostic boot builds. `logunifrog0009.txt` showed wide and
-  UHS were unstable on the tested device.
+- `SD_MODE=safe`, `wide1`, `wide2`, `wide4`, `wide8`, `wide10`, `wide12`,
+  `wide14`, `wide16`, `wide18`, `wide20`, `wide22`, `wide24`, `wide25`,
+  `wide37`, `hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, and `uhs` remain
+  fixed-profile diagnostic boot builds.
+  `logunifrog0009.txt` showed wide and UHS were unstable on the tested device.
 - SD cards support 1-bit and 4-bit transfer widths here. The HCRTOS MMC driver
   reports invalid `bus-width` values, so 2-bit and 3-bit profiles are not valid
   experiments.
-- Runtime profile switching is used for diagnostics and for default
-  `SD_READ_MODE=uhs25` read windows. Frontend startup keeps file-backed logging
-  suspended until the first screen is ready, restores safe mode, then flushes.
-  ROM content prep restores the safe boot profile before core init and retries
-  the read in safe mode if the fast window fails. Storage full test reads
-  `/ROMS/probes/test*.md`, returns to safe mode after each experimental read,
+- Runtime profile switching is used for diagnostics only unless
+  `SD_READ_MODE` is explicitly set to a non-boot profile. Frontend startup keeps
+  file-backed logging suspended until the first screen is ready, then flushes.
+  If a diagnostic fast window fails, ROM content prep restores the boot profile
+  before core init and retries the read on the boot profile. Storage full test reads
+  `/ROMS/probes/test*.md`, returns to the boot profile after each experimental read,
   and checkpoints the report before the next probe. Storage mode test switches
   to one selected profile, reads all probes, then restores once; use it to
   separate sustained-read stability from repeated suspend/resume stress. If an
   unstable mode wedges inside the MMC command path, software recovery may still
   fail.
-- Experimental SD builds defer file-log flushes during game launch and libretro
-  quick-menu activity where possible. This reduces storage contention, but it is
-  not a substitute for a stable bus.
+- Buffered UniFrog log flushes and SDK file UART drains use synchronous writes
+  and close the log file after each flush. This is slower, but it gives the SD
+  card an explicit completion point instead of leaving background appends dirty.
 - Trust the `unifrog storage config` line when comparing SD modes. It reports
   the DTB profile actually seen by the kernel (`bus-width`, high-speed, UHS,
   and 1.8 V flags).
+- The RGB panel timing now uses the 9 MHz clock option with the existing
+  444x304 totals, for roughly 66.7 Hz refresh. The previous 6.6 MHz profile was
+  roughly 48.9 Hz and could produce visible rolling/diagonal flicker, especially
+  when SD activity injected noise onto shared rails.
 - `logunifrog0022-*` fixed-profile boots still failed before libretro dispatch
   when launching a ROM. The runtime single-mode tests were better isolated:
   `uhs25` passed every probe and reached about 14 MiB/s on the 50 MiB read,
-  while `wide50`, `uhs12`, and `uhs` still showed read failures.
+  while `wide50`, `uhs12`, and `uhs` still showed read failures. Later game
+  launch testing showed `uhs25` can still stall on the third repeated
+  safe-to-fast runtime switch even though suspend/resume and mount report
+  success. Treat the UHS profiles as electrical/protocol experiments, not the
+  default user-facing fast path.
 - UniFrog keeps `/log.txt` bounded: when it grows past 1 MiB at boot, it moves
   the previous file to `/log-prev.txt` before appending the new run.
-- The SDK file UART appends lazily after mount and syncs only after larger
-  chunks. It must not open and `fsync()` `/log.txt` immediately on every mount
-  notification because that competes with early SD probing.
+- The SDK file UART appends lazily after mount, then `fsync()`s and closes the
+  file after each buffered drain. It must not open and `fsync()` `/log.txt`
+  immediately on every mount notification because that competes with early SD
+  probing.
 - If a transient file UART write or sync fails, the logger closes the file
   descriptor but keeps the mount name so the delayed worker can reopen and retry
   instead of waiting for a fresh mount notification.
@@ -251,10 +266,10 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
   - open the amp gate only after the DAC path is configured and unmuted
   Do not reintroduce duplicated stereo, differential drive, or gain-as-noise
   masking without a device log proving the analog tone/noise issue stayed gone.
-- HCRTOS audio driver and `hcplayer` can produce working audio. Current
+- HCRTOS audio driver and `/dev/auddec` can produce working audio. Current
   libretro logs show the AUDSINK volume ioctl returning unsupported, so UniFrog
-  also applies the SND volume/mute ioctls directly when using AUDSINK or
-  `hcplayer`. `loghcrtos148` also showed audio writes are measurable but much
+  also applies the SND volume/mute ioctls directly when using AUDSINK.
+  `loghcrtos148` also showed audio writes are measurable but much
   smaller than gpSP core frame time, and AUDSINK delay is not reliable enough to
   drive auto-frameskip directly on this path.
 
@@ -421,7 +436,7 @@ Do not blindly repurpose these pins on the SF2000. Several are already used for 
 
 - CPU: 810 MHz balanced, 918 MHz performance mode.
 - ISA/toolchain: `mipsfrog` only if the target workload benefits; pure MIPS32r1 remains safest.
-- Backlight: PWM2 at 10 kHz polarity 1 through `/dev/backlight`.
+- Backlight: PWM2 at 20 kHz polarity 1 through `/dev/backlight`.
 - SD: 1-bit mode when reliability matters, especially with extenders.
 - Video: hardware decoder for media playback; GE 198 selector for scaling/fill.
 - Audio: S16 interleaved PCM with 512-byte periods as the current low-latency

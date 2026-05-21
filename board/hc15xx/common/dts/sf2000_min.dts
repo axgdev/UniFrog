@@ -55,8 +55,13 @@
 #define MAX_EXTRA_FB_NUM (3)
 #define MAX_REF_FB_NUM (7)		//if usb wired cast:MIN NUM:5
 #define MAX_TOTAL_FB_NUM (MAX_REF_FB_NUM + MAX_EXTRA_FB_NUM)
-#define MAX_WIDTH (720)
-#define MAX_HEIGHT (576)
+/*
+ * The native media stack feeds /dev/viddec directly.  Keep the media heap large
+ * enough for common 480p/720p H.264 files while leaving the upper retained-log
+ * and fastboot handoff regions untouched.
+ */
+#define MAX_WIDTH (1280)
+#define MAX_HEIGHT (720)
 #define MAX_MB_WIDTH (MAX_WIDTH / 16)
 #define MAX_MB_HEIGHT (MAX_HEIGHT / 16)
 #define ONE_MV_SIZE (32 * MAX_MB_WIDTH * MAX_MB_HEIGHT)
@@ -83,18 +88,24 @@
 	 (CONFIG_DUAL_OUTPUT_SUPPORT * CONFIG_MM_VC_FB_SIZE) +               \
 	 ((CONFIG_VIDEO_IN_SUPPORT && (!CONFIG_VIDEO_IN_SHARE_WITH_VDEC)) * CONFIG_MM_VIN_FB_SIZE))
 
-#define HCRTOS_MMZ_BLOCKLOG (12)
-#define HCRTOS_MMZ0_SIZE (0)
-#define HCRTOS_MMZ0_OFFSET (CONFIG_MEMORY_SIZE)
-
 #define UNIFROG_SYSMEM_MIN_SIZE (0x03000000)
 #define UNIFROG_FASTBOOT_RESERVED_SIZE (0x00019000)
+#define UNIFROG_RECOVERY_LOG_SIZE (0x00100000)
+#define HCRTOS_MMZ_BLOCKLOG (12)
+#define HCRTOS_MMZ0_SIZE                                                       \
+	(__HCRTOS_MMZ0_SIZE +                                                  \
+	 (16 * (__HCRTOS_MMZ0_SIZE >> HCRTOS_MMZ_BLOCKLOG)) +                  \
+	 (16 << HCRTOS_MMZ_BLOCKLOG))
+#define HCRTOS_MMZ0_OFFSET                                                     \
+	(CONFIG_MEMORY_SIZE - UNIFROG_FASTBOOT_RESERVED_SIZE -                 \
+	 UNIFROG_RECOVERY_LOG_SIZE - HCRTOS_MMZ0_SIZE)
 #define UNIFROG_APPMEM_SIZE                                                    \
-	(CONFIG_MEMORY_SIZE > UNIFROG_SYSMEM_MIN_SIZE ?                       \
-	 (CONFIG_MEMORY_SIZE - UNIFROG_SYSMEM_MIN_SIZE -                     \
-	  UNIFROG_FASTBOOT_RESERVED_SIZE) :                                   \
-	 0)
+	(HCRTOS_MMZ0_OFFSET > UNIFROG_SYSMEM_MIN_SIZE ?                       \
+	 (HCRTOS_MMZ0_OFFSET - UNIFROG_SYSMEM_MIN_SIZE) : 0)
 #define UNIFROG_APPMEM_OFFSET (UNIFROG_SYSMEM_MIN_SIZE)
+#define UNIFROG_RECOVERY_LOG_OFFSET                                            \
+	(CONFIG_MEMORY_SIZE - UNIFROG_FASTBOOT_RESERVED_SIZE -                 \
+	 UNIFROG_RECOVERY_LOG_SIZE)
 #define UNIFROG_FASTBOOT_RESERVED_OFFSET                                       \
 	(CONFIG_MEMORY_SIZE - UNIFROG_FASTBOOT_RESERVED_SIZE)
 
@@ -121,6 +132,10 @@ hcrtos {
 
 		appmem {
 			reg = <UNIFROG_APPMEM_OFFSET UNIFROG_APPMEM_SIZE>;
+		};
+
+		recovery_log_reserved {
+			reg = <UNIFROG_RECOVERY_LOG_OFFSET UNIFROG_RECOVERY_LOG_SIZE>;
 		};
 
 		fastboot_reserved {
@@ -363,7 +378,7 @@ hcrtos {
 		pinmux-active = <PINPAD_R05 PINMUX_R05_PWM_2>;
 		backlight-gpios-rtos = <PINPAD_R05 GPIO_ACTIVE_LOW>;
 		backlight-pwmdev = "/dev/pwm2";
-		backlight-frequency = <10000>;
+		backlight-frequency = <20000>;
 		polarity = <1>;
 		brightness-levels = <0 1 2 4 6 8 10 12 16 20 25 32 40 50 64 80 100>;
 		default-brightness-level = <16>;
@@ -430,7 +445,10 @@ hcrtos {
 	};
 
 	i2so { // Sound Output Device
+		pinmux-mute = <PINPAD_R07 7>;
+		mute-polar = <0>;
 		volume = <90>; //Volume ranges from 0 - 100 in %. Using 90% to avoid clipping
+		fade-step = <8>;
 		status = "okay";
 	};
 
@@ -462,9 +480,13 @@ hcrtos {
 	};
 
 	irc {
+		/*
+		 * R07 is the external speaker gate on SF2000/GB300. Do not let
+		 * the IR receiver driver claim the same pad while audio is active.
+		 */
 		pinmux-active = <PINPAD_R07 7>;
 		linux,rc-map-name = "rc-hcdemo";
-		status = "okay";
+		status = "disabled";
 	};
 
 	adc {
@@ -641,10 +663,10 @@ hcrtos {
 
 	ge: ge@18806000 {
 	    reg = <0xb8806000 0x2000>, <0xb8800000 0x1000>;
-	    interrupts = <4>; 
+	    interrupts = <4>;
 	    cmdq_buf_size = <0x3c000>;
 	    status = "okay";
-    	}; 
+	};
 	dsc: dsc@0x18870000 {
 	     compatible = "hichip,dsc";
 	     reg = <0xb8834000 0x1000>;
@@ -690,7 +712,7 @@ hcrtos {
 				* VPO_RGB_CLOCK_54M = 13,//H1600
 				* VPO_RGB_CLOCK_132M = 14,//H1600
 				*/
-				output-clock = <8>;
+				output-clock = <9>;
 
 				h-total-len = <444>;
 				v-total-len = <304>;
