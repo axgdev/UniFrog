@@ -3392,26 +3392,29 @@ int unifrog_media_play_video_ex(const char *path,
    if (options && options->preset >= 0 &&
       (unsigned)options->preset < sizeof(playback_presets) / sizeof(playback_presets[0]))
       preset = &playback_presets[options->preset];
-   if (audio_only) {
-      printf("unifrog media audio route=direct reason=upstream_ffmpeg "
-             "force_hcplayer=%d force_audio=%d path=%s\n",
-         options && options->force_hcplayer ? 1 : 0, force_audio,
-         path ? path : "");
+   if (audio_only && options && options->force_native) {
+      printf("unifrog media audio route=direct reason=explicit_native "
+             "force_native=1 force_audio=%d path=%s\n",
+         force_audio, path ? path : "");
       ret = media_play_direct_audio(path);
       unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
       (void)unifrog_log_flush();
       return ret;
    }
-   if (!audio_only && !image_file) {
-      printf("unifrog media video route=native reason=upstream_ffmpeg "
-             "force_hcplayer=%d disable_audio=%d path=%s\n",
-         options && options->force_hcplayer ? 1 : 0, force_no_audio, path);
+   if (!audio_only && !image_file && options && options->force_native) {
+      printf("unifrog media video route=native reason=explicit_native "
+             "force_native=1 disable_audio=%d path=%s\n",
+         force_no_audio, path);
       ret = media_play_native_video(path, options);
       printf("unifrog media video route=native ret=%d path=%s\n", ret, path);
       unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
       (void)unifrog_log_flush();
       return ret;
    }
+   printf("unifrog media route=hcplayer reason=%s audio_only=%d image=%d "
+          "force_audio=%d disable_audio=%d path=%s\n",
+      options && options->force_hcplayer ? "requested" : "image",
+      audio_only, image_file, force_audio, force_no_audio, path ? path : "");
    media_init_drivers_once();
 
    memset(&init_args, 0, sizeof(init_args));

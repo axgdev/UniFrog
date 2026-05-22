@@ -6482,7 +6482,7 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
    if (strcmp(item->core, "native") == 0) {
       options.force_native = 1;
    } else if (strcmp(item->core, "hcplayer") == 0) {
-      options.force_hcplayer = 0;
+      options.force_hcplayer = 1;
    } else if (strcmp(item->core, "hcplayer-audio") == 0) {
       options.force_hcplayer = 1;
       options.force_audio = 1;

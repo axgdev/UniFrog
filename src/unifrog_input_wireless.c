@@ -651,12 +651,14 @@ void unifrog_input_wireless_poll_once(void)
       }
       if (wireless_rf_poll_count >= RF_IDLE_POLL_SUSPEND &&
           wireless_rf_status_log_count >= 8) {
-         printf("unifrog wireless suspend reason=idle_empty polls=%u status=0x%02x ch_index=%u\n",
+         printf("unifrog wireless idle_keepalive polls=%u status=0x%02x ch_index=%u\n",
             wireless_rf_poll_count, (unsigned)status,
             wireless_rf_channel_index);
-         wireless_rf_bus_ok = 0;
-         unifrog_input_restore_local_bus();
-         return;
+         wireless_rf_poll_count = 0;
+         wireless_rf_status_log_count = 0;
+         rf_stock_ready_pin_state();
+         rf_force_stock_program_idle_shadow();
+         rf_stock_radio_config();
       }
    }
 
