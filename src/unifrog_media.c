@@ -49,8 +49,8 @@
 #define VIDEO_SOURCE_H 1080
 #define VIDEO_OUTPUT_W 1920
 #define VIDEO_OUTPUT_H 1080
-#define MEDIA_MAX_VIDEO_W 1280
-#define MEDIA_MAX_VIDEO_H 720
+#define MEDIA_MAX_VIDEO_W 1920
+#define MEDIA_MAX_VIDEO_H 1080
 #define VIDEO_EXIT_HOLD_POLLS 4u
 #define VIDEO_MONITOR_POLLS 30u
 #define VIDEO_STALL_LIMIT 8u
@@ -207,6 +207,7 @@ static uint32_t media_read_be32(const uint8_t *p)
 static int dis_fd = -1;
 static int fb_fd = -1;
 static unsigned media_video_debug_packets;
+static int media_caps_logged;
 
 extern unsigned long _padec_start;
 extern unsigned long _padec_end;
@@ -278,6 +279,14 @@ static void media_log_format_streams(AVFormatContext *fmt, const char *path,
          par->extradata_size, fmt->streams[i]->time_base.num,
          fmt->streams[i]->time_base.den);
    }
+}
+
+static void media_log_ffmpeg_caps_once(void)
+{
+   if (media_caps_logged)
+      return;
+   media_caps_logged = 1;
+   printf("unifrog media ffmpeg caps demuxers=avi,h264,m4v,matroska,mov,mpegps,mpegts,mpegvideo missing_audio_demuxers=mp3,wav,flac,ogg codecs_linked=mp3,aac,pcm,flac,vorbis,opus,wma,h264\n");
 }
 
 static void open_display(void)
@@ -480,6 +489,7 @@ static void media_ffmpeg_register_once(void)
    avcodec_register_all();
 #pragma GCC diagnostic pop
    printf("unifrog media ffmpeg registered\n");
+   media_log_ffmpeg_caps_once();
 }
 
 static int32_t media_ffmpeg_read_sample(const uint8_t *p,
@@ -3214,8 +3224,7 @@ int unifrog_media_play_video_ex(const char *path,
       (void)unifrog_log_flush();
       return ret;
    }
-   if (!audio_only && !image_file && (!options || !options->force_hcplayer) &&
-       !force_no_audio) {
+   if (!audio_only && !image_file && !force_no_audio) {
       AVFormatContext *fmt = NULL;
 
       media_ffmpeg_register_once();
@@ -3240,8 +3249,8 @@ int unifrog_media_play_video_ex(const char *path,
                   (void)unifrog_log_flush();
                   return ret;
                }
-               printf("unifrog media highres native fallback ret=%d path=%s\n",
-                  ret, path);
+               printf("unifrog media highres native fallback ret=%d force_hcplayer=%d path=%s\n",
+                  ret, options && options->force_hcplayer, path);
             }
          }
       } else {
@@ -3515,8 +3524,18 @@ int unifrog_media_play_video_ex(const char *path,
                target = dur;
             printf("unifrog media seek request pos=%lld dur=%lld target=%lld\n",
                pos, dur, target);
-            printf("unifrog media seek ret=%d target=%lld\n",
-               hcplayer_seek(player, target), target);
+            hcplayer_pause2(player);
+            {
+               int seek_ret = hcplayer_seek(player, target);
+               int64_t after;
+
+               msleep(80);
+               hcplayer_resume2(player);
+               msleep(80);
+               after = hcplayer_get_position(player);
+               printf("unifrog media seek ret=%d target=%lld after=%lld\n",
+                  seek_ret, target, after);
+            }
          } else {
             printf("unifrog media seek unsupported pos=%lld dur=%lld\n",
                pos, dur);

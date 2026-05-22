@@ -84,6 +84,27 @@ static uint16_t contrast_text(uint16_t fg, uint16_t bg, uint8_t bg_alpha)
       UNIFROG_RGB565(12, 14, 18);
 }
 
+static uint16_t readable_text_on_pixel(const struct unifrog_surface *surface,
+   uint16_t fg, int x, int y)
+{
+   uint16_t bg;
+   unsigned fl;
+   unsigned bl;
+   unsigned diff;
+
+   if (!surface || !surface->pixels || x < 0 || y < 0 ||
+       x >= (int)surface->width || y >= (int)surface->height)
+      return fg;
+   bg = surface->pixels[(unsigned)y * surface->stride + (unsigned)x];
+   fl = rgb565_luma(fg);
+   bl = rgb565_luma(bg);
+   diff = fl > bl ? fl - bl : bl - fl;
+   if (diff >= 92u)
+      return fg;
+   return bl < 128u ? UNIFROG_RGB565(248, 248, 240) :
+      UNIFROG_RGB565(12, 14, 18);
+}
+
 static uint16_t blend_rgb565(uint16_t dst, uint16_t src, uint8_t alpha)
 {
    unsigned inv = 255u - alpha;
@@ -518,6 +539,9 @@ static void draw_row(struct unifrog_ui *ui,
    }
    fg = contrast_text(fg, contrast_bg, contrast_alpha);
    value_fg = contrast_text(value_fg, contrast_bg, contrast_alpha);
+   fg = readable_text_on_pixel(&surface, fg, x + label_x, text_y);
+   value_fg = readable_text_on_pixel(&surface, value_fg,
+      x + w - value_w - 2, text_y);
    if (text_alpha)
       unifrog_ui_text_clipped(ui, x + label_x, text_y,
          ((w - label_x - value_w - 8) / font_adv), label, fg, 1);
@@ -606,6 +630,9 @@ static void draw_launcher_grid(struct unifrog_ui *ui,
       uint8_t text_alpha = focused ?
          theme_alpha(style->list_focus_text_alpha) :
          theme_alpha(style->list_text_alpha);
+      int text_x = x + 5;
+      int text_y = y + tile_h - 18;
+      uint16_t text_fg;
 
       if (style->launch_wallpaper[i][0])
          draw_image_path(&surface, style->launch_wallpaper[i], x, y,
@@ -624,10 +651,14 @@ static void draw_launcher_grid(struct unifrog_ui *ui,
          unifrog_gfx_draw_text(&surface, x + tile_w / 2 - 3,
             y + 4 + icon_h / 2 - 4, glyph, style->background, 1);
       }
+      if (!text_alpha)
+         text_alpha = 255u;
+      text_fg = readable_text_on_pixel(&surface,
+         contrast_text(fg, bg, bg_alpha), text_x, text_y);
       if (text_alpha)
-         unifrog_ui_text_clipped(ui, x + 5, y + tile_h - 18,
+         unifrog_ui_text_clipped(ui, text_x, text_y,
             (tile_w - 10) / 6, launch_labels[i],
-            contrast_text(fg, bg, bg_alpha), 1);
+            text_fg, 1);
    }
 }
 
