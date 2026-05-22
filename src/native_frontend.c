@@ -2328,8 +2328,18 @@ static int scheme_set_color(struct unifrog_ui_theme *theme,
    return 0;
 }
 
+static int scale_scheme_dimension(int value, unsigned scale_div)
+{
+   if (scale_div <= 1u || value == 0)
+      return value;
+   if (value > 0)
+      return (value + (int)scale_div / 2) / (int)scale_div;
+   return -((-value + (int)scale_div / 2) / (int)scale_div);
+}
+
 static int scheme_set_layout(struct unifrog_frontend_lvgl_style *style,
-   const char *section, const char *key, const char *value)
+   const char *section, const char *key, const char *value,
+   unsigned scale_div)
 {
    int v;
 
@@ -2340,36 +2350,36 @@ static int scheme_set_layout(struct unifrog_frontend_lvgl_style *style,
       return 0;
    if (strcmp(section, "header") == 0 &&
        strcmp(key, "HEADER_HEIGHT") == 0)
-      style->header_height = v;
+      style->header_height = scale_scheme_dimension(v, scale_div);
    else if (strcmp(section, "footer") == 0 &&
             strcmp(key, "FOOTER_HEIGHT") == 0)
-      style->footer_height = v;
+      style->footer_height = scale_scheme_dimension(v, scale_div);
    else if (strcmp(section, "list") == 0 &&
             strcmp(key, "LIST_DEFAULT_RADIUS") == 0)
-      style->list_radius = v;
+      style->list_radius = scale_scheme_dimension(v, scale_div);
    else if (strcmp(section, "list") == 0 &&
             strcmp(key, "LIST_FOCUS_RADIUS") == 0)
-      style->list_radius = v;
+      style->list_radius = scale_scheme_dimension(v, scale_div);
    else if (strcmp(section, "list") == 0 &&
             strcmp(key, "LIST_DEFAULT_BORDER_WIDTH") == 0)
-      style->list_border_width = v;
+      style->list_border_width = scale_scheme_dimension(v, scale_div);
    else if (strcmp(section, "misc") == 0 &&
             strcmp(key, "NAVIGATION_TYPE") == 0)
       style->navigation_type = v;
    else if (strcmp(section, "misc") == 0 &&
             strcmp(key, "CONTENT_ITEM_HEIGHT") == 0) {
       if (v > 0)
-         style->list_h = v;
+         style->list_h = scale_scheme_dimension(v, scale_div);
    } else if (strcmp(section, "misc") == 0 &&
             strcmp(key, "CONTENT_PADDING_LEFT") == 0)
-      style->list_x = v;
+      style->list_x = scale_scheme_dimension(v, scale_div);
    else if (strcmp(section, "misc") == 0 &&
             strcmp(key, "CONTENT_PADDING_TOP") == 0)
-      style->list_y = v;
+      style->list_y = scale_scheme_dimension(v, scale_div);
    else if (strcmp(section, "misc") == 0 &&
             strcmp(key, "CONTENT_WIDTH") == 0) {
       if (v > 0)
-         style->list_w = v;
+         style->list_w = scale_scheme_dimension(v, scale_div);
    } else if (strcmp(section, "grid") == 0 &&
             strcmp(key, "COLUMN_COUNT") == 0) {
       style->grid_column_count = v;
@@ -2383,16 +2393,16 @@ static int scheme_set_layout(struct unifrog_frontend_lvgl_style *style,
          style->grid_row_count > 0;
    } else if (strcmp(section, "grid") == 0 &&
             strcmp(key, "LOCATION_X") == 0)
-      style->launch_x = v;
+      style->launch_x = scale_scheme_dimension(v, scale_div);
    else if (strcmp(section, "grid") == 0 &&
             strcmp(key, "LOCATION_Y") == 0)
-      style->launch_y = v;
+      style->launch_y = scale_scheme_dimension(v, scale_div);
    else if (strcmp(section, "grid") == 0 &&
             strcmp(key, "COLUMN_PADDING") == 0)
-      style->launch_gap_x = v;
+      style->launch_gap_x = scale_scheme_dimension(v, scale_div);
    else if (strcmp(section, "grid") == 0 &&
             strcmp(key, "ROW_PADDING") == 0)
-      style->launch_gap_y = v;
+      style->launch_gap_y = scale_scheme_dimension(v, scale_div);
    else if (strcmp(section, "grid") == 0 &&
             strcmp(key, "NAVIGATION_TYPE") == 0)
       style->navigation_type = v;
@@ -2411,13 +2421,17 @@ static int load_muos_scheme_file(const char *path,
    uint32_t start_ms = unifrog_perf_time_ms();
    unsigned lines = 0;
    unsigned keys = 0;
+   unsigned scale_div = 2;
 
    file = fopen(path, "rb");
    if (!file)
       return -1;
+   if (strstr(path, "/320x240/scheme/"))
+      scale_div = 1;
    while (fgets(line, sizeof(line), file)) {
       char *eq;
 
+      lines++;
       strip_eol(line);
       if (!line[0] || line[0] == '#' || line[0] == ';')
          continue;
@@ -2437,13 +2451,15 @@ static int load_muos_scheme_file(const char *path,
       *eq++ = '\0';
       scheme_set_color(theme, style, section, trim_ascii(line),
          trim_ascii(eq));
-      scheme_set_layout(style, section, trim_ascii(line), trim_ascii(eq));
+      scheme_set_layout(style, section, trim_ascii(line), trim_ascii(eq),
+         scale_div);
       keys++;
    }
    fclose(file);
    if (unifrog_perf_time_ms() - start_ms > 50u)
-      unifrog_log("frontend theme scheme slow path=%s ms=%u lines=%u keys=%u\n",
-         path, (unsigned)(unifrog_perf_time_ms() - start_ms), lines, keys);
+      unifrog_log("frontend theme scheme slow path=%s ms=%u lines=%u keys=%u scale=%u\n",
+         path, (unsigned)(unifrog_perf_time_ms() - start_ms), lines, keys,
+         scale_div);
    return 0;
 }
 
@@ -5499,6 +5515,11 @@ static void browser_back(struct native_frontend *fe)
       restore_parent_view(fe, FRONTEND_VIEW_LAUNCH);
       return;
    }
+   if (fe->view == FRONTEND_VIEW_CONFIG || fe->view == FRONTEND_VIEW_INFO ||
+       fe->view == FRONTEND_VIEW_APPS) {
+      restore_parent_view(fe, FRONTEND_VIEW_LAUNCH);
+      return;
+   }
    if (fe->view == FRONTEND_VIEW_CONNECT || fe->view == FRONTEND_VIEW_CUSTOM ||
        fe->view == FRONTEND_VIEW_VISUAL) {
       restore_parent_view(fe, FRONTEND_VIEW_CONFIG);
@@ -6147,7 +6168,7 @@ static void activate(struct native_frontend *fe)
       show_file_list(fe, "Collection", FRONTEND_FAVORITES_PATH,
          FRONTEND_VIEW_FAVORITES);
    } else if (strcmp(item.path, "config") == 0) {
-      clear_parent_view(fe);
+      set_parent_view(fe);
       show_config(fe);
    } else if (strcmp(item.path, "connect") == 0) {
       set_parent_view(fe);
@@ -6176,13 +6197,13 @@ static void activate(struct native_frontend *fe)
    } else if (strcmp(item.path, "storage_mode") == 0) {
       show_storage_mode(fe);
    } else if (strcmp(item.path, "info") == 0) {
-      clear_parent_view(fe);
+      set_parent_view(fe);
       show_info(fe);
    } else if (strcmp(item.path, "sysinfo") == 0) {
       set_parent_view(fe);
       show_sysinfo(fe);
    } else if (strcmp(item.path, "apps") == 0) {
-      clear_parent_view(fe);
+      set_parent_view(fe);
       show_apps(fe);
    } else if (strcmp(item.path, "scripts") == 0) {
       set_parent_view(fe);
@@ -6427,8 +6448,9 @@ static void activate(struct native_frontend *fe)
               strcmp(item.path, "noop") == 0) {
       set_status(fe, "%s unavailable on SF2000", item.name);
    } else if (strcmp(item.path, "back") == 0) {
-      if (fe->view == FRONTEND_VIEW_APPS)
-         show_launch(fe);
+      if (fe->view == FRONTEND_VIEW_APPS || fe->view == FRONTEND_VIEW_CONFIG ||
+          fe->view == FRONTEND_VIEW_INFO)
+         restore_parent_view(fe, FRONTEND_VIEW_LAUNCH);
       else
          show_launch(fe);
    }
