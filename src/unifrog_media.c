@@ -239,6 +239,8 @@ static unsigned media_video_debug_packets;
 static int media_caps_logged;
 static unsigned media_sd_read_depth;
 static unsigned media_disk_suspend_depth;
+static uint32_t media_disk_suspend_start_ms;
+static uint32_t media_video_activity_marker;
 
 extern unsigned long _padec_start;
 extern unsigned long _padec_end;
@@ -259,9 +261,27 @@ static void media_auddec_close(struct media_auddec *auddec);
 static int media_video_wait_write_space(int fd, uint32_t need,
    unsigned packet_index);
 
+static uint32_t media_video_activity_mark_value(void)
+{
+   if (media_video_activity_marker == 0)
+      media_video_activity_marker =
+         unifrog_exception_activity_hash("native_video");
+   return media_video_activity_marker;
+}
+
+static void media_video_activity_stage(uint32_t stage, uint32_t detail0,
+   uint32_t detail1)
+{
+   uint32_t packed = ((stage & 0xffu) << 24) | (detail0 & 0x00ffffffu);
+
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_MEDIA_VIDEO,
+      media_video_activity_mark_value(), packed, detail1);
+}
+
 static void media_disk_suspend_begin(const char *tag, const char *path)
 {
    if (media_disk_suspend_depth++ == 0) {
+      media_disk_suspend_start_ms = unifrog_perf_time_ms();
       printf("unifrog media disk_suspend begin tag=%s path=%s pending=%lu\n",
          tag ? tag : "", path ? path : "",
          (unsigned long)unifrog_log_pending());
@@ -286,9 +306,14 @@ static void media_disk_suspend_end(const char *tag, const char *path)
       return;
    media_disk_suspend_depth--;
    if (media_disk_suspend_depth == 0) {
+      uint32_t now = unifrog_perf_time_ms();
+      uint32_t elapsed_ms = now - media_disk_suspend_start_ms;
+
       printf("unifrog media disk_suspend end tag=%s path=%s pending=%lu\n",
          tag ? tag : "", path ? path : "",
          (unsigned long)unifrog_log_pending());
+      printf("unifrog media disk_suspend elapsed tag=%s path=%s ms=%lu\n",
+         tag ? tag : "", path ? path : "", (unsigned long)elapsed_ms);
       unifrog_diag_memory_snapshot(tag ? tag : "media.disk_suspend_end");
       unifrog_log_set_disk_suspended(0);
    } else {
@@ -2308,18 +2333,38 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
       cfg.pic_width, cfg.pic_height, cfg.frame_rate, cfg.codec_frame_size,
       (unsigned long)cfg.kshm_size, cfg.extradata_size,
       cfg.decode_mode, cfg.quick_mode);
+   media_video_activity_stage(1u,
+      (((uint32_t)stream_index & 0xffu) << 16) |
+      ((uint32_t)par->codec_id & 0xffffu),
+      (((uint32_t)cfg.pic_width & 0xffffu) << 16) |
+      ((uint32_t)cfg.pic_height & 0xffffu));
    errno = 0;
    fd = open("/dev/viddec", O_RDWR);
    if (fd < 0) {
       printf("unifrog media native video open viddec failed errno=%d\n", errno);
+      media_video_activity_stage(2u, (uint32_t)(errno & 0xffffu), 0u);
       return -1;
    }
+   media_video_activity_stage(3u,
+      (uint32_t)(fd & 0xffffu),
+      (((uint32_t)dis_fd & 0xffffu) << 16) | ((uint32_t)vidsink_fd & 0xffffu));
    printf("unifrog media native video open_viddec done fd=%d\n", fd);
+   media_video_activity_stage(4u, (uint32_t)(fd & 0xffffu), 0u);
+   open_display_controller();
+   media_video_activity_stage(5u,
+      (((uint32_t)dis_fd & 0xffffu) << 16) | ((uint32_t)fd & 0xffffu), 0u);
    printf("unifrog media native video init begin fd=%d dis=%d vidsink=%d\n",
       fd, dis_fd, vidsink_fd);
+   (void)unifrog_log_flush();
+   media_video_activity_stage(6u,
+      (((uint32_t)dis_fd & 0xffffu) << 16) | ((uint32_t)vidsink_fd & 0xffffu),
+      (uint32_t)(fd & 0xffffu));
    errno = 0;
    init_ret = ioctl(fd, VIDDEC_INIT, &cfg);
    init_errno = errno;
+   media_video_activity_stage(7u,
+      ((uint32_t)(init_ret & 0xffffu) << 16) | ((uint32_t)init_errno & 0xffffu),
+      (uint32_t)(fd & 0xffffu));
    printf("unifrog media native video init done fd=%d ret=%d errno=%d\n",
       fd, init_ret, init_errno);
    if (init_ret == 0) {
@@ -2346,10 +2391,12 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    start_ret = init_ret == 0 ?
       ioctl(fd, VIDDEC_START, 0) : -1;
    start_errno = errno;
+   media_video_activity_stage(8u,
+      ((uint32_t)(start_ret & 0xffffu) << 16) |
+      ((uint32_t)start_errno & 0xffffu),
+      ((uint32_t)(win_ret & 0xffffu) << 16) | ((uint32_t)mirror_ret & 0xffffu));
    printf("unifrog media native video start done fd=%d ret=%d errno=%d\n",
       fd, start_ret, start_errno);
-   if (start_ret == 0)
-      open_display_controller();
    if (start_ret == 0 && dis_fd >= 0) {
       dis_win_onoff_t win;
 
@@ -2499,6 +2546,8 @@ static int media_play_native_video(const char *path,
    memset(&audio_converter, 0, sizeof(audio_converter));
    unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_MEDIA_VIDEO,
       unifrog_exception_activity_hash(path ? path : "native_video"), 0, 1);
+   media_video_activity_marker =
+      unifrog_exception_activity_hash(path ? path : "native_video");
    media_ffmpeg_register_once();
    media_sd_read_begin("native_video_open", path);
    sd_read_active = 1;
@@ -2682,6 +2731,7 @@ out:
       ret, (unsigned long)video_packets,
       (unsigned long)(audio_frames + auddec.packets),
       (unsigned long)(unifrog_perf_time_ms() - start_ms), path ? path : "");
+   media_video_activity_marker = 0;
    unifrog_exception_activity_clear();
    if (audio.fd >= 0)
       unifrog_audio_close(&audio);
