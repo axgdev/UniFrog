@@ -5315,12 +5315,15 @@ static void show_open_with(struct native_frontend *fe,
          add_item(fe, "Auto core", "launcher default",
             FRONTEND_ITEM_ACTION, "open_with_core", NULL);
    } else if (item->kind == FRONTEND_ITEM_MEDIA) {
-      add_item(fe,
-         media_path_has_native_wav(item->path) ? "Homemade WAV" :
-            "Media Native",
-         media_path_has_native_wav(item->path) ? "native low latency" :
-            "ffmpeg decoder",
-         FRONTEND_ITEM_ACTION, "open_with_media_native", NULL);
+      if (media_path_has_native_wav(item->path)) {
+         add_item(fe, "Homemade WAV", "native low latency",
+            FRONTEND_ITEM_ACTION, "open_with_media_native", NULL);
+         add_item(fe, "FFmpeg WAV", "software decoder",
+            FRONTEND_ITEM_ACTION, "open_with_media_ffmpeg", NULL);
+      } else {
+         add_item(fe, "Media Native", "ffmpeg decoder",
+            FRONTEND_ITEM_ACTION, "open_with_media_native", NULL);
+      }
 #if UNIFROG_HCRTOS_MEDIA_FIRMWARE
       add_item(fe, "Media Auto", "quiet unless audio is verified",
          FRONTEND_ITEM_ACTION, "open_with_media_hcplayer", NULL);
@@ -6484,6 +6487,8 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
    options.preset = -1;
    if (strcmp(item->core, "native") == 0) {
       options.force_native = 1;
+   } else if (strcmp(item->core, "ffmpeg") == 0) {
+      options.force_ffmpeg = 1;
    } else if (strcmp(item->core, "hcplayer") == 0) {
       options.force_hcplayer = 1;
    } else if (strcmp(item->core, "hcplayer-audio") == 0) {
@@ -6778,6 +6783,12 @@ static void activate(struct native_frontend *fe)
       if (strcmp(item.path, "open_with_media_native") == 0 &&
           fe->pending_open_valid) {
          unifrog_text_copy(pending.core, sizeof(pending.core), "native");
+         launch_media(fe, &pending);
+         return;
+      }
+      if (strcmp(item.path, "open_with_media_ffmpeg") == 0 &&
+          fe->pending_open_valid) {
+         unifrog_text_copy(pending.core, sizeof(pending.core), "ffmpeg");
          launch_media(fe, &pending);
          return;
       }
