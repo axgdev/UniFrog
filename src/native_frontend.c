@@ -5315,9 +5315,12 @@ static void show_open_with(struct native_frontend *fe,
          add_item(fe, "Auto core", "launcher default",
             FRONTEND_ITEM_ACTION, "open_with_core", NULL);
    } else if (item->kind == FRONTEND_ITEM_MEDIA) {
-      if (media_path_has_native_wav(item->path))
-         add_item(fe, "Homemade WAV", "native low latency",
-            FRONTEND_ITEM_ACTION, "open_with_media_native", NULL);
+      add_item(fe,
+         media_path_has_native_wav(item->path) ? "Homemade WAV" :
+            "Media Native",
+         media_path_has_native_wav(item->path) ? "native low latency" :
+            "ffmpeg decoder",
+         FRONTEND_ITEM_ACTION, "open_with_media_native", NULL);
 #if UNIFROG_HCRTOS_MEDIA_FIRMWARE
       add_item(fe, "Media Auto", "quiet unless audio is verified",
          FRONTEND_ITEM_ACTION, "open_with_media_hcplayer", NULL);
@@ -7608,6 +7611,7 @@ int unifrog_native_frontend_main(void)
       fe.language_index = 0;
    load_language(&fe);
    load_theme(&fe);
+   unifrog_input_init();
    if (fe.run_options.backlight_level >= 0)
       (void)unifrog_backlight_set((unsigned)fe.run_options.backlight_level);
    mark_boot_ok();

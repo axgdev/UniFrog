@@ -19,7 +19,12 @@
 #include <hcuapi/iocbase.h>
 #include <hcuapi/codec_id.h>
 #include <hcuapi/viddec.h>
+#ifndef UNIFROG_ENABLE_HCPLAYER
+#define UNIFROG_ENABLE_HCPLAYER 0
+#endif
+#if UNIFROG_ENABLE_HCPLAYER
 #include <vendor/ffplayer.h>
+#endif
 #include <libavcodec/avcodec.h>
 #include <libavcodec/bsf.h>
 #include <libavformat/avformat.h>
@@ -63,10 +68,7 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define MEDIA_SEEK_STEP_MS 10000
 
-#ifndef UNIFROG_ENABLE_HCPLAYER
-#define UNIFROG_ENABLE_HCPLAYER 0
-#endif
-
+#if UNIFROG_ENABLE_HCPLAYER
 struct playback_preset {
    const char *name;
    HCPlayerSyncType sync_type;
@@ -85,6 +87,7 @@ static const struct playback_preset playback_presets[] = {
    { "stc buffered", HCPLAYER_SYNC_STC, false, 1, 0, true },
    { "audio buffered", HCPLAYER_AUDIO_MASTER, false, 3, 0, true },
 };
+#endif
 
 struct media_auddec {
    int fd;
@@ -210,6 +213,7 @@ static int fb_fd = -1;
 static unsigned media_video_debug_packets;
 static int media_caps_logged;
 static unsigned media_sd_read_depth;
+static unsigned media_disk_suspend_depth;
 
 extern unsigned long _padec_start;
 extern unsigned long _padec_end;
@@ -228,17 +232,47 @@ static void media_auddec_finish(struct media_auddec *auddec,
    unsigned timeout_ms);
 static void media_auddec_close(struct media_auddec *auddec);
 
+static void media_disk_suspend_begin(const char *tag, const char *path)
+{
+   if (media_disk_suspend_depth++ == 0) {
+      printf("unifrog media disk_suspend begin tag=%s path=%s pending=%lu\n",
+         tag ? tag : "", path ? path : "",
+         (unsigned long)unifrog_log_pending());
+      unifrog_diag_memory_snapshot(tag ? tag : "media.disk_suspend_begin");
+      (void)unifrog_log_flush();
+      unifrog_log_set_disk_suspended(1);
+      printf("unifrog media disk_suspend active tag=%s path=%s\n",
+         tag ? tag : "", path ? path : "");
+   } else {
+      printf("unifrog media disk_suspend nested depth=%u tag=%s path=%s\n",
+         media_disk_suspend_depth, tag ? tag : "", path ? path : "");
+   }
+}
+
+static void media_disk_suspend_end(const char *tag, const char *path)
+{
+   if (media_disk_suspend_depth == 0)
+      return;
+   media_disk_suspend_depth--;
+   if (media_disk_suspend_depth == 0) {
+      printf("unifrog media disk_suspend end tag=%s path=%s pending=%lu\n",
+         tag ? tag : "", path ? path : "",
+         (unsigned long)unifrog_log_pending());
+      unifrog_diag_memory_snapshot(tag ? tag : "media.disk_suspend_end");
+      unifrog_log_set_disk_suspended(0);
+   } else {
+      printf("unifrog media disk_suspend nested_end depth=%u tag=%s path=%s\n",
+         media_disk_suspend_depth, tag ? tag : "", path ? path : "");
+   }
+}
+
 static void media_sd_read_begin(const char *tag, const char *path)
 {
    if (media_sd_read_depth++ == 0) {
       printf("unifrog media sd_read begin tag=%s path=%s pending=%lu\n",
          tag ? tag : "", path ? path : "",
          (unsigned long)unifrog_log_pending());
-      unifrog_diag_memory_snapshot(tag ? tag : "media.sd_read_begin");
-      (void)unifrog_log_flush();
-      unifrog_log_set_disk_suspended(1);
-      printf("unifrog media sd_read disk_suspended=1 tag=%s path=%s\n",
-         tag ? tag : "", path ? path : "");
+      media_disk_suspend_begin(tag ? tag : "media.sd_read_begin", path);
    } else {
       printf("unifrog media sd_read nested depth=%u tag=%s path=%s\n",
          media_sd_read_depth, tag ? tag : "", path ? path : "");
@@ -254,8 +288,7 @@ static void media_sd_read_end(const char *tag, const char *path)
       printf("unifrog media sd_read end tag=%s path=%s pending=%lu\n",
          tag ? tag : "", path ? path : "",
          (unsigned long)unifrog_log_pending());
-      unifrog_diag_memory_snapshot(tag ? tag : "media.sd_read_end");
-      unifrog_log_set_disk_suspended(0);
+      media_disk_suspend_end(tag ? tag : "media.sd_read_end", path);
    } else {
       printf("unifrog media sd_read nested_end depth=%u tag=%s path=%s\n",
          media_sd_read_depth, tag ? tag : "", path ? path : "");
@@ -264,12 +297,13 @@ static void media_sd_read_end(const char *tag, const char *path)
 
 static void media_sd_read_recover_stale(const char *tag)
 {
-   if (media_sd_read_depth == 0)
+   if (media_sd_read_depth == 0 && media_disk_suspend_depth == 0)
       return;
-   printf("unifrog media sd_read recover_stale tag=%s depth=%u pending=%lu\n",
-      tag ? tag : "", media_sd_read_depth,
+   printf("unifrog media sd_read recover_stale tag=%s read_depth=%u disk_depth=%u pending=%lu\n",
+      tag ? tag : "", media_sd_read_depth, media_disk_suspend_depth,
       (unsigned long)unifrog_log_pending());
    media_sd_read_depth = 0;
+   media_disk_suspend_depth = 0;
    unifrog_log_set_disk_suspended(0);
 }
 
@@ -434,6 +468,7 @@ static int set_video_layer_visible(int visible, int src_w, int src_h,
    return order_ret == 0 && zoom_ret == 0 ? 0 : -1;
 }
 
+#if UNIFROG_ENABLE_HCPLAYER
 static int set_player_display_rect(void *player, int src_w, int src_h,
    int dst_w, int dst_h)
 {
@@ -457,6 +492,7 @@ static int set_player_display_rect(void *player, int src_w, int src_h,
       ret);
    return ret;
 }
+#endif
 
 static void media_set_aspect_mode(dis_tv_mode_e ratio, dis_mode_e mode)
 {
@@ -3323,6 +3359,7 @@ int unifrog_media_play_video_ex(const char *path,
       return -1;
    media_sd_read_recover_stale("play_start");
    old_log_auto_flush = unifrog_log_auto_flush_bytes();
+   media_disk_suspend_begin("media_session", path);
    unifrog_log_set_auto_flush_bytes(VIDEO_LOG_AUTO_FLUSH_BYTES);
    printf("unifrog media start stack=native path=%s audio_only=%d image=%d force_native=%d\n",
       path, audio_only, image_file, force_native);
@@ -3356,6 +3393,7 @@ int unifrog_media_play_video_ex(const char *path,
    }
    printf("unifrog media end stack=native ret=%d path=%s\n", ret, path);
    unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
+   media_disk_suspend_end("media_session", path);
    (void)unifrog_log_flush();
    return ret;
 #else
@@ -3383,6 +3421,7 @@ int unifrog_media_play_video_ex(const char *path,
       return -1;
    media_sd_read_recover_stale("play_start");
    old_log_auto_flush = unifrog_log_auto_flush_bytes();
+   media_disk_suspend_begin("media_session", path);
    unifrog_log_set_auto_flush_bytes(VIDEO_LOG_AUTO_FLUSH_BYTES);
    printf("unifrog media start path=%s audio_only=%d image=%d\n",
       path, audio_only, image_file);
@@ -3398,6 +3437,7 @@ int unifrog_media_play_video_ex(const char *path,
          force_audio, path ? path : "");
       ret = media_play_direct_audio(path);
       unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
+      media_disk_suspend_end("media_session", path);
       (void)unifrog_log_flush();
       return ret;
    }
@@ -3408,6 +3448,7 @@ int unifrog_media_play_video_ex(const char *path,
       ret = media_play_native_video(path, options);
       printf("unifrog media video route=native ret=%d path=%s\n", ret, path);
       unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
+      media_disk_suspend_end("media_session", path);
       (void)unifrog_log_flush();
       return ret;
    }
@@ -3712,6 +3753,7 @@ out:
       ret = media_play_direct_audio(path);
    printf("unifrog media end ret=%d path=%s\n", ret, path ? path : "");
    unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
+   media_disk_suspend_end("media_session", path);
    (void)unifrog_log_flush();
    return ret;
 #endif

@@ -80,7 +80,7 @@ LOG_AUTO_FLUSH_BYTES ?= 16384
 LOG_FLUSH_EVERY ?= 0
 LOG_DISK_WRITES ?= 1
 STORAGE_BOOT_MOUNT ?= 0
-HCRTOS_MEDIA ?= firmware
+HCRTOS_MEDIA ?= native
 FRONTEND_IMPL ?= native
 
 -include config.mk
@@ -156,7 +156,7 @@ OPT_AUDIO ?= -Os
 OPT_FLAGS := -O0 -O1 -O2 -O3 -Os -Og -Ofast
 SD_MODES := safe wide1 wide2 wide4 wide8 wide10 wide12 wide14 wide16 wide18 wide20 wide22 wide24 wide25 wide37 hs1 wide50 wide uhs12 uhs25 uhs
 SD_READ_MODES := boot off none safe wide1 wide2 wide4 wide8 wide10 wide12 wide14 wide16 wide18 wide20 wide22 wide24 wide25 wide37 hs1 wide50 wide uhs12 uhs25 uhs
-HCRTOS_MEDIA_MODES := module firmware
+HCRTOS_MEDIA_MODES := native module firmware
 FRONTEND_IMPLS := native
 
 ifneq ($(filter $(SD_MODE),$(SD_MODES)),$(SD_MODE))
@@ -377,8 +377,9 @@ CONFIG_DEFINES := \
 	-DNOT_SUPPORT_4K \
 	-DSOC_HC15XX \
 	-DSF2000 \
-	-DSUPPORT_FFPLAYER \
+	$(if $(filter firmware module,$(HCRTOS_MEDIA)),-DSUPPORT_FFPLAYER) \
 	-DUNIFROG_HCRTOS_MEDIA=\"$(HCRTOS_MEDIA)\" \
+	-DUNIFROG_HCRTOS_MEDIA_NATIVE=$(if $(filter native,$(HCRTOS_MEDIA)),1,0) \
 	-DUNIFROG_HCRTOS_MEDIA_MODULE=$(if $(filter module,$(HCRTOS_MEDIA)),1,0) \
 	-DUNIFROG_HCRTOS_MEDIA_FIRMWARE=$(if $(filter firmware,$(HCRTOS_MEDIA)),1,0) \
 	-DUNIFROG_ENABLE_HCPLAYER=$(if $(filter firmware,$(HCRTOS_MEDIA)),1,0) \
@@ -468,7 +469,7 @@ HCRTOS_DISPLAY_LDLIBS := \
 	-lviddrv
 
 HCRTOS_MEDIA_LDLIBS := \
-	-lffplayer \
+	$(if $(filter firmware module,$(HCRTOS_MEDIA)),-lffplayer) \
 	-lavformat \
 	-lavcodec \
 	-lavutil \
@@ -478,7 +479,7 @@ HCRTOS_MEDIA_LDLIBS := \
 
 # Normal archives are pulled as needed by the linker.
 LDLIBS := \
-	$(if $(filter firmware,$(HCRTOS_MEDIA)),$(HCRTOS_MEDIA_LDLIBS)) \
+	$(if $(filter native firmware,$(HCRTOS_MEDIA)),$(HCRTOS_MEDIA_LDLIBS)) \
 	$(HCRTOS_DISPLAY_LDLIBS) \
 	-lge \
 	-lz \
@@ -524,7 +525,7 @@ HCRTOS_MEDIA_WHOLE_LIBS := \
 	-lviddrv_mpeg4dec \
 	-lviddrv_imagedec
 
-WHOLE_LIBS := $(if $(filter firmware,$(HCRTOS_MEDIA)),$(HCRTOS_MEDIA_WHOLE_LIBS)) $(CORE_WHOLE_LIBS)
+WHOLE_LIBS := $(if $(filter native firmware,$(HCRTOS_MEDIA)),$(HCRTOS_MEDIA_WHOLE_LIBS)) $(CORE_WHOLE_LIBS)
 
 JS2300_HOST_SOURCES := \
 	src/frontend/js2300_frontend.c \
@@ -589,7 +590,7 @@ UNIFROG_OBJECTS := \
 UNIFROG_OBJECTS += \
 	$(BUILD)/unifrog_ui.o
 
-ifeq ($(HCRTOS_MEDIA),firmware)
+ifneq ($(filter native firmware,$(HCRTOS_MEDIA)),)
 UNIFROG_OBJECTS += \
 	$(BUILD)/unifrog_media.o
 else
@@ -935,8 +936,9 @@ help:
 	@echo "  make LOG_FLUSH_EVERY=1  Flush each log line for diagnostics"
 	@echo "  make LOG_AUTO_FLUSH_BYTES=4096  Set buffered log flush threshold"
 	@echo "  make LOG_DISK_WRITES=0  Keep logs/reports in retained RAM only"
-	@echo "  make HCRTOS_MEDIA=module  Keep native media in an SD-loaded module"
-	@echo "  make HCRTOS_MEDIA=firmware  Link native media into unifrog.bin"
+	@echo "  make HCRTOS_MEDIA=native  Link native FFmpeg media into unifrog.bin"
+	@echo "  make HCRTOS_MEDIA=module  Keep HCRTOS media in an SD-loaded module"
+	@echo "  make HCRTOS_MEDIA=firmware  Link hcplayer/HCRTOS media into unifrog.bin"
 	@echo "  make FRONTEND_IMPL=native   Build the native frontend (default)"
 	@echo "  make FRONTEND_IMPL=native   Build the native C frontend fallback"
 	@echo "  make SD_MODE=wide10 Diagnostic 4-bit 10 MHz SD build"
