@@ -2316,6 +2316,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    int hc_codec;
    int init_ret;
    int init_errno;
+   uint32_t init_elapsed_ms = 0;
    int start_ret;
    int start_errno;
    int rect_ret;
@@ -2351,7 +2352,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    cfg.independent_url = 1;
    cfg.combine_enable = 0;
    cfg.sync_mode = 0;
-   cfg.decode_mode = VDEC_WORK_MODE_NORMAL;
+   cfg.decode_mode = VDEC_WORK_MODE_KSHM;
    cfg.decoder_flag = 0;
    cfg.rotate_by_cfg = 1;
    cfg.rotate_enable = 0;
@@ -2379,7 +2380,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    cfg.rotate_type = ROTATE_TYPE_0;
    cfg.bit_rate = par->bit_rate > 0 && par->bit_rate < INT32_MAX ?
       (int)par->bit_rate : 0;
-   cfg.kshm_size = 0;
+   cfg.kshm_size = MEDIA_VIDEO_KSHM_SIZE;
    cfg.buffering_start = 200;
    cfg.buffering_end = 1000;
    cfg.scan_type = YUV420_YH1V2;
@@ -2421,23 +2422,29 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
       (((uint32_t)dis_fd & 0xffffu) << 16) | ((uint32_t)vidsink_fd & 0xffffu));
    printf("unifrog media native video open_viddec done fd=%d\n", fd);
    media_video_activity_stage(4u, (uint32_t)(fd & 0xffffu), 0u);
-   open_display_controller();
    media_video_activity_stage(5u,
-      (((uint32_t)dis_fd & 0xffffu) << 16) | ((uint32_t)fd & 0xffffu), 0u);
-   printf("unifrog media native video init begin fd=%d dis=%d vidsink=%d\n",
-      fd, dis_fd, vidsink_fd);
+      (((uint32_t)cfg.decode_mode & 0xffu) << 16) |
+      ((uint32_t)cfg.kshm_size & 0xffffu),
+      (((uint32_t)cfg.extradata_size & 0xffffu) << 16) |
+      ((uint32_t)post_extra_size & 0xffffu));
+   printf("unifrog media native video init begin fd=%d req=0x%lx dis=%d vidsink=%d mode=%d kshm=%d cfg_extra=%d post_extra=%d\n",
+      fd, (unsigned long)VIDDEC_INIT, dis_fd, vidsink_fd, cfg.decode_mode,
+      cfg.kshm_size, cfg.extradata_size, post_extra_size);
    (void)unifrog_log_flush();
    media_video_activity_stage(6u,
-      (((uint32_t)dis_fd & 0xffffu) << 16) | ((uint32_t)vidsink_fd & 0xffffu),
-      (uint32_t)(fd & 0xffffu));
+      (((uint32_t)cfg.decode_mode & 0xffu) << 16) |
+      ((uint32_t)VIDDEC_INIT & 0xffffu),
+      (uint32_t)cfg.kshm_size);
    errno = 0;
+   init_elapsed_ms = unifrog_perf_time_ms();
    init_ret = ioctl(fd, VIDDEC_INIT, &cfg);
+   init_elapsed_ms = unifrog_perf_time_ms() - init_elapsed_ms;
    init_errno = errno;
    media_video_activity_stage(7u,
       ((uint32_t)(init_ret & 0xffffu) << 16) | ((uint32_t)init_errno & 0xffffu),
       (uint32_t)(fd & 0xffffu));
-   printf("unifrog media native video init done fd=%d ret=%d errno=%d\n",
-      fd, init_ret, init_errno);
+   printf("unifrog media native video init done fd=%d ret=%d errno=%d ms=%lu\n",
+      fd, init_ret, init_errno, (unsigned long)init_elapsed_ms);
    if (init_ret == 0 && post_extra_size > 0) {
       printf("unifrog media native video post_extra begin fd=%d size=%d\n",
          fd, post_extra_size);
@@ -2480,6 +2487,11 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
       ((uint32_t)(win_ret & 0xffffu) << 16) | ((uint32_t)mirror_ret & 0xffffu));
    printf("unifrog media native video start done fd=%d ret=%d errno=%d\n",
       fd, start_ret, start_errno);
+   if (start_ret == 0) {
+      open_display_controller();
+      media_video_activity_stage(10u,
+         (((uint32_t)dis_fd & 0xffffu) << 16) | ((uint32_t)fd & 0xffffu), 0u);
+   }
    if (start_ret == 0 && dis_fd >= 0) {
       dis_win_onoff_t win;
 

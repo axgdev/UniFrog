@@ -38,6 +38,21 @@ This matches prior stable behavior and vendor-style decoder usage.
 - post-init extra packet send (`media_send_extra_packet`) before start
 - start path blocked if post-extra send fails
 - extra diagnostics around post-extra stage
+- native decoder init uses `VDEC_WORK_MODE_KSHM` with non-zero `kshm_size`
+  (8 MiB), matching the last known non-freezing logs
+
+## Regression Found In `v050/0089`
+
+- Last known non-freezing run (`v050/0082`) showed:
+  - `decode=5` (`VDEC_WORK_MODE_KSHM`)
+  - `kshm=8388608`
+  - `init done ret=0`
+- Freezing runs (`v050/0087`, `v050/0088`, `v050/0089`) showed:
+  - `decode=0` (`VDEC_WORK_MODE_NORMAL`)
+  - `kshm=0`
+  - no `init done` after `init begin`
+
+The freeze correlates with that config regression at `VIDDEC_INIT`.
 
 ## Validation Performed
 
