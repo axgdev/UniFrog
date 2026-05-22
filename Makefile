@@ -1489,6 +1489,7 @@ $(BUILD)/unifrog_boot_logo.o: $(BOOT_LOGO_RGB565_INC)
 $(BUILD)/unifrog_fb.o $(BUILD)/unifrog_ge.o $(BUILD)/unifrog_presenter.o $(BUILD)/unifrog_surface_alloc.o: CFLAGS := $(CFLAGS_VIDEO)
 $(BUILD)/unifrog_gfx.o $(BUILD)/unifrog_perf.o $(BUILD)/unifrog_scpu.o: CFLAGS := $(CFLAGS_FAST)
 $(BUILD)/unifrog_audio.o: CFLAGS := $(CFLAGS_AUDIO)
+$(BUILD)/unifrog_media.o $(BUILD)/native_modules/unifrog_media.o: $(HCRTOS_FFMPEG_STAMP)
 $(BUILD)/unifrog_libretro_host.o: CFLAGS := $(CFLAGS_AUDIO) -I$(ZSTD_DIR)
 
 $(BUILD)/%.o: src/%.S | $(BUILD)
