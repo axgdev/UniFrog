@@ -25,5 +25,6 @@ Current component docs:
 - `sf2000-backlight-pwm.md`: backlight PWM notes
 - `audio-quirks.md`: SF2000 audio gate/mute behavior and buzz diagnostics
 - `filesystem-mmc-notes.md`: confirmed FatFs/MMC/logging behavior
+- `media-video-freeze-handoff.md`: native MP4/H.264 freeze signature and fix path
 - `av-output.md`: AV output notes
 - `WIRELESS_STATUS.md`: wireless controller investigation status
