@@ -23,6 +23,7 @@
 #include <unifrog/build_info.h>
 #include <unifrog/core_module.h>
 #include <unifrog/diag.h>
+#include <unifrog/exception_record.h>
 #include <unifrog/gfx.h>
 #include <unifrog/input.h>
 #include <unifrog/libretro_host.h>
@@ -162,6 +163,10 @@ struct native_frontend {
    char nav_path[FRONTEND_NAV_MAX][FRONTEND_MAX_PATH];
    unsigned nav_selected[FRONTEND_NAV_MAX];
    unsigned nav_count;
+   enum frontend_view view_stack[FRONTEND_NAV_MAX];
+   unsigned view_stack_selected[FRONTEND_NAV_MAX];
+   unsigned view_stack_scroll[FRONTEND_NAV_MAX];
+   unsigned view_stack_count;
    char title[64];
    char current_dir[FRONTEND_MAX_PATH];
    char last_path[FRONTEND_MAX_PATH];
@@ -3385,6 +3390,10 @@ static void load_theme(struct native_frontend *fe)
          fe->theme_alternate ? 1 : 0);
       return;
    }
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_FRONTEND_START,
+      unifrog_exception_activity_hash("theme.scheme"),
+      unifrog_exception_activity_hash(fe->theme_name),
+      (uint32_t)(fe->theme_alternate ? 1 : 0));
    frontend_loading_show(fe, "Loading Theme", fe->theme_name, "scheme", 5);
    unifrog_frontend_lvgl_style_default(&style, &theme);
    fe->scheme_count = 0;
@@ -3461,6 +3470,10 @@ static void load_theme(struct native_frontend *fe)
       }
    }
    dir_ms = unifrog_perf_time_ms() - t0;
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_FRONTEND_START,
+      unifrog_exception_activity_hash("theme.assets"),
+      unifrog_exception_activity_hash(fe->theme_name),
+      (uint32_t)(fe->theme_alternate ? 1 : 0));
    frontend_loading_show(fe, "Loading Theme", fe->theme_name, "assets", 35);
    base_theme = theme;
    base_style = style;
@@ -3501,6 +3514,10 @@ static void load_theme(struct native_frontend *fe)
       fe->view_style_valid[i] = dir_theme_loaded ? 0 : 1;
    }
    screens_ms = unifrog_perf_time_ms() - t0;
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_FRONTEND_START,
+      unifrog_exception_activity_hash("theme.cache"),
+      unifrog_exception_activity_hash(fe->theme_name),
+      (uint32_t)(fe->theme_alternate ? 1 : 0));
    frontend_loading_show(fe, "Loading Theme", fe->theme_name, "cache", 65);
    t0 = unifrog_perf_time_ms();
    {
@@ -3520,6 +3537,10 @@ static void load_theme(struct native_frontend *fe)
    preload_ms = unifrog_perf_time_ms() - t0;
    fe->theme = &fe->active_theme;
    t0 = unifrog_perf_time_ms();
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_FRONTEND_START,
+      unifrog_exception_activity_hash("theme.apply"),
+      unifrog_exception_activity_hash(fe->theme_name),
+      (uint32_t)(fe->theme_alternate ? 1 : 0));
    frontend_loading_show(fe, "Loading Theme", fe->theme_name, "apply", 90);
    apply_frontend_style(fe, -2, &fe->active_style);
    apply_ms = unifrog_perf_time_ms() - t0;
@@ -3539,6 +3560,7 @@ static void load_theme(struct native_frontend *fe)
       sizeof(fe->loaded_theme_language), active_language_label(fe));
    fe->loaded_theme_alternate = fe->theme_alternate ? 1 : 0;
    fe->theme_loaded = 1;
+   unifrog_exception_activity_clear();
    frontend_invalidate_draw(fe);
 }
 
@@ -3734,6 +3756,19 @@ static void nav_reset(struct native_frontend *fe)
 
 static void set_parent_view(struct native_frontend *fe)
 {
+   if (fe->view_stack_count >= FRONTEND_NAV_MAX) {
+      memmove(fe->view_stack, fe->view_stack + 1,
+         (FRONTEND_NAV_MAX - 1u) * sizeof(fe->view_stack[0]));
+      memmove(fe->view_stack_selected, fe->view_stack_selected + 1,
+         (FRONTEND_NAV_MAX - 1u) * sizeof(fe->view_stack_selected[0]));
+      memmove(fe->view_stack_scroll, fe->view_stack_scroll + 1,
+         (FRONTEND_NAV_MAX - 1u) * sizeof(fe->view_stack_scroll[0]));
+      fe->view_stack_count = FRONTEND_NAV_MAX - 1u;
+   }
+   fe->view_stack[fe->view_stack_count] = fe->view;
+   fe->view_stack_selected[fe->view_stack_count] = fe->selected;
+   fe->view_stack_scroll[fe->view_stack_count] = fe->scroll;
+   fe->view_stack_count++;
    fe->parent_view = fe->view;
    fe->has_parent_view = 1;
 }
@@ -3742,6 +3777,7 @@ static void clear_parent_view(struct native_frontend *fe)
 {
    fe->has_parent_view = 0;
    fe->parent_view = FRONTEND_VIEW_LAUNCH;
+   fe->view_stack_count = 0;
 }
 
 static void nav_push(struct native_frontend *fe)
@@ -4200,7 +4236,8 @@ static void show_launch(struct native_frontend *fe)
    add_item(fe, "Config", "settings", FRONTEND_ITEM_ACTION, "config", NULL);
    add_item(fe, "Reboot", "system", FRONTEND_ITEM_ACTION, "reboot", NULL);
    add_item(fe, "Shutdown", "not supported", FRONTEND_ITEM_ACTION, "shutdown", NULL);
-   set_status(fe, "native frontend adapter %s", UNIFROG_NATIVE_FRONTEND_GIT_COMMIT);
+   fe->status[0] = '\0';
+   fe->needs_draw = 1;
 }
 
 static void add_dir_entry(struct native_frontend *fe, const char *dir,
@@ -5333,6 +5370,104 @@ static void show_sysinfo(struct native_frontend *fe)
    add_item(fe, "Reload", "refresh", FRONTEND_ITEM_ACTION, "sysinfo", NULL);
 }
 
+static void restore_view_selection(struct native_frontend *fe, unsigned selected,
+   unsigned scroll)
+{
+   fe->selected = selected;
+   fe->scroll = scroll;
+   clamp_selection(fe);
+   fe->needs_draw = 1;
+   log_selection(fe, "back");
+}
+
+static void show_view(struct native_frontend *fe, enum frontend_view view)
+{
+   switch (view) {
+   case FRONTEND_VIEW_LAUNCH:
+      show_launch(fe);
+      break;
+   case FRONTEND_VIEW_CONFIG:
+      show_config(fe);
+      break;
+   case FRONTEND_VIEW_CONNECT:
+      show_connect(fe);
+      break;
+   case FRONTEND_VIEW_CUSTOM:
+      show_custom(fe);
+      break;
+   case FRONTEND_VIEW_VISUAL:
+      show_visual(fe);
+      break;
+   case FRONTEND_VIEW_POWER:
+      show_power(fe);
+      break;
+   case FRONTEND_VIEW_STORAGE:
+      show_storage(fe);
+      break;
+   case FRONTEND_VIEW_STORAGE_MODE:
+      show_storage_mode(fe);
+      break;
+   case FRONTEND_VIEW_INFO:
+      show_info(fe);
+      break;
+   case FRONTEND_VIEW_APPS:
+      show_apps(fe);
+      break;
+   case FRONTEND_VIEW_UPDATES:
+      show_updates(fe);
+      break;
+   case FRONTEND_VIEW_CORES:
+      show_core_manager(fe);
+      break;
+   case FRONTEND_VIEW_PACKAGE_CHECK:
+      show_package_check(fe);
+      break;
+   case FRONTEND_VIEW_SYSINFO:
+      show_sysinfo(fe);
+      break;
+   case FRONTEND_VIEW_THEME:
+      show_theme_list(fe);
+      break;
+   case FRONTEND_VIEW_LANGUAGE:
+      show_language_list(fe);
+      break;
+   case FRONTEND_VIEW_LAUNCH_SETTINGS:
+      show_launch_settings(fe);
+      break;
+   default:
+      show_launch(fe);
+      break;
+   }
+}
+
+static int restore_parent_view(struct native_frontend *fe,
+   enum frontend_view fallback)
+{
+   enum frontend_view view = fallback;
+   unsigned selected = 0;
+   unsigned scroll = 0;
+   int had_parent = 0;
+
+   if (fe->view_stack_count > 0) {
+      fe->view_stack_count--;
+      view = fe->view_stack[fe->view_stack_count];
+      selected = fe->view_stack_selected[fe->view_stack_count];
+      scroll = fe->view_stack_scroll[fe->view_stack_count];
+      had_parent = 1;
+   }
+   if (fe->view_stack_count > 0) {
+      fe->parent_view = fe->view_stack[fe->view_stack_count - 1u];
+      fe->has_parent_view = 1;
+   } else {
+      fe->parent_view = FRONTEND_VIEW_LAUNCH;
+      fe->has_parent_view = 0;
+   }
+   show_view(fe, view);
+   if (had_parent)
+      restore_view_selection(fe, selected, scroll);
+   return had_parent;
+}
+
 static void browser_back(struct native_frontend *fe)
 {
    char parent[FRONTEND_MAX_PATH];
@@ -5354,18 +5489,7 @@ static void browser_back(struct native_frontend *fe)
    }
    if (fe->view == FRONTEND_VIEW_SYSINFO || fe->view == FRONTEND_VIEW_CORES ||
        fe->view == FRONTEND_VIEW_PACKAGE_CHECK) {
-      if (fe->has_parent_view && fe->parent_view == FRONTEND_VIEW_APPS) {
-         clear_parent_view(fe);
-         show_apps(fe);
-         return;
-      }
-      if (fe->has_parent_view && fe->parent_view == FRONTEND_VIEW_STORAGE) {
-         clear_parent_view(fe);
-         show_storage(fe);
-         return;
-      }
-      clear_parent_view(fe);
-      show_info(fe);
+      restore_parent_view(fe, FRONTEND_VIEW_INFO);
       return;
    }
    if (fe->view == FRONTEND_VIEW_CORE_INFO) {
@@ -5373,42 +5497,20 @@ static void browser_back(struct native_frontend *fe)
       return;
    }
    if (fe->view == FRONTEND_VIEW_HISTORY || fe->view == FRONTEND_VIEW_FAVORITES) {
-      if (fe->has_parent_view && fe->parent_view == FRONTEND_VIEW_APPS) {
-         clear_parent_view(fe);
-         show_apps(fe);
-         return;
-      }
-      if (fe->has_parent_view && fe->parent_view == FRONTEND_VIEW_STORAGE) {
-         clear_parent_view(fe);
-         show_storage(fe);
-         return;
-      }
-      clear_parent_view(fe);
-      show_launch(fe);
+      restore_parent_view(fe, FRONTEND_VIEW_LAUNCH);
       return;
    }
    if (fe->view == FRONTEND_VIEW_CONNECT || fe->view == FRONTEND_VIEW_CUSTOM ||
        fe->view == FRONTEND_VIEW_VISUAL) {
-      if (fe->has_parent_view && fe->parent_view == FRONTEND_VIEW_APPS) {
-         clear_parent_view(fe);
-         show_apps(fe);
-         return;
-      }
-      if (fe->has_parent_view && fe->parent_view == FRONTEND_VIEW_INFO) {
-         clear_parent_view(fe);
-         show_info(fe);
-         return;
-      }
-      clear_parent_view(fe);
-      show_config(fe);
+      restore_parent_view(fe, FRONTEND_VIEW_CONFIG);
       return;
    }
    if (fe->view == FRONTEND_VIEW_THEME) {
-      show_custom(fe);
+      restore_parent_view(fe, FRONTEND_VIEW_CUSTOM);
       return;
    }
    if (fe->view == FRONTEND_VIEW_LANGUAGE) {
-      show_config(fe);
+      restore_parent_view(fe, FRONTEND_VIEW_CONFIG);
       return;
    }
    if (fe->view == FRONTEND_VIEW_STORAGE_CONFIRM) {
@@ -5425,18 +5527,7 @@ static void browser_back(struct native_frontend *fe)
    }
    if (fe->view == FRONTEND_VIEW_POWER || fe->view == FRONTEND_VIEW_STORAGE ||
        fe->view == FRONTEND_VIEW_LAUNCH_SETTINGS || fe->view == FRONTEND_VIEW_UPDATES) {
-      if (fe->has_parent_view && fe->parent_view == FRONTEND_VIEW_APPS) {
-         clear_parent_view(fe);
-         show_apps(fe);
-         return;
-      }
-      if (fe->has_parent_view && fe->parent_view == FRONTEND_VIEW_INFO) {
-         clear_parent_view(fe);
-         show_info(fe);
-         return;
-      }
-      clear_parent_view(fe);
-      show_config(fe);
+      restore_parent_view(fe, FRONTEND_VIEW_CONFIG);
       return;
    }
    if (fe->view == FRONTEND_VIEW_FIRMWARE) {
@@ -5869,7 +5960,7 @@ static void activate(struct native_frontend *fe)
          return;
       }
       if (strcmp(item.path, "back_config") == 0) {
-         show_config(fe);
+         restore_parent_view(fe, FRONTEND_VIEW_CONFIG);
          return;
       }
       change_config(fe, 1);
@@ -6114,6 +6205,7 @@ static void activate(struct native_frontend *fe)
       save_settings(fe);
       set_status(fe, "theme %s", active_theme_label(fe));
       show_theme_list(fe);
+      restore_view_selection(fe, selected, fe->scroll);
    } else if (strcmp(item.path, "language_select") == 0) {
       unifrog_text_copy(fe->language_name, sizeof(fe->language_name),
          item.core[0] ? item.core : "english");
@@ -6123,7 +6215,7 @@ static void activate(struct native_frontend *fe)
       load_theme(fe);
       save_settings(fe);
       set_status(fe, "language %s", active_language_label(fe));
-      show_config(fe);
+      restore_parent_view(fe, FRONTEND_VIEW_CONFIG);
    } else if (strcmp(item.path, "storage_apply_pending") == 0) {
       char previous_profile[sizeof(fe->storage_profile)];
       int ret;
@@ -6315,7 +6407,7 @@ static void activate(struct native_frontend *fe)
    } else if (strcmp(item.path, "shutdown") == 0) {
       set_status(fe, "shutdown unsupported; use reboot");
    } else if (strcmp(item.path, "back_config") == 0) {
-      show_config(fe);
+      restore_parent_view(fe, FRONTEND_VIEW_CONFIG);
    } else if (strcmp(item.path, "back_apps") == 0) {
       show_apps(fe);
    } else if (strcmp(item.path, "back_storage") == 0) {

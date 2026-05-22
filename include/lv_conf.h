@@ -62,12 +62,12 @@ uint64_t mux_tick(void);
 #define LV_FONT_UNSCII_8 1
 #define LV_FONT_DEFAULT &lv_font_unscii_8
 #define LV_FONT_FMT_TXT_LARGE 0
-#define LV_USE_FONT_COMPRESSED 0
+#define LV_USE_FONT_COMPRESSED 1
 #define LV_USE_BIDI 0
 #define LV_USE_ARABIC_PERSIAN_CHARS 0
 
 #define LV_USE_FS_STDIO 1
-#define LV_FS_STDIO_LETTER '\0'
+#define LV_FS_STDIO_LETTER 'S'
 #define LV_FS_STDIO_PATH ""
 #define LV_FS_STDIO_CACHE_SIZE 0
 

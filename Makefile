@@ -276,7 +276,7 @@ UNIFROG_NATIVE_FRONTEND_GIT_COMMIT := native
 
 # Treat SDK headers as system headers so third-party/newlib warnings do not
 # obscure warnings from the UniFrog source itself.
-PROJECT_INCLUDES := -Iinclude -Isrc -I$(BUILD) -I$(CORE_SOURCE_ROOT)/libretro-common/include -I$(JS2300)/include
+PROJECT_INCLUDES := -Iinclude -Isrc -I$(BUILD) -I$(CORE_SOURCE_ROOT)/libretro-common/include -I$(JS2300)/include -I$(LVGL_DIR) -I$(LVGL_DIR)/src
 SDK_INCLUDES := \
 	-isystem $(SDK)/include \
 	-isystem $(SDK)/include/hcrtos \
@@ -556,6 +556,19 @@ ZSTD_CFLAGS := $(CFLAGS_FAST) -w \
 	-I$(ZSTD_DIR)/decompress
 
 UNIFROG_OBJECTS += $(LZ4_OBJS) $(ZSTD_DECODER_OBJ)
+
+LVGL_FONT_OBJECTS := \
+	$(BUILD)/lvgl/font/lv_font_loader.o \
+	$(BUILD)/lvgl/font/lv_font_fmt_txt.o \
+	$(BUILD)/lvgl/misc/lv_fs.o \
+	$(BUILD)/lvgl/misc/lv_gc.o \
+	$(BUILD)/lvgl/misc/lv_ll.o \
+	$(BUILD)/lvgl/misc/lv_mem.o \
+	$(BUILD)/lvgl/misc/lv_txt.o \
+	$(BUILD)/lvgl/misc/lv_txt_ap.o \
+	$(BUILD)/lvgl/misc/lv_utils.o \
+	$(BUILD)/lvgl/extra/libs/fsdrv/lv_fs_stdio.o
+UNIFROG_OBJECTS += $(LVGL_FONT_OBJECTS)
 
 LIBUNIFROG := $(OUT)/libunifrog.a
 LIBJS2300 := $(JS2300)/output/libjs2300.a
@@ -1301,6 +1314,11 @@ $(ZSTD_DECODER_OBJ): $(ZSTD_DECODER_SRC) | $(BUILD)
 	@echo "  CC      $<"
 	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) $(ZSTD_CFLAGS) -MD -MP -c $< -o $@
+
+$(BUILD)/lvgl/%.o: $(LVGL_DIR)/src/%.c | $(BUILD)
+	@echo "  CC      $<"
+	$(Q)mkdir -p $(dir $@)
+	$(Q)$(CC) $(CFLAGS_FAST) -w -MD -MP -c $< -o $@
 
 define CORE_MODULE_RULES
 $(BUILD)/core_modules/$(1).out: $(BUILD)/core_modules/$(1)_entry.o $(BUILD)/core_modules/support.o $$($(2)_CORE_LIB) $$($(2)_CORE_SUPPORT_LIBS) $(LIBRETRO_COMMON_LIB) $(LIBUNIFROG) linker/core-module.ld linker/hc15xx/peripherals.ld $(SDK_BUILD_STAMP) $(BUILD_CONFIG_STAMP) | $(OUT)

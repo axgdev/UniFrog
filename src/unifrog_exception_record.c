@@ -7,11 +7,31 @@
 
 #include <stdio.h>
 
+static uint32_t checksum_mix(uint32_t checksum, uint32_t value);
+
 static uint32_t exception_checksum(
    const volatile struct fastboot_exception_record *record)
 {
-   return record->magic ^ record->version ^ record->cause ^ record->epc ^
+   uint32_t checksum = record->magic ^ record->version ^ record->cause ^ record->epc ^
       record->badvaddr ^ record->ra ^ record->count ^ 0x9e3779b9u;
+
+   checksum = checksum_mix(checksum, record->status);
+   checksum = checksum_mix(checksum, record->sp);
+   checksum = checksum_mix(checksum, record->task);
+   checksum = checksum_mix(checksum, record->irq_nesting);
+   checksum = checksum_mix(checksum, record->phase);
+   checksum = checksum_mix(checksum, record->marker);
+   checksum = checksum_mix(checksum, record->heartbeat);
+   checksum = checksum_mix(checksum, record->detail0);
+   checksum = checksum_mix(checksum, record->detail1);
+   checksum = checksum_mix(checksum, record->epc_section);
+   checksum = checksum_mix(checksum, record->ra_section);
+   checksum = checksum_mix(checksum, record->gp);
+   for (unsigned i = 0; i < FASTBOOT_EXCEPTION_EPC_WORDS; i++)
+      checksum = checksum_mix(checksum, record->epc_words[i]);
+   for (unsigned i = 0; i < FASTBOOT_EXCEPTION_STACK_WORDS; i++)
+      checksum = checksum_mix(checksum, record->stack_words[i]);
+   return checksum;
 }
 
 static uint32_t checksum_mix(uint32_t checksum, uint32_t value)
@@ -42,6 +62,50 @@ static int activity_valid(const volatile struct fastboot_activity_record *record
    return record->magic == FASTBOOT_ACTIVITY_MAGIC &&
       record->version == FASTBOOT_ACTIVITY_VERSION &&
       record->checksum == activity_checksum(record);
+}
+
+static uint32_t read_status_register(void)
+{
+   uint32_t status;
+
+   __asm__ volatile("mfc0 %0, $12" : "=r"(status));
+   return status;
+}
+
+static uint32_t read_sp_register(void)
+{
+   uint32_t sp;
+
+   __asm__ volatile("move %0, $29" : "=r"(sp));
+   return sp;
+}
+
+static uint32_t read_gp_register(void)
+{
+   uint32_t gp;
+
+   __asm__ volatile("move %0, $28" : "=r"(gp));
+   return gp;
+}
+
+static int readable_code_addr(uint32_t addr)
+{
+   return addr >= 0x80000000u && addr < 0x80800000u && (addr & 3u) == 0;
+}
+
+static int readable_stack_addr(uint32_t addr)
+{
+   return addr >= 0x80000000u && addr < 0x88000000u && (addr & 3u) == 0;
+}
+
+static void copy_words(volatile uint32_t *out, unsigned count, uint32_t addr,
+   int (*valid)(uint32_t))
+{
+   for (unsigned i = 0; i < count; i++) {
+      uint32_t cur = addr + i * 4u;
+
+      out[i] = valid(cur) ? *(volatile const uint32_t *)(uintptr_t)cur : 0;
+   }
 }
 
 static const char *phase_label(uint32_t phase)
@@ -132,6 +196,10 @@ void unifrog_exception_record_store(uint32_t cause, uint32_t epc,
    record->badvaddr = badvaddr;
    record->ra = ra;
    record->count = count;
+   record->status = read_status_register();
+   record->sp = read_sp_register();
+   record->task = 0;
+   record->irq_nesting = 0;
    record->phase = 0;
    record->marker = 0;
    record->heartbeat = 0;
@@ -145,6 +213,13 @@ void unifrog_exception_record_store(uint32_t cause, uint32_t epc,
       record->detail0 = activity->detail0;
       record->detail1 = activity->detail1;
    }
+   record->epc_section = epc & 0xfff00000u;
+   record->ra_section = ra & 0xfff00000u;
+   record->gp = read_gp_register();
+   copy_words(record->epc_words, FASTBOOT_EXCEPTION_EPC_WORDS,
+      epc & ~3u, readable_code_addr);
+   copy_words(record->stack_words, FASTBOOT_EXCEPTION_STACK_WORDS,
+      record->sp, readable_stack_addr);
    record->checksum = exception_checksum(record);
    unifrog_perf_cache_flush((const void *)record, sizeof(*record));
 }
@@ -236,6 +311,9 @@ void unifrog_exception_record_log_and_clear(const char *tag)
    uint32_t epc;
    uint32_t badvaddr;
    uint32_t ra;
+   uint32_t status;
+   uint32_t sp;
+   uint32_t gp;
    FILE *file;
 
    if (record->magic != FASTBOOT_EXCEPTION_MAGIC ||
@@ -259,13 +337,27 @@ void unifrog_exception_record_log_and_clear(const char *tag)
    epc = record->epc;
    badvaddr = record->badvaddr;
    ra = record->ra;
-   unifrog_log("unifrog exception retained tag=%s count=%lu cause=0x%08lx epc=0x%08lx badv=0x%08lx ra=0x%08lx\n",
+   status = record->status;
+   sp = record->sp;
+   gp = record->gp;
+   unifrog_log("unifrog exception retained tag=%s count=%lu cause=0x%08lx epc=0x%08lx badv=0x%08lx ra=0x%08lx status=0x%08lx sp=0x%08lx gp=0x%08lx phase=%lu(%s) marker=%lu beat=%lu detail0=0x%08lx detail1=0x%08lx epc_section=0x%08lx ra_section=0x%08lx\n",
       tag ? tag : "",
       (unsigned long)count,
       (unsigned long)cause,
       (unsigned long)epc,
       (unsigned long)badvaddr,
-      (unsigned long)ra);
+      (unsigned long)ra,
+      (unsigned long)status,
+      (unsigned long)sp,
+      (unsigned long)gp,
+      (unsigned long)record->phase,
+      phase_label(record->phase),
+      (unsigned long)record->marker,
+      (unsigned long)record->heartbeat,
+      (unsigned long)record->detail0,
+      (unsigned long)record->detail1,
+      (unsigned long)record->epc_section,
+      (unsigned long)record->ra_section);
    file = fopen(UNIFROG_CRASH_MARKER_PATH, "wb");
    if (file) {
       fprintf(file,
@@ -275,13 +367,41 @@ void unifrog_exception_record_log_and_clear(const char *tag)
          "cause=0x%08lx\n"
          "epc=0x%08lx\n"
          "badvaddr=0x%08lx\n"
-         "ra=0x%08lx\n",
+         "ra=0x%08lx\n"
+         "status=0x%08lx\n"
+         "sp=0x%08lx\n"
+         "gp=0x%08lx\n"
+         "phase=%lu\n"
+         "phase_label=%s\n"
+         "marker=%lu\n"
+         "heartbeat=%lu\n"
+         "detail0=0x%08lx\n"
+         "detail1=0x%08lx\n"
+         "epc_section=0x%08lx\n"
+         "ra_section=0x%08lx\n",
          tag ? tag : "",
          (unsigned long)count,
          (unsigned long)cause,
          (unsigned long)epc,
          (unsigned long)badvaddr,
-         (unsigned long)ra);
+         (unsigned long)ra,
+         (unsigned long)status,
+         (unsigned long)sp,
+         (unsigned long)gp,
+         (unsigned long)record->phase,
+         phase_label(record->phase),
+         (unsigned long)record->marker,
+         (unsigned long)record->heartbeat,
+         (unsigned long)record->detail0,
+         (unsigned long)record->detail1,
+         (unsigned long)record->epc_section,
+         (unsigned long)record->ra_section);
+      for (unsigned i = 0; i < FASTBOOT_EXCEPTION_EPC_WORDS; i++)
+         fprintf(file, "epc_word%u=0x%08lx\n", i,
+            (unsigned long)record->epc_words[i]);
+      for (unsigned i = 0; i < FASTBOOT_EXCEPTION_STACK_WORDS; i++)
+         fprintf(file, "stack_word%u=0x%08lx\n", i,
+            (unsigned long)record->stack_words[i]);
       fclose(file);
    } else {
       unifrog_log("unifrog exception marker write failed path=%s\n",

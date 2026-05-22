@@ -126,6 +126,128 @@ static void fill_rect_alpha(const struct unifrog_surface *surface,
    }
 }
 
+static const char *button_label_end(const char *text)
+{
+   const char *p = text;
+
+   while (*p && *p != ' ')
+      p++;
+   return p;
+}
+
+static int is_button_token(const char *text, size_t len)
+{
+   return (len == 1u &&
+      (text[0] == 'A' || text[0] == 'B' || text[0] == 'X' ||
+       text[0] == 'Y')) ||
+      (len == 5u && strncmp(text, "START", len) == 0) ||
+      (len == 6u && strncmp(text, "SELECT", len) == 0) ||
+      (len == 4u && strncmp(text, "MENU", len) == 0) ||
+      (len == 3u && strncmp(text, "L/R", len) == 0);
+}
+
+static void draw_footer_status(struct unifrog_ui *ui,
+   const struct unifrog_frontend_lvgl_style *style, int y,
+   const char *status, uint16_t color, uint16_t bg, uint8_t bg_alpha)
+{
+   struct unifrog_surface surface = unifrog_ui_surface(ui);
+   const char *p = status ? status : "";
+   int x = 10;
+   int max_x = FRONTEND_LVGL_W - 8;
+
+   while (*p && x < max_x) {
+      const char *end;
+      size_t len;
+
+      while (*p == ' ')
+         p++;
+      end = button_label_end(p);
+      len = (size_t)(end - p);
+      if (len == 0)
+         break;
+      if (is_button_token(p, len)) {
+         int w = (int)len * 6 + 8;
+         char token[8];
+
+         if (x + w >= max_x)
+            break;
+         memset(token, 0, sizeof(token));
+         if (len >= sizeof(token))
+            len = sizeof(token) - 1u;
+         memcpy(token, p, len);
+         fill_rect_alpha(&surface, x, y - 4, w, 14,
+            contrast_text(style->footer_text, style->footer_background,
+               bg_alpha), 210);
+         unifrog_gfx_draw_text(&surface, x + 4, y,
+            token, contrast_text(bg, style->footer_text, 255), 1);
+         x += w + 4;
+      } else {
+         char word[20];
+         int w;
+
+         if (len >= sizeof(word))
+            len = sizeof(word) - 1u;
+         memcpy(word, p, len);
+         word[len] = '\0';
+         w = (int)len * 6;
+         if (x + w >= max_x)
+            break;
+         unifrog_gfx_draw_text(&surface, x, y, word, color, 1);
+         x += w + 6;
+      }
+      p = end;
+   }
+}
+
+static const char *find_percent_token(const char *text, char *out,
+   size_t out_size)
+{
+   const char *percent;
+   const char *start;
+   const char *end;
+   size_t len;
+
+   if (!text || !out || out_size == 0)
+      return NULL;
+   percent = strchr(text, '%');
+   if (!percent)
+      return NULL;
+   start = percent;
+   while (start > text && start[-1] >= '0' && start[-1] <= '9')
+      start--;
+   end = percent + 1;
+   len = (size_t)(end - start);
+   if (len == 0 || len >= out_size)
+      return NULL;
+   memcpy(out, start, len);
+   out[len] = '\0';
+   return out;
+}
+
+static void draw_header_battery(struct unifrog_ui *ui,
+   const struct unifrog_frontend_lvgl_style *style, const char *detail,
+   uint16_t color)
+{
+   struct unifrog_surface surface = unifrog_ui_surface(ui);
+   char percent[8];
+   int pct;
+   int fill;
+
+   if (!find_percent_token(detail, percent, sizeof(percent)))
+      return;
+   pct = atoi(percent);
+   if (pct < 0)
+      pct = 0;
+   if (pct > 100)
+      pct = 100;
+   fill = (pct * 16 + 99) / 100;
+   unifrog_gfx_fill_rect(&surface, 286, 8, 22, 11, color);
+   unifrog_gfx_fill_rect(&surface, 288, 10, 18, 7, style->header_background);
+   if (fill > 0)
+      unifrog_gfx_fill_rect(&surface, 289, 11, fill, 5, color);
+   unifrog_gfx_fill_rect(&surface, 308, 11, 2, 5, color);
+}
+
 static struct unifrog_png_image *cached_image(const char *path)
 {
    if (!path || !path[0])
@@ -228,10 +350,14 @@ static void draw_shell(struct unifrog_ui *ui,
       unifrog_ui_text_clipped(ui, 214, 9, 16, detail,
          contrast_text(style->header_text, style->header_background,
             header_alpha), 1);
+   if (header_h > 0 && style->header_text_alpha && detail && detail[0])
+      draw_header_battery(ui, style, detail,
+         contrast_text(style->header_text, style->header_background,
+            header_alpha));
    if (footer_h > 0 && style->footer_text_alpha)
-      unifrog_ui_text_clipped(ui, 10, footer_y + 7, 30,
-         status ? status : "", contrast_text(style->footer_text,
-            style->footer_background, footer_alpha), 1);
+      draw_footer_status(ui, style, footer_y + 7, status,
+         contrast_text(style->footer_text, style->footer_background,
+            footer_alpha), style->footer_background, footer_alpha);
 }
 
 static void begin_frame(struct unifrog_ui *ui,
