@@ -85,6 +85,7 @@ enum frontend_view {
    FRONTEND_VIEW_STORAGE_CONFIRM,
    FRONTEND_VIEW_ROM_SYSTEMS,
    FRONTEND_VIEW_OPEN_WITH,
+   FRONTEND_VIEW_OPEN_WITH_OTHER,
    FRONTEND_VIEW_THEME,
    FRONTEND_VIEW_LANGUAGE,
    FRONTEND_VIEW_FIRMWARE,
@@ -113,6 +114,11 @@ enum frontend_item_kind {
 struct frontend_catalog {
    const char *core;
    const char *suffixes[8];
+};
+
+struct frontend_core_alias {
+   const char *name;
+   const char *core;
 };
 
 struct frontend_item {
@@ -223,6 +229,10 @@ struct native_frontend {
 static void show_launch(struct native_frontend *fe);
 static void show_open_with(struct native_frontend *fe,
    const struct frontend_item *item);
+static void reset_items(struct native_frontend *fe, const char *title);
+static struct frontend_item *add_item(struct native_frontend *fe,
+   const char *name, const char *meta, enum frontend_item_kind kind,
+   const char *path, const char *core);
 static void draw(struct native_frontend *fe);
 static void set_status(struct native_frontend *fe, const char *fmt, ...);
 static void restore_view_selection(struct native_frontend *fe,
@@ -294,6 +304,36 @@ static const struct frontend_catalog frontend_catalog[] = {
    { "pce-fast", { ".pce", ".sgx" } },
    { "qpsx", { ".cue", ".iso", ".img", ".pbp" } },
    { "pmp-video", { ".avi" } },
+};
+
+static const struct frontend_core_alias frontend_core_aliases[] = {
+   { "gba", "gpsp" },
+   { "gameboyadvance", "gpsp" },
+   { "gb", "gambatte" },
+   { "gbc", "gambatte" },
+   { "gameboy", "gambatte" },
+   { "nes", "quicknes" },
+   { "fds", "fceumm" },
+   { "snes", "snes9x2005" },
+   { "supernintendo", "snes9x2005" },
+   { "md", "picodrive" },
+   { "genesis", "picodrive" },
+   { "megadrive", "picodrive" },
+   { "mastersystem", "picodrive" },
+   { "sms", "picodrive" },
+   { "gamegear", "picodrive" },
+   { "gg", "picodrive" },
+   { "pce", "pce-fast" },
+   { "pcengine", "pce-fast" },
+   { "psx", "qpsx" },
+   { "ps1", "qpsx" },
+   { "playstation", "qpsx" },
+};
+
+static const char *const frontend_rom_root_choices[] = {
+   FRONTEND_ROMS_ROOT,
+   FRONTEND_ROOT "/games/ROMS",
+   FRONTEND_ROOT,
 };
 
 static const char *const media_suffixes[] = {
@@ -1987,6 +2027,51 @@ static const struct frontend_catalog *catalog_for_core(const char *core)
    return NULL;
 }
 
+static unsigned add_core_candidate(char ids[][UNIFROG_CORE_MODULE_ID_MAX],
+   unsigned count, const char *core);
+
+static const char *core_for_path_component(const char *component)
+{
+   if (!component || !component[0])
+      return NULL;
+   for (unsigned i = 0; i < ARRAY_SIZE(frontend_core_aliases); i++) {
+      if (strcasecmp(component, frontend_core_aliases[i].name) == 0)
+         return frontend_core_aliases[i].core;
+   }
+   return NULL;
+}
+
+static unsigned add_core_candidates_from_path_dirs(const char *path,
+   char ids[][UNIFROG_CORE_MODULE_ID_MAX], unsigned count)
+{
+   char copy[FRONTEND_MAX_PATH];
+   char *p;
+
+   if (!path)
+      return count;
+   unifrog_text_copy(copy, sizeof(copy), path);
+   p = copy;
+   while (*p) {
+      char *slash;
+      const char *core;
+
+      while (*p == '/')
+         p++;
+      if (!*p)
+         break;
+      slash = strchr(p, '/');
+      if (slash)
+         *slash = '\0';
+      core = core_for_path_component(p);
+      if (core)
+         count = add_core_candidate(ids, count, core);
+      if (!slash)
+         break;
+      p = slash + 1;
+   }
+   return count;
+}
+
 static const char *safe_core_for_path(const char *path, const char *core)
 {
    const struct frontend_catalog *cat = catalog_for_core(core);
@@ -2018,6 +2103,7 @@ static unsigned collect_core_candidates(const char *path,
    const struct frontend_catalog *cat = catalog_for_path(path);
    unsigned count = 0;
 
+   count = add_core_candidates_from_path_dirs(path, ids, count);
    if (cat)
       count = add_core_candidate(ids, count, cat->core);
    if (!count && is_zip_file(path)) {
@@ -2025,6 +2111,61 @@ static unsigned collect_core_candidates(const char *path,
          count = add_core_candidate(ids, count, frontend_catalog[i].core);
    }
    return count;
+}
+
+static unsigned collect_other_core_candidates(
+   char ids[][UNIFROG_CORE_MODULE_ID_MAX])
+{
+   unsigned count = 0;
+
+   for (unsigned i = 0; i < ARRAY_SIZE(frontend_catalog); i++)
+      count = add_core_candidate(ids, count, frontend_catalog[i].core);
+   return count;
+}
+
+static void cycle_rom_root(struct native_frontend *fe, int dir)
+{
+   unsigned index = 0;
+
+   if (!fe)
+      return;
+   for (unsigned i = 0; i < ARRAY_SIZE(frontend_rom_root_choices); i++) {
+      if (strcmp(frontend_rom_root(fe), frontend_rom_root_choices[i]) == 0)
+         index = i;
+   }
+   if (dir < 0)
+      index = index == 0 ? ARRAY_SIZE(frontend_rom_root_choices) - 1u :
+         index - 1u;
+   else
+      index = (index + 1u) % ARRAY_SIZE(frontend_rom_root_choices);
+   unifrog_text_copy(fe->rom_root, sizeof(fe->rom_root),
+      frontend_rom_root_choices[index]);
+   if (strcmp(fe->rom_root, FRONTEND_ROOT) == 0)
+      unifrog_text_copy(fe->rom_root_label, sizeof(fe->rom_root_label), "SD");
+   else if (strcmp(fe->rom_root, FRONTEND_ROOT "/games/ROMS") == 0)
+      unifrog_text_copy(fe->rom_root_label, sizeof(fe->rom_root_label),
+         "games/ROMS");
+   else
+      unifrog_text_copy(fe->rom_root_label, sizeof(fe->rom_root_label),
+         "ROMs");
+}
+
+static void show_open_with_other(struct native_frontend *fe)
+{
+   char ids[16][UNIFROG_CORE_MODULE_ID_MAX];
+   unsigned count;
+
+   if (!fe || !fe->pending_open_valid)
+      return;
+   reset_items(fe, "Other Cores");
+   fe->view = FRONTEND_VIEW_OPEN_WITH_OTHER;
+   count = collect_other_core_candidates(ids);
+   for (unsigned i = 0; i < count; i++)
+      add_item(fe, ids[i], "experimental", FRONTEND_ITEM_ACTION,
+         "open_with_core", ids[i]);
+   add_item(fe, "Back", "choose handler", FRONTEND_ITEM_ACTION,
+      "open_with_back", NULL);
+   set_status(fe, "other cores");
 }
 
 static int is_content_file(const char *path)
@@ -4771,6 +4912,8 @@ static void show_open_with(struct native_frontend *fe,
       for (unsigned i = 0; i < count; i++)
          add_item(fe, ids[i], i == 0 ? "default core" : "compatible core",
             FRONTEND_ITEM_ACTION, "open_with_core", ids[i]);
+      add_item(fe, "Other Cores", "experimental", FRONTEND_ITEM_ACTION,
+         "open_with_other", NULL);
       if (!count)
          add_item(fe, "Auto core", "launcher default",
             FRONTEND_ITEM_ACTION, "open_with_core", NULL);
@@ -4880,6 +5023,8 @@ static void show_launch_settings(struct native_frontend *fe)
       backlight = 0;
    snprintf(detail, sizeof(detail), "%u", backlight);
    add_item(fe, "Backlight", detail, FRONTEND_ITEM_ACTION, "backlight", NULL);
+   add_item(fe, "ROM Root", frontend_rom_root(fe), FRONTEND_ITEM_ACTION,
+      "rom_root", NULL);
    add_item(fe, "ROM Systems", "defaults", FRONTEND_ITEM_ACTION,
       "rom_systems", NULL);
    add_item(fe, "Back", "config", FRONTEND_ITEM_ACTION, "back_config", NULL);
@@ -5625,7 +5770,8 @@ static void browser_back(struct native_frontend *fe)
 
    if (fe->view == FRONTEND_VIEW_LAUNCH)
       return;
-   if (fe->view == FRONTEND_VIEW_OPEN_WITH) {
+   if (fe->view == FRONTEND_VIEW_OPEN_WITH ||
+       fe->view == FRONTEND_VIEW_OPEN_WITH_OTHER) {
       return_from_open_with(fe);
       return;
    }
@@ -5849,7 +5995,7 @@ static void launch_game(struct native_frontend *fe, struct frontend_item *item)
    if (!item || !item->path[0])
       return;
    if (fe->view != FRONTEND_VIEW_OPEN_WITH &&
-       (!item->core[0] || is_zip_file(item->path))) {
+       fe->view != FRONTEND_VIEW_OPEN_WITH_OTHER) {
       set_parent_view(fe);
       show_open_with(fe, item);
       return;
@@ -5937,7 +6083,8 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
    set_status(fe, "media returned %d", ret);
    (void)unifrog_ui_open(&fe->ui, 0);
    unifrog_input_clear();
-   if (fe->view == FRONTEND_VIEW_OPEN_WITH)
+   if (fe->view == FRONTEND_VIEW_OPEN_WITH ||
+       fe->view == FRONTEND_VIEW_OPEN_WITH_OTHER)
       return_from_open_with(fe);
 }
 
@@ -5998,6 +6145,14 @@ static void change_config(struct native_frontend *fe, int dir)
    if (strcmp(item->path, "rom_systems") == 0 ||
        strcmp(item->path, "back_config") == 0)
       return;
+   if (strcmp(item->path, "rom_root") == 0) {
+      cycle_rom_root(fe, dir);
+      save_settings(fe);
+      show_launch_settings(fe);
+      fe->selected = selected;
+      clamp_selection(fe);
+      return;
+   }
    if (strcmp(item->path, "audio") == 0)
       fe->run_options.audio_enabled = !fe->run_options.audio_enabled;
    else if (strcmp(item->path, "gain") == 0) {
@@ -6120,7 +6275,8 @@ static void activate(struct native_frontend *fe)
       change_config(fe, 1);
       return;
    }
-   if (fe->view == FRONTEND_VIEW_OPEN_WITH) {
+   if (fe->view == FRONTEND_VIEW_OPEN_WITH ||
+       fe->view == FRONTEND_VIEW_OPEN_WITH_OTHER) {
       struct frontend_item pending = fe->pending_open_item;
 
       if (strcmp(item.path, "open_with_core") == 0 &&
@@ -6153,6 +6309,16 @@ static void activate(struct native_frontend *fe)
          unifrog_text_copy(pending.core, sizeof(pending.core),
             "hcplayer-muted");
          launch_media(fe, &pending);
+         return;
+      }
+      if (strcmp(item.path, "open_with_other") == 0 &&
+          fe->pending_open_valid) {
+         show_open_with_other(fe);
+         return;
+      }
+      if (strcmp(item.path, "open_with_back") == 0 &&
+          fe->pending_open_valid) {
+         show_open_with(fe, &fe->pending_open_item);
          return;
       }
       if (strcmp(item.path, "back") == 0) {
