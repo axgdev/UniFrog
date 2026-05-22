@@ -126,13 +126,15 @@ void unifrog_panic_screen_labeled(const char *title, const char *label0,
 void unifrog_exception_panic(uint32_t cause, uint32_t epc, uint32_t badvaddr,
    uint32_t ra)
 {
+   int screen_ret;
+
    unifrog_exception_record_store(cause, epc, badvaddr, ra);
+   screen_ret = draw_panic_screen("UNIFROG EXCEPTION", "CAUSE", cause, "EPC",
+      epc, "BADV", badvaddr, "RA", ra);
    unifrog_log("unifrog exception cause=0x%08lx epc=0x%08lx badv=0x%08lx ra=0x%08lx\n",
       (unsigned long)cause, (unsigned long)epc, (unsigned long)badvaddr,
       (unsigned long)ra);
-   (void)unifrog_log_flush_force();
-   if (draw_panic_screen("UNIFROG EXCEPTION", "CAUSE", cause, "EPC", epc,
-       "BADV", badvaddr, "RA", ra) == 0)
+   if (screen_ret == 0)
       unifrog_log("unifrog exception screen shown autoreboot_ms=5000\n");
    else
       unifrog_log("unifrog exception screen unavailable autoreboot_ms=5000\n");

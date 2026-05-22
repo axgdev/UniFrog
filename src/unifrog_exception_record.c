@@ -171,6 +171,20 @@ static const char *phase_label(uint32_t phase)
       return "core_module_entry";
    case UNIFROG_ACTIVITY_PHASE_CORE_MODULE_DONE:
       return "core_module_done";
+   case UNIFROG_ACTIVITY_PHASE_MEDIA:
+      return "media";
+   case UNIFROG_ACTIVITY_PHASE_MEDIA_AUDIO:
+      return "media_audio";
+   case UNIFROG_ACTIVITY_PHASE_MEDIA_VIDEO:
+      return "media_video";
+   case UNIFROG_ACTIVITY_PHASE_LOG_FLUSH:
+      return "log_flush";
+   case UNIFROG_ACTIVITY_PHASE_LOG_RESET:
+      return "log_reset";
+   case UNIFROG_ACTIVITY_PHASE_LOG_RECOVERY:
+      return "log_recovery";
+   case UNIFROG_ACTIVITY_PHASE_REPORT_WRITE:
+      return "report_write";
    default:
       return "none";
    }

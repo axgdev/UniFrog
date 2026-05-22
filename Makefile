@@ -761,7 +761,7 @@ CORE_MODULE_ENTRY_OBJECTS := $(LIBRETRO_CORE_ENTRY_OBJECTS)
 CORE_MODULE_SUPPORT_OBJECT := $(BUILD)/core_modules/support.o
 
 DTS_INPUTS := $(DTS) $(shell test ! -d dts/include || find dts/include -type f | sort)
-SDK_PATCHES := $(shell test ! -d patches/open-source || find patches/open-source -type f -name '*.patch' | sort)
+SDK_PATCHES := $(shell test ! -d "$(SDK)/patches/open-source" || find "$(SDK)/patches/open-source" -type f -name '*.patch' | sort)
 JS2300_INPUTS := $(addprefix $(JS2300)/,$(shell test ! -d "$(JS2300)/.git" || git -C "$(JS2300)" ls-files))
 MQUICKJS_INPUTS := $(addprefix $(MQUICKJS_DIR)/,$(shell test ! -d "$(MQUICKJS_DIR)/.git" || git -C "$(MQUICKJS_DIR)" ls-files '*.c' '*.h' Makefile))
 

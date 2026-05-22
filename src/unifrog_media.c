@@ -33,11 +33,16 @@
 #include <libavutil/error.h>
 #include <libavutil/frame.h>
 #include <libavutil/mathematics.h>
+#include <libavutil/pixdesc.h>
+#include <libavutil/pixfmt.h>
 #include <libavutil/samplefmt.h>
+#include <libswresample/swresample.h>
+#include <libswscale/swscale.h>
 
 #include <unifrog/abi.h>
 #include <unifrog/audio.h>
 #include <unifrog/diag.h>
+#include <unifrog/exception_record.h>
 #include <unifrog/hcrtos_media_compat.h>
 #include <unifrog/input.h>
 #include <unifrog/log.h>
@@ -68,6 +73,7 @@
 #define MEDIA_AUDIO_KSHM_SIZE 0x000a0000u
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define MEDIA_SEEK_STEP_MS 10000
+#define MEDIA_SWVIDEO_MMZ_ID 0
 
 #if UNIFROG_ENABLE_HCPLAYER
 struct playback_preset {
@@ -117,6 +123,18 @@ struct media_raw_auddec_variant {
    int enable_audsink;
    int audio_flush_thres;
    int kshm_size;
+};
+
+extern void *mmz_memalign(int id, size_t alignment, size_t size)
+   __attribute__((weak));
+extern void mmz_free(int id, void *ptr) __attribute__((weak));
+
+struct media_sw_video {
+   void *buffer;
+   size_t buffer_size;
+   int width;
+   int height;
+   uint32_t frames;
 };
 
 static int media_has_suffix(const char *path, const char *const *suffixes,
@@ -567,6 +585,146 @@ static void close_display(void)
    }
 }
 
+static void media_swvideo_close(struct media_sw_video *video)
+{
+   if (!video)
+      return;
+   if (video->buffer && mmz_free)
+      mmz_free(MEDIA_SWVIDEO_MMZ_ID, video->buffer);
+   video->buffer = NULL;
+   video->buffer_size = 0;
+   video->width = 0;
+   video->height = 0;
+}
+
+static int media_swvideo_prepare(struct media_sw_video *video, int width,
+   int height)
+{
+   size_t y_size;
+   size_t uv_size;
+   size_t need;
+
+   if (!video || width <= 0 || height <= 0)
+      return -1;
+   y_size = (size_t)width * (size_t)height;
+   uv_size = ((size_t)width + 1u) / 2u * (((size_t)height + 1u) / 2u);
+   need = y_size + uv_size * 2u;
+   if (need == 0)
+      return -1;
+   if (video->buffer && video->buffer_size >= need &&
+       video->width == width && video->height == height)
+      return 0;
+   media_swvideo_close(video);
+   if (!mmz_memalign) {
+      printf("unifrog media swvideo mmz missing width=%d height=%d bytes=%lu\n",
+         width, height, (unsigned long)need);
+      return -1;
+   }
+   video->buffer = mmz_memalign(MEDIA_SWVIDEO_MMZ_ID, 32, need);
+   if (!video->buffer) {
+      printf("unifrog media swvideo mmz alloc failed width=%d height=%d bytes=%lu\n",
+         width, height, (unsigned long)need);
+      return -1;
+   }
+   video->buffer_size = need;
+   video->width = width;
+   video->height = height;
+   memset(video->buffer, 0, need);
+   printf("unifrog media swvideo buffer ptr=%p phys=0x%08lx width=%d height=%d bytes=%lu\n",
+      video->buffer, (unsigned long)unifrog_perf_phys_addr(video->buffer),
+      width, height, (unsigned long)need);
+   return 0;
+}
+
+static int media_swvideo_copy_yuv420(struct media_sw_video *video,
+   const AVFrame *frame)
+{
+   uint8_t *y_dst;
+   uint8_t *u_dst;
+   uint8_t *v_dst;
+   size_t y_size;
+   size_t cw;
+   size_t ch;
+   size_t uv_size;
+
+   if (!video || !video->buffer || !frame)
+      return -1;
+   if (frame->format != AV_PIX_FMT_YUV420P &&
+       frame->format != AV_PIX_FMT_YUVJ420P)
+      return -1;
+   y_size = (size_t)frame->width * (size_t)frame->height;
+   cw = ((size_t)frame->width + 1u) / 2u;
+   ch = ((size_t)frame->height + 1u) / 2u;
+   uv_size = cw * ch;
+   y_dst = (uint8_t *)video->buffer;
+   u_dst = y_dst + y_size;
+   v_dst = u_dst + uv_size;
+   for (int y = 0; y < frame->height; y++)
+      memcpy(y_dst + (size_t)y * (size_t)frame->width,
+         frame->data[0] + (size_t)y * (size_t)frame->linesize[0],
+         (size_t)frame->width);
+   for (int y = 0; y < (int)ch; y++) {
+      memcpy(u_dst + (size_t)y * cw,
+         frame->data[1] + (size_t)y * (size_t)frame->linesize[1], cw);
+      memcpy(v_dst + (size_t)y * cw,
+         frame->data[2] + (size_t)y * (size_t)frame->linesize[2], cw);
+   }
+   unifrog_perf_cache_flush(video->buffer, video->buffer_size);
+   return 0;
+}
+
+static int media_swvideo_present(struct media_sw_video *video,
+   const AVFrame *frame)
+{
+   dis_display_info_t info;
+   size_t y_size;
+   size_t uv_size;
+   int ret;
+
+   if (!video || !frame || frame->width <= 0 || frame->height <= 0)
+      return -1;
+   if (media_swvideo_prepare(video, frame->width, frame->height) != 0)
+      return -1;
+   if (media_swvideo_copy_yuv420(video, frame) != 0)
+      return -1;
+   open_display();
+   if (dis_fd < 0)
+      return -1;
+   y_size = (size_t)frame->width * (size_t)frame->height;
+   uv_size = ((size_t)frame->width + 1u) / 2u *
+      (((size_t)frame->height + 1u) / 2u);
+   memset(&info, 0, sizeof(info));
+   info.distype = DIS_TYPE_HD;
+   info.info.layer = DIS_PIC_LAYER_CURRENT;
+   info.info.y_buf = (uint32_t)(uintptr_t)video->buffer;
+   info.info.y_buf_size = (uint32_t)y_size;
+   info.info.c_buf = (uint32_t)(uintptr_t)((uint8_t *)video->buffer + y_size);
+   info.info.c_buf_size = (uint32_t)(uv_size * 2u);
+   info.info.pic_width = (uint32_t)frame->width;
+   info.info.pic_height = (uint32_t)frame->height;
+   info.info.de_map_mode = 0;
+   info.info.status = DIS_DISPLAY_INFO_STATUS_SUCCESS;
+   info.info.sample_format = 0;
+   info.info.rotate_mode = 0;
+   info.info.pic_dis_area.x = 0;
+   info.info.pic_dis_area.y = 0;
+   info.info.pic_dis_area.w = (uint16_t)frame->width;
+   info.info.pic_dis_area.h = (uint16_t)frame->height;
+   ret = ioctl(dis_fd, DIS_SET_DISPLAY_INFO, &info);
+   if (ret == 0) {
+      video->frames++;
+      if (video->frames <= 3u || (video->frames % 120u) == 0)
+         printf("unifrog media swvideo presented frame=%lu %dx%d ptr=%p phys=0x%08lx\n",
+            (unsigned long)video->frames, frame->width, frame->height,
+            video->buffer, (unsigned long)unifrog_perf_phys_addr(video->buffer));
+   } else {
+      printf("unifrog media swvideo display failed ret=%d errno=%d frame=%lu %dx%d\n",
+         ret, errno, (unsigned long)video->frames, frame->width,
+         frame->height);
+   }
+   return ret;
+}
+
 static int media_exit_down(void)
 {
    uint32_t buttons;
@@ -635,6 +793,22 @@ static const char *media_sample_format_name(enum AVSampleFormat fmt)
    return name ? name : "?";
 }
 
+static const char *media_pixel_format_name(enum AVPixelFormat fmt)
+{
+   const char *name = av_get_pix_fmt_name(fmt);
+
+   return name ? name : "?";
+}
+
+struct media_ffmpeg_audio_converter {
+   SwrContext *swr;
+   int src_rate;
+   int src_channels;
+   uint64_t src_layout;
+   enum AVSampleFormat src_fmt;
+   int dst_rate;
+};
+
 static void media_ffmpeg_register_once(void)
 {
    static int registered;
@@ -651,82 +825,138 @@ static void media_ffmpeg_register_once(void)
    media_log_ffmpeg_caps_once();
 }
 
-static int32_t media_ffmpeg_read_sample(const uint8_t *p,
-   enum AVSampleFormat packed_fmt)
+static uint64_t media_ffmpeg_frame_layout(const AVCodecContext *codec_ctx,
+   const AVFrame *frame, int *channels_out)
 {
-   if (!p)
-      return 0;
-   switch (packed_fmt) {
-   case AV_SAMPLE_FMT_U8:
-      return ((int32_t)p[0] - 128) << 8;
-   case AV_SAMPLE_FMT_S16:
-      return (int16_t)media_read_le16(p);
-   case AV_SAMPLE_FMT_S32:
-      return ((int32_t)media_read_le32(p)) >> 16;
-   case AV_SAMPLE_FMT_FLT: {
-      float value;
+   uint64_t layout = 0;
+   int channels = 0;
 
-      memcpy(&value, p, sizeof(value));
-      if (value > 1.0f)
-         value = 1.0f;
-      else if (value < -1.0f)
-         value = -1.0f;
-      return (int32_t)(value * 32767.0f);
+   if (frame) {
+      layout = frame->channel_layout;
+      channels = frame->channels;
    }
-   default:
-      return 0;
+   if ((!layout || channels <= 0) && codec_ctx) {
+      if (!layout)
+         layout = codec_ctx->channel_layout;
+      if (channels <= 0)
+         channels = codec_ctx->channels;
    }
+   if (!layout && channels > 0)
+      layout = (uint64_t)av_get_default_channel_layout(channels);
+   if (channels <= 0 && layout)
+      channels = av_get_channel_layout_nb_channels(layout);
+   if (channels_out)
+      *channels_out = channels;
+   return layout;
 }
 
-static int media_ffmpeg_frame_to_mono_s16(const AVFrame *frame,
-   int16_t *out, unsigned out_capacity)
+static int media_ffmpeg_converter_configure(
+   struct media_ffmpeg_audio_converter *converter,
+   const AVCodecContext *codec_ctx, const AVFrame *frame,
+   int dst_rate, const char *path)
 {
+   SwrContext *swr;
    enum AVSampleFormat src_fmt;
-   enum AVSampleFormat packed_fmt;
-   int planar;
    int bytes;
    int channels;
-   unsigned frames;
+   int src_rate;
+   uint64_t layout;
+   int ret;
 
-   if (!frame || !out || out_capacity == 0)
+   if (!converter || !frame || dst_rate <= 0)
       return -1;
    src_fmt = (enum AVSampleFormat)frame->format;
-   packed_fmt = av_get_packed_sample_fmt(src_fmt);
-   planar = av_sample_fmt_is_planar(src_fmt);
-   bytes = av_get_bytes_per_sample(packed_fmt);
-   channels = frame->channels;
-   if (channels <= 0 || frame->nb_samples <= 0 || bytes <= 0)
-      return -1;
-   if (packed_fmt != AV_SAMPLE_FMT_U8 &&
-       packed_fmt != AV_SAMPLE_FMT_S16 &&
-       packed_fmt != AV_SAMPLE_FMT_S32 &&
-       packed_fmt != AV_SAMPLE_FMT_FLT)
+   if (src_fmt == AV_SAMPLE_FMT_NONE && codec_ctx)
+      src_fmt = codec_ctx->sample_fmt;
+   bytes = av_get_bytes_per_sample(av_get_packed_sample_fmt(src_fmt));
+   src_rate = frame->sample_rate > 0 ? frame->sample_rate :
+      (codec_ctx ? codec_ctx->sample_rate : 0);
+   layout = media_ffmpeg_frame_layout(codec_ctx, frame, &channels);
+   if (!layout || channels <= 0 || src_rate <= 0 || bytes <= 0)
       return -1;
 
-   frames = (unsigned)frame->nb_samples;
-   if (frames > out_capacity)
-      frames = out_capacity;
-   for (unsigned i = 0; i < frames; i++) {
-      int64_t mix = 0;
-      unsigned mix_channels = (unsigned)channels;
+   if (converter->swr && converter->src_rate == src_rate &&
+       converter->src_channels == channels &&
+       converter->src_layout == layout && converter->src_fmt == src_fmt &&
+       converter->dst_rate == dst_rate)
+      return 0;
 
-      if (mix_channels > 2u)
-         mix_channels = 2u;
-      for (unsigned ch = 0; ch < mix_channels; ch++) {
-         const uint8_t *sample;
-
-         if (planar)
-            sample = frame->extended_data[ch] + i * (unsigned)bytes;
-         else
-            sample = frame->extended_data[0] +
-               (i * (unsigned)channels + ch) * (unsigned)bytes;
-         mix += media_ffmpeg_read_sample(sample, packed_fmt);
-      }
-      if (mix_channels > 1u)
-         mix /= (int)mix_channels;
-      out[i] = media_wav_clip_sample((int32_t)mix);
+   swr_free(&converter->swr);
+   swr = swr_alloc_set_opts(NULL, AV_CH_LAYOUT_MONO, AV_SAMPLE_FMT_S16,
+      dst_rate, (int64_t)layout, src_fmt, src_rate, 0, NULL);
+   if (!swr) {
+      printf("unifrog media ffmpeg swr_alloc failed src_rate=%d ch=%d layout=0x%lx fmt=%s dst_rate=%d path=%s\n",
+         src_rate, channels, (unsigned long)layout,
+         media_sample_format_name(src_fmt), dst_rate, path ? path : "");
+      return -1;
    }
-   return (int)frames;
+   ret = swr_init(swr);
+   if (ret < 0) {
+      printf("unifrog media ffmpeg swr_init failed ret=%d src_rate=%d ch=%d layout=0x%lx fmt=%s dst_rate=%d path=%s\n",
+         ret, src_rate, channels, (unsigned long)layout,
+         media_sample_format_name(src_fmt), dst_rate, path ? path : "");
+      swr_free(&swr);
+      return -1;
+   }
+
+   converter->swr = swr;
+   converter->src_rate = src_rate;
+   converter->src_channels = channels;
+   converter->src_layout = layout;
+   converter->src_fmt = src_fmt;
+   converter->dst_rate = dst_rate;
+   printf("unifrog media ffmpeg swr config src_rate=%d ch=%d layout=0x%lx fmt=%s dst_rate=%d path=%s\n",
+      src_rate, channels, (unsigned long)layout,
+      media_sample_format_name(src_fmt), dst_rate, path ? path : "");
+   return 0;
+}
+
+static int media_ffmpeg_frame_data_at(const AVFrame *frame,
+   const struct media_ffmpeg_audio_converter *converter, unsigned offset,
+   const uint8_t *src_data[AV_NUM_DATA_POINTERS])
+{
+   int bytes;
+
+   if (!frame || !converter || !src_data || converter->src_channels <= 0)
+      return -1;
+   memset(src_data, 0, sizeof(const uint8_t *) * AV_NUM_DATA_POINTERS);
+   bytes = av_get_bytes_per_sample(
+      av_get_packed_sample_fmt((enum AVSampleFormat)frame->format));
+   if (bytes <= 0)
+      return -1;
+   if (av_sample_fmt_is_planar((enum AVSampleFormat)frame->format)) {
+      if (converter->src_channels > AV_NUM_DATA_POINTERS)
+         return -1;
+      for (int ch = 0; ch < converter->src_channels; ch++) {
+         if (!frame->extended_data[ch])
+            return -1;
+         src_data[ch] = frame->extended_data[ch] + offset * (unsigned)bytes;
+      }
+   } else {
+      if (!frame->extended_data[0])
+         return -1;
+      src_data[0] = frame->extended_data[0] +
+         offset * (unsigned)converter->src_channels * (unsigned)bytes;
+   }
+   return 0;
+}
+
+static int media_ffmpeg_write_pcm(struct unifrog_audio *audio,
+   const int16_t *pcm, unsigned frames, uint32_t *played, const char *path)
+{
+   int ret;
+
+   if (!audio || !pcm || frames == 0)
+      return -1;
+   ret = unifrog_audio_write(audio, pcm, frames);
+   if (ret < 0) {
+      printf("unifrog media ffmpeg audio_write failed ret=%d frames=%u rate=%u ch=%u path=%s\n",
+         ret, frames, audio->rate, audio->channels, path ? path : "");
+      return -1;
+   }
+   if (played)
+      *played += frames;
+   return 0;
 }
 
 static int media_ffmpeg_open_audio(const char *path, AVFormatContext **fmt_out,
@@ -831,46 +1061,49 @@ fail:
 }
 
 static int media_ffmpeg_write_frame(struct unifrog_audio *audio,
+   const AVCodecContext *codec_ctx,
+   struct media_ffmpeg_audio_converter *converter,
    const AVFrame *frame, int16_t *pcm, unsigned pcm_capacity,
-   uint32_t *played)
+   uint32_t *played, const char *path)
 {
    unsigned offset = 0;
 
+   if (!audio || !converter || !frame || !pcm || pcm_capacity == 0)
+      return -1;
+   if (media_ffmpeg_converter_configure(converter, codec_ctx, frame,
+       (int)audio->rate, path) != 0)
+      return -1;
    while (offset < (unsigned)frame->nb_samples) {
       unsigned chunk = (unsigned)frame->nb_samples - offset;
+      const uint8_t *src_data[AV_NUM_DATA_POINTERS];
+      uint8_t *dst_data[1];
+      int dst_need;
       int got;
-      AVFrame chunk_frame = *frame;
 
       if (chunk > pcm_capacity)
          chunk = pcm_capacity;
-      if (offset) {
-         int channels = frame->channels;
-         int bytes = av_get_bytes_per_sample(
-            av_get_packed_sample_fmt((enum AVSampleFormat)frame->format));
-         int planar = av_sample_fmt_is_planar(
-            (enum AVSampleFormat)frame->format);
-
-         if (channels <= 0)
-            channels = frame->channels;
-         if (channels <= 0 || bytes <= 0)
-            return -1;
-         if (planar) {
-            for (int ch = 0; ch < channels; ch++)
-               chunk_frame.extended_data[ch] =
-                  frame->extended_data[ch] + offset * (unsigned)bytes;
-         } else {
-            chunk_frame.extended_data[0] = frame->extended_data[0] +
-               offset * (unsigned)channels * (unsigned)bytes;
-         }
+      for (;;) {
+         dst_need = (int)av_rescale_rnd(
+            swr_get_delay(converter->swr, converter->src_rate) +
+               (int64_t)chunk,
+            converter->dst_rate, converter->src_rate, AV_ROUND_UP);
+         if (dst_need <= (int)pcm_capacity || chunk <= 1u)
+            break;
+         chunk = (chunk * pcm_capacity) / (unsigned)dst_need;
+         if (chunk == 0)
+            chunk = 1;
       }
-      chunk_frame.nb_samples = (int)chunk;
-      got = media_ffmpeg_frame_to_mono_s16(&chunk_frame, pcm, pcm_capacity);
+      if (media_ffmpeg_frame_data_at(frame, converter, offset, src_data) != 0)
+         return -1;
+      dst_data[0] = (uint8_t *)pcm;
+      got = swr_convert(converter->swr, dst_data, (int)pcm_capacity,
+         src_data, (int)chunk);
       if (got <= 0)
          return -1;
-      (void)unifrog_audio_write(audio, pcm, (unsigned)got);
-      if (played)
-         *played += (uint32_t)got;
-      offset += (unsigned)got;
+      if (media_ffmpeg_write_pcm(audio, pcm, (unsigned)got, played,
+          path) != 0)
+         return -1;
+      offset += chunk;
       if (media_exit_down())
          return 1;
    }
@@ -885,6 +1118,7 @@ static int media_play_ffmpeg_audio(const char *path)
    AVCodec *decoder = NULL;
    AVPacket *packet = NULL;
    AVFrame *frame = NULL;
+   struct media_ffmpeg_audio_converter converter;
    int16_t *pcm = NULL;
    int stream = -1;
    uint32_t played = 0;
@@ -893,6 +1127,9 @@ static int media_play_ffmpeg_audio(const char *path)
 
    memset(&audio, 0, sizeof(audio));
    audio.fd = -1;
+   memset(&converter, 0, sizeof(converter));
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_MEDIA_AUDIO,
+      unifrog_exception_activity_hash(path ? path : "ffmpeg_audio"), 0, 1);
    if (media_ffmpeg_open_audio(path, &fmt, &codec_ctx, &stream,
        &decoder) != 0)
       goto out;
@@ -959,10 +1196,11 @@ static int media_play_ffmpeg_audio(const char *path)
                   path);
                saw_frame = 1;
             }
-            write_ret = media_ffmpeg_write_frame(&audio, frame, pcm,
-               MEDIA_FFMPEG_CHUNK_FRAMES, &played);
+            write_ret = media_ffmpeg_write_frame(&audio, codec_ctx,
+               &converter, frame, pcm, MEDIA_FFMPEG_CHUNK_FRAMES,
+               &played, path);
             if (write_ret < 0) {
-               printf("unifrog media ffmpeg unsupported frame fmt=%s ch=%d samples=%d path=%s\n",
+               printf("unifrog media ffmpeg frame output failed fmt=%s ch=%d samples=%d path=%s\n",
                   media_sample_format_name((enum AVSampleFormat)frame->format),
                   frame->channels, frame->nb_samples, path);
                av_packet_unref(packet);
@@ -987,8 +1225,8 @@ static int media_play_ffmpeg_audio(const char *path)
          break;
       if (recv_ret < 0)
          break;
-      write_ret = media_ffmpeg_write_frame(&audio, frame, pcm,
-         MEDIA_FFMPEG_CHUNK_FRAMES, &played);
+      write_ret = media_ffmpeg_write_frame(&audio, codec_ctx, &converter,
+         frame, pcm, MEDIA_FFMPEG_CHUNK_FRAMES, &played, path);
       if (write_ret != 0)
          break;
    }
@@ -997,8 +1235,10 @@ static int media_play_ffmpeg_audio(const char *path)
 out:
    printf("unifrog media ffmpeg audio end ret=%d frames=%lu path=%s\n",
       ret, (unsigned long)played, path ? path : "");
+   unifrog_exception_activity_clear();
    if (audio.fd >= 0)
       unifrog_audio_close(&audio);
+   swr_free(&converter.swr);
    free(pcm);
    if (frame)
       av_frame_free(&frame);
@@ -2102,6 +2342,7 @@ static int media_play_native_video(const char *path,
    AVBSFContext *video_bsf = NULL;
    struct unifrog_audio audio;
    struct media_auddec auddec;
+   struct media_ffmpeg_audio_converter audio_converter;
    int16_t *pcm = NULL;
    int video_stream = -1;
    int audio_stream = -1;
@@ -2121,6 +2362,9 @@ static int media_play_native_video(const char *path,
    audio.fd = -1;
    memset(&auddec, 0, sizeof(auddec));
    auddec.fd = -1;
+   memset(&audio_converter, 0, sizeof(audio_converter));
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_MEDIA_VIDEO,
+      unifrog_exception_activity_hash(path ? path : "native_video"), 0, 1);
    media_ffmpeg_register_once();
    media_sd_read_begin("native_video_open", path);
    sd_read_active = 1;
@@ -2254,8 +2498,9 @@ static int media_play_native_video(const char *path,
                   break;
                if (recv_ret < 0)
                   break;
-               write_ret = media_ffmpeg_write_frame(&audio, frame, pcm,
-                  MEDIA_FFMPEG_CHUNK_FRAMES, &audio_frames);
+               write_ret = media_ffmpeg_write_frame(&audio, audio_ctx,
+                  &audio_converter, frame, pcm, MEDIA_FFMPEG_CHUNK_FRAMES,
+                  &audio_frames, path);
                if (write_ret != 0)
                   break;
             }
@@ -2303,6 +2548,7 @@ out:
       ret, (unsigned long)video_packets,
       (unsigned long)(audio_frames + auddec.packets),
       (unsigned long)(unifrog_perf_time_ms() - start_ms), path ? path : "");
+   unifrog_exception_activity_clear();
    if (audio.fd >= 0)
       unifrog_audio_close(&audio);
    media_auddec_close(&auddec);
@@ -2316,6 +2562,7 @@ out:
       close(video_fd);
    }
    close_display();
+   swr_free(&audio_converter.swr);
    free(pcm);
    if (video_bsf)
       av_bsf_free(&video_bsf);
@@ -2329,6 +2576,241 @@ out:
       avformat_close_input(&fmt);
    if (sd_read_active)
       media_sd_read_end("native_video_close", path);
+   return ret;
+}
+
+static int media_play_ffmpeg_video(const char *path,
+   const struct unifrog_media_video_options *options)
+{
+   AVFormatContext *fmt = NULL;
+   AVCodecContext *video_ctx = NULL;
+   AVCodecContext *audio_ctx = NULL;
+   AVCodec *video_decoder = NULL;
+   AVCodec *audio_decoder = NULL;
+   AVPacket *packet = NULL;
+   AVFrame *frame = NULL;
+   struct unifrog_audio audio;
+   struct media_ffmpeg_audio_converter audio_converter;
+   struct media_sw_video sw_video;
+   int16_t *pcm = NULL;
+   int video_stream = -1;
+   int audio_stream = -1;
+   uint32_t audio_frames = 0;
+   uint32_t video_frames = 0;
+   uint32_t loop_polls = 0;
+   uint32_t start_ms = unifrog_perf_time_ms();
+   int audio_enabled = 0;
+   int disable_audio = options && options->disable_audio;
+   int ret = -1;
+   int sd_read_active = 0;
+
+   memset(&audio, 0, sizeof(audio));
+   audio.fd = -1;
+   memset(&audio_converter, 0, sizeof(audio_converter));
+   memset(&sw_video, 0, sizeof(sw_video));
+   media_ffmpeg_register_once();
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_MEDIA_VIDEO,
+      unifrog_exception_activity_hash(path ? path : "ffmpeg_video"), 0, 1);
+   media_sd_read_begin("ffmpeg_video_open", path);
+   sd_read_active = 1;
+   printf("unifrog media ffmpeg video open_input begin path=%s\n",
+      path ? path : "");
+   if (avformat_open_input(&fmt, path, NULL, NULL) < 0) {
+      printf("unifrog media ffmpeg video open_input failed path=%s\n",
+         path ? path : "");
+      goto out;
+   }
+   if (avformat_find_stream_info(fmt, NULL) < 0) {
+      printf("unifrog media ffmpeg video stream_info failed path=%s\n",
+         path ? path : "");
+      goto out;
+   }
+   media_log_format_streams(fmt, path, "ffmpeg_video_open");
+   video_stream = media_find_stream_type(fmt, AVMEDIA_TYPE_VIDEO);
+   if (!disable_audio)
+      audio_stream = media_find_stream_type(fmt, AVMEDIA_TYPE_AUDIO);
+   if (video_stream < 0) {
+      printf("unifrog media ffmpeg video no_video audio=%d path=%s\n",
+         audio_stream, path ? path : "");
+      goto out;
+   }
+   video_decoder = avcodec_find_decoder(
+      fmt->streams[video_stream]->codecpar->codec_id);
+   if (!video_decoder) {
+      printf("unifrog media ffmpeg video decoder missing codec=%d path=%s\n",
+         fmt->streams[video_stream]->codecpar->codec_id, path ? path : "");
+      goto out;
+   }
+   video_ctx = avcodec_alloc_context3(video_decoder);
+   if (!video_ctx ||
+       avcodec_parameters_to_context(video_ctx,
+          fmt->streams[video_stream]->codecpar) < 0 ||
+       avcodec_open2(video_ctx, video_decoder, NULL) < 0) {
+      printf("unifrog media ffmpeg video decoder open failed codec=%s path=%s\n",
+         video_decoder && video_decoder->name ? video_decoder->name : "?",
+         path ? path : "");
+      goto out;
+   }
+   printf("unifrog media ffmpeg video decoder codec=%s stream=%d %dx%d pix=%s path=%s\n",
+      video_decoder->name ? video_decoder->name : "?",
+      video_stream, video_ctx->width, video_ctx->height,
+      media_pixel_format_name(video_ctx->pix_fmt), path ? path : "");
+
+   if (audio_stream >= 0) {
+      audio_decoder = avcodec_find_decoder(
+         fmt->streams[audio_stream]->codecpar->codec_id);
+      if (audio_decoder) {
+         audio_ctx = avcodec_alloc_context3(audio_decoder);
+         if (audio_ctx &&
+             avcodec_parameters_to_context(audio_ctx,
+                fmt->streams[audio_stream]->codecpar) == 0 &&
+             avcodec_open2(audio_ctx, audio_decoder, NULL) == 0 &&
+             audio_ctx->sample_rate >= 8000 &&
+             audio_ctx->sample_rate <= 48000 &&
+             unifrog_audio_open(&audio, (unsigned)audio_ctx->sample_rate, 1,
+                512, 8) == 0) {
+            pcm = malloc(sizeof(*pcm) * MEDIA_FFMPEG_CHUNK_FRAMES);
+            if (pcm) {
+               (void)unifrog_audio_set_volume(&audio, MEDIA_AUDIO_VOLUME);
+               (void)unifrog_audio_set_mute(&audio, 1);
+               (void)unifrog_audio_start(&audio);
+               (void)unifrog_audio_set_output_enabled(&audio, 1);
+               audio_enabled = 1;
+               printf("unifrog media ffmpeg video audio enabled codec=%s stream=%d rate=%d ch=%d fmt=%s\n",
+                  audio_decoder->name ? audio_decoder->name : "?",
+                  audio_stream, audio_ctx->sample_rate, audio_ctx->channels,
+                  media_sample_format_name(audio_ctx->sample_fmt));
+            }
+         }
+      }
+      if (!audio_enabled)
+         printf("unifrog media ffmpeg video audio disabled stream=%d decoder=%s path=%s\n",
+            audio_stream, audio_decoder && audio_decoder->name ?
+            audio_decoder->name : "missing", path ? path : "");
+   }
+
+   packet = av_packet_alloc();
+   frame = av_frame_alloc();
+   if (!packet || !frame)
+      goto out;
+   open_display();
+   if (fb_fd >= 0)
+      (void)ioctl(fb_fd, FBIOBLANK, FB_BLANK_NORMAL);
+
+   while (!media_exit_down()) {
+      int read_ret = av_read_frame(fmt, packet);
+
+      if (read_ret < 0)
+         break;
+      if (packet->stream_index == video_stream) {
+         int send_ret = avcodec_send_packet(video_ctx, packet);
+
+         if (send_ret < 0 && send_ret != AVERROR(EAGAIN)) {
+            printf("unifrog media ffmpeg video send failed ret=%d path=%s\n",
+               send_ret, path ? path : "");
+            av_packet_unref(packet);
+            break;
+         }
+         for (;;) {
+            int recv_ret = avcodec_receive_frame(video_ctx, frame);
+
+            if (recv_ret == AVERROR(EAGAIN) || recv_ret == AVERROR_EOF)
+               break;
+            if (recv_ret < 0) {
+               printf("unifrog media ffmpeg video receive failed ret=%d path=%s\n",
+                  recv_ret, path ? path : "");
+               break;
+            }
+            if (frame->format != AV_PIX_FMT_YUV420P &&
+                frame->format != AV_PIX_FMT_YUVJ420P) {
+               printf("unifrog media ffmpeg video unsupported_pix fmt=%s(%d) %dx%d path=%s\n",
+                  media_pixel_format_name((enum AVPixelFormat)frame->format),
+                  frame->format, frame->width, frame->height,
+                  path ? path : "");
+               av_frame_unref(frame);
+               continue;
+            }
+            if (sw_video.frames == 0) {
+               media_set_aspect_mode(DIS_TV_16_9, DIS_PILLBOX);
+               (void)set_video_layer_visible(1, frame->width, frame->height,
+                  VIDEO_OUTPUT_W, VIDEO_OUTPUT_H);
+               printf("unifrog media ffmpeg video first_frame %dx%d fmt=%s path=%s\n",
+                  frame->width, frame->height,
+                  media_pixel_format_name((enum AVPixelFormat)frame->format),
+                  path ? path : "");
+            }
+            if (media_swvideo_present(&sw_video, frame) == 0)
+               video_frames = sw_video.frames;
+            av_frame_unref(frame);
+         }
+      } else if (audio_enabled && packet->stream_index == audio_stream) {
+         int send_ret = avcodec_send_packet(audio_ctx, packet);
+
+         if (send_ret >= 0 || send_ret == AVERROR(EAGAIN)) {
+            for (;;) {
+               int recv_ret = avcodec_receive_frame(audio_ctx, frame);
+               int write_ret;
+
+               if (recv_ret == AVERROR(EAGAIN) || recv_ret == AVERROR_EOF)
+                  break;
+               if (recv_ret < 0)
+                  break;
+               write_ret = media_ffmpeg_write_frame(&audio, audio_ctx,
+                  &audio_converter, frame, pcm, MEDIA_FFMPEG_CHUNK_FRAMES,
+                  &audio_frames, path);
+               av_frame_unref(frame);
+               if (write_ret != 0)
+                  break;
+            }
+         }
+      }
+      av_packet_unref(packet);
+      if ((++loop_polls % 240u) == 0)
+         printf("unifrog media ffmpeg video monitor video=%lu audio=%lu ms=%lu path=%s\n",
+            (unsigned long)video_frames, (unsigned long)audio_frames,
+            (unsigned long)(unifrog_perf_time_ms() - start_ms),
+            path ? path : "");
+   }
+
+   (void)avcodec_send_packet(video_ctx, NULL);
+   for (;;) {
+      int recv_ret = avcodec_receive_frame(video_ctx, frame);
+
+      if (recv_ret == AVERROR(EAGAIN) || recv_ret == AVERROR_EOF)
+         break;
+      if (recv_ret < 0)
+         break;
+      if ((frame->format == AV_PIX_FMT_YUV420P ||
+           frame->format == AV_PIX_FMT_YUVJ420P) &&
+          media_swvideo_present(&sw_video, frame) == 0)
+         video_frames = sw_video.frames;
+      av_frame_unref(frame);
+   }
+   ret = video_frames ? 0 : -1;
+
+out:
+   printf("unifrog media ffmpeg video end ret=%d video_frames=%lu audio_frames=%lu ms=%lu path=%s\n",
+      ret, (unsigned long)video_frames, (unsigned long)audio_frames,
+      (unsigned long)(unifrog_perf_time_ms() - start_ms), path ? path : "");
+   unifrog_exception_activity_clear();
+   if (audio.fd >= 0)
+      unifrog_audio_close(&audio);
+   swr_free(&audio_converter.swr);
+   media_swvideo_close(&sw_video);
+   close_display();
+   free(pcm);
+   if (frame)
+      av_frame_free(&frame);
+   if (packet)
+      av_packet_free(&packet);
+   if (audio_ctx)
+      avcodec_free_context(&audio_ctx);
+   if (video_ctx)
+      avcodec_free_context(&video_ctx);
+   if (fmt)
+      avformat_close_input(&fmt);
+   if (sd_read_active)
+      media_sd_read_end("ffmpeg_video_close", path);
    return ret;
 }
 
@@ -3433,7 +3915,12 @@ int unifrog_media_play_video_ex(const char *path,
          path);
       ret = -1;
    } else {
-      ret = media_play_native_video(path, options);
+      ret = media_play_ffmpeg_video(path, options);
+      if (ret != 0) {
+         printf("unifrog media ffmpeg video fallback native_viddec ret=%d path=%s\n",
+            ret, path ? path : "");
+         ret = media_play_native_video(path, options);
+      }
    }
    if (ret != 0 && !force_native) {
       printf("unifrog media native fallback_unavailable ret=%d path=%s\n",

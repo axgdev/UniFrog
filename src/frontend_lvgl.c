@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include <unifrog/exception_record.h>
 #include <unifrog/gfx.h>
 #include <unifrog/log.h>
 #include <unifrog/paths.h>
@@ -343,22 +344,34 @@ static void write_screenshot_if_requested(const struct unifrog_surface *surface,
 {
    char path[256];
    FILE *file;
+   int failed = 0;
 
    if (!frontend_lvgl.screenshot_request || !surface || !surface->pixels)
       return;
    frontend_lvgl.screenshot_request = 0;
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_REPORT_WRITE,
+      unifrog_exception_activity_hash("frontend_screenshot"),
+      frontend_lvgl.frame_seq, 1);
    (void)mkdir(UNIFROG_LOG_ROOT "/reports", 0777);
    snprintf(path, sizeof(path), UNIFROG_LOG_ROOT "/reports/frontend-%s-%u.ppm",
       tag ? tag : "screen", frontend_lvgl.frame_seq);
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_REPORT_WRITE,
+      unifrog_exception_activity_hash(path), frontend_lvgl.frame_seq, 2);
    file = fopen(path, "wb");
    if (!file) {
       unifrog_log("frontend screenshot failed path=%s\n", path);
       return;
    }
-   fprintf(file, "P6\n%u %u\n255\n", surface->width, surface->height);
+   if (fprintf(file, "P6\n%u %u\n255\n", surface->width,
+       surface->height) < 0)
+      failed = 1;
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_REPORT_WRITE,
+      unifrog_exception_activity_hash(path), frontend_lvgl.frame_seq, 3);
    for (unsigned y = 0; y < surface->height; y++) {
       const uint16_t *row = surface->pixels + y * surface->stride;
 
+      if (failed)
+         break;
       for (unsigned x = 0; x < surface->width; x++) {
          uint16_t p = row[x];
          unsigned char rgb[3];
@@ -366,12 +379,24 @@ static void write_screenshot_if_requested(const struct unifrog_surface *surface,
          rgb[0] = (unsigned char)((((p >> 11) & 0x1fu) * 255u + 15u) / 31u);
          rgb[1] = (unsigned char)((((p >> 5) & 0x3fu) * 255u + 31u) / 63u);
          rgb[2] = (unsigned char)(((p & 0x1fu) * 255u + 15u) / 31u);
-         (void)fwrite(rgb, 1, sizeof(rgb), file);
+         if (fwrite(rgb, 1, sizeof(rgb), file) != sizeof(rgb)) {
+            failed = 1;
+            break;
+         }
       }
    }
-   fclose(file);
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_REPORT_WRITE,
+      unifrog_exception_activity_hash(path), frontend_lvgl.frame_seq, 4);
+   if (fclose(file) != 0)
+      failed = 1;
+   if (failed) {
+      unifrog_log("frontend screenshot write failed path=%s seq=%u tag=%s\n",
+         path, frontend_lvgl.frame_seq, tag ? tag : "");
+      return;
+   }
    unifrog_log("frontend screenshot written path=%s seq=%u tag=%s\n",
       path, frontend_lvgl.frame_seq, tag ? tag : "");
+   unifrog_exception_activity_clear();
 }
 
 static const struct unifrog_frontend_lvgl_style *active_style(

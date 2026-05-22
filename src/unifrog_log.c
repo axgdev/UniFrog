@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <sys/unistd.h>
 
+#include <unifrog/exception_record.h>
 #include <unifrog/perf.h>
 #include <unifrog/paths.h>
 
@@ -113,6 +114,15 @@ static struct memlog_persist_header *memlog_persist;
 static char memlog_current_path[160];
 static char memlog_crash_path[160];
 static char memlog_rotated_path[192];
+
+static void memlog_activity_set(uint32_t phase, uint32_t pending,
+   uint32_t stage)
+{
+   const char *path = memlog_last_path ? memlog_last_path : "log";
+
+   unifrog_exception_activity_set(phase,
+      unifrog_exception_activity_hash(path), pending, stage);
+}
 
 static const struct memlog_location memlog_locations[] = {
    {
@@ -417,6 +427,8 @@ static int memlog_flush_recovery(void)
    }
 
    pending = memlog_len;
+   memlog_activity_set(UNIFROG_ACTIVITY_PHASE_LOG_RECOVERY,
+      (uint32_t)pending, 1);
    fd = memlog_recovery_open_retry();
    if (fd < 0) {
       memlog_last_result = UNIFROG_LOG_ERR_OPEN;
@@ -435,6 +447,8 @@ static int memlog_flush_recovery(void)
       memlog_last_result = UNIFROG_LOG_ERR_WRITE;
       return UNIFROG_LOG_ERR_WRITE;
    }
+   memlog_activity_set(UNIFROG_ACTIVITY_PHASE_LOG_RECOVERY,
+      (uint32_t)pending, 2);
    if (write(fd, marker, (size_t)marker_len) != (ssize_t)marker_len ||
        write(fd, memlog, pending) != (ssize_t)pending ||
        write(fd, "UFLOG type=recovery_end\n",
@@ -452,10 +466,13 @@ static int memlog_flush_recovery(void)
    }
 #endif
 
+   memlog_activity_set(UNIFROG_ACTIVITY_PHASE_LOG_RECOVERY,
+      (uint32_t)pending, 4);
    close(fd);
    memlog_recovery_pending = 0;
    memlog_persist_clear();
    memlog_last_result = 0;
+   unifrog_exception_activity_clear();
    return 0;
 }
 
@@ -699,6 +716,8 @@ int unifrog_log_reset(void)
       (void)unifrog_log_flush();
 
    memlog_flushing = 1;
+   memlog_activity_set(UNIFROG_ACTIVITY_PHASE_LOG_RESET,
+      (uint32_t)memlog_len, 1);
    fd = memlog_open_retry(O_CREAT | O_WRONLY | O_APPEND);
    if (fd < 0) {
       memlog_flushing = 0;
@@ -723,6 +742,8 @@ int unifrog_log_reset(void)
    if (marker_len >= (int)sizeof(marker))
       marker_len = (int)sizeof(marker) - 1;
 
+   memlog_activity_set(UNIFROG_ACTIVITY_PHASE_LOG_RESET,
+      (uint32_t)memlog_len, 2);
    if (write(fd, marker, (size_t)marker_len) != (ssize_t)marker_len) {
       close(fd);
       memlog_flushing = 0;
@@ -738,6 +759,8 @@ int unifrog_log_reset(void)
    }
 #endif
 
+   memlog_activity_set(UNIFROG_ACTIVITY_PHASE_LOG_RESET,
+      (uint32_t)memlog_len, 4);
    close(fd);
    memlog_len = 0;
    memlog_dropped = 0;
@@ -745,6 +768,7 @@ int unifrog_log_reset(void)
    memlog_flushing = 0;
    memlog_last_result = 0;
    memlog_persist_store();
+   unifrog_exception_activity_clear();
    return 0;
 }
 
@@ -795,6 +819,8 @@ int unifrog_log_flush(void)
 
    memlog_flushing = 1;
    start_ms = unifrog_perf_time_ms();
+   memlog_activity_set(UNIFROG_ACTIVITY_PHASE_LOG_FLUSH,
+      (uint32_t)pending, 1);
    fd = memlog_open_retry(O_CREAT | O_WRONLY | O_APPEND);
    if (fd < 0) {
       memlog_flushing = 0;
@@ -809,6 +835,8 @@ int unifrog_log_flush(void)
       memlog_last_path ? memlog_last_path : "?",
       (unsigned long)pending,
       dropped);
+   memlog_activity_set(UNIFROG_ACTIVITY_PHASE_LOG_FLUSH,
+      (uint32_t)pending, 2);
    if (header_len <= 0 || header_len >= (int)sizeof(header) ||
        write(fd, header, (size_t)header_len) != (ssize_t)header_len) {
       close(fd);
@@ -819,6 +847,8 @@ int unifrog_log_flush(void)
    if (memlog_dropped)
       write(fd, "UFLOG type=drop reason=memory_buffer_full\n",
          sizeof("UFLOG type=drop reason=memory_buffer_full\n") - 1);
+   memlog_activity_set(UNIFROG_ACTIVITY_PHASE_LOG_FLUSH,
+      (uint32_t)pending, 3);
    if (memlog_len > 0 && write(fd, memlog, memlog_len) != (ssize_t)memlog_len) {
       close(fd);
       memlog_flushing = 0;
@@ -826,6 +856,8 @@ int unifrog_log_flush(void)
       return UNIFROG_LOG_ERR_WRITE;
    }
    write_ms = unifrog_perf_time_ms();
+   memlog_activity_set(UNIFROG_ACTIVITY_PHASE_LOG_FLUSH,
+      (uint32_t)pending, 4);
 #if UNIFROG_LOG_FLUSH_FSYNC
    fsync_ret = fsync(fd);
 #else
@@ -839,6 +871,8 @@ int unifrog_log_flush(void)
       return UNIFROG_LOG_ERR_WRITE;
    }
 
+   memlog_activity_set(UNIFROG_ACTIVITY_PHASE_LOG_FLUSH,
+      (uint32_t)pending, 5);
    close(fd);
    end_ms = unifrog_perf_time_ms();
    memlog_len = 0;
@@ -857,6 +891,7 @@ int unifrog_log_flush(void)
       (unsigned long)(end_ms - fsync_ms),
       UNIFROG_LOG_FLUSH_FSYNC);
    memlog_defer_depth--;
+   unifrog_exception_activity_clear();
    return 0;
 }
 
