@@ -448,6 +448,8 @@ static void draw_row(struct unifrog_ui *ui,
       theme_alpha(style->list_indicator_alpha);
    uint16_t value_fg = muted;
    uint8_t value_alpha = indicator_alpha;
+   uint16_t contrast_bg = bg;
+   uint8_t contrast_alpha = bg_alpha;
    int glyph_w = style->list_glyph_w > 0 ? style->list_glyph_w : 16;
    int glyph_h = style->list_glyph_h > 0 ? style->list_glyph_h : 16;
    int glyph_x = style->list_glyph_x >= 0 ? style->list_glyph_x : 5;
@@ -483,8 +485,12 @@ static void draw_row(struct unifrog_ui *ui,
       value_alpha = text_alpha;
       value_fg = fg;
    }
-   fg = contrast_text(fg, bg, bg_alpha);
-   value_fg = contrast_text(value_fg, bg, bg_alpha);
+   if (contrast_alpha < 64u) {
+      contrast_bg = style->background;
+      contrast_alpha = 255u;
+   }
+   fg = contrast_text(fg, contrast_bg, contrast_alpha);
+   value_fg = contrast_text(value_fg, contrast_bg, contrast_alpha);
    if (text_alpha)
       unifrog_ui_text_clipped(ui, x + label_x, y + (h - 7) / 2,
          ((w - label_x - value_w - 8) / 6), label, fg, 1);

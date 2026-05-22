@@ -3168,7 +3168,8 @@ int unifrog_media_play_video_ex(const char *path,
          (int)video_info.frame_rate);
       (void)set_video_layer_visible(1, video_info.width, video_info.height,
          VIDEO_OUTPUT_W, VIDEO_OUTPUT_H);
-      (void)set_player_display_rect(player, VIDEO_SOURCE_W, VIDEO_SOURCE_H,
+      (void)set_player_display_rect(player, video_info.width,
+         video_info.height,
          VIDEO_OUTPUT_W, VIDEO_OUTPUT_H);
    } else if (!audio_only) {
       printf("unifrog media stream info unavailable\n");
@@ -3188,6 +3189,26 @@ int unifrog_media_play_video_ex(const char *path,
    hcplayer_play(player);
    printf("unifrog media hcplayer_play done\n");
    (void)unifrog_log_flush();
+   if (!force_no_audio && !audio_output_enabled) {
+      for (unsigned i = 0; i < 5u; i++) {
+         msleep(20);
+         if (hcplayer_get_nth_audio_stream_info(player, 0, &audio_info) == 0) {
+            audio_output_enabled = 1;
+            (void)hcplayer_set_audio_output_dev(player, AUDDEV_I2SO);
+            printf("unifrog media stream audio after_play codec=0x%x rate=%d ch=%d try=%u\n",
+               audio_info.codec_id, audio_info.sample_rate,
+               audio_info.channels, i + 1u);
+            break;
+         }
+      }
+   }
+   if (!force_no_audio && !audio_output_enabled &&
+       (audio_only || force_audio)) {
+      audio_output_enabled = 1;
+      (void)hcplayer_set_audio_output_dev(player, AUDDEV_I2SO);
+      printf("unifrog media audio output forced reason=%s\n",
+         force_audio ? "force_audio" : "audio_only");
+   }
    if (audio_output_enabled) {
       (void)hcplayer_set_audio_output_dev(player, AUDDEV_I2SO);
       (void)unifrog_audio_set_system_volume(MEDIA_AUDIO_VOLUME);
