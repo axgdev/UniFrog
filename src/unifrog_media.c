@@ -3127,6 +3127,11 @@ int unifrog_media_play_video_ex(const char *path,
       init_args.buffering_enable ? 1 : 0,
       (unsigned)MEDIA_AUDIO_KSHM_SIZE, audio_only, image_file,
       force_no_audio, force_audio);
+   printf("unifrog media init display preview=%d src=%dx%d dst=%dx%d disable_video=%d disable_audio=%d snd=0x%lx\n",
+      init_args.preview_enable ? 1 : 0, init_args.src_area.w,
+      init_args.src_area.h, init_args.dst_area.w, init_args.dst_area.h,
+      init_args.disable_video ? 1 : 0, init_args.disable_audio ? 1 : 0,
+      (unsigned long)init_args.snd_devs);
    (void)unifrog_log_flush();
    printf("unifrog media hcplayer_init begin\n");
    (void)unifrog_log_flush();
@@ -3149,6 +3154,12 @@ int unifrog_media_play_video_ex(const char *path,
    }
    printf("unifrog media audio config snd_devs=0x%lx audsink=%d\n",
       (unsigned long)init_args.snd_devs, init_args.enable_audsink ? 1 : 0);
+   if (!force_no_audio)
+      printf("unifrog media audio streams count=%d\n",
+         hcplayer_get_audio_streams_count(player));
+   if (!audio_only)
+      printf("unifrog media video streams count=%d\n",
+         hcplayer_get_video_streams_count(player));
 
    if (!force_no_audio &&
        hcplayer_get_nth_audio_stream_info(player, 0, &audio_info) == 0) {
@@ -3181,14 +3192,33 @@ int unifrog_media_play_video_ex(const char *path,
       printf("unifrog media stream video disabled audio_only=1\n");
    }
 
-   if (!audio_only && fb_fd >= 0)
-      (void)ioctl(fb_fd, FBIOBLANK, FB_BLANK_NORMAL);
+   if (!audio_only && fb_fd >= 0) {
+      int blank_ret = ioctl(fb_fd, FBIOBLANK, FB_BLANK_NORMAL);
+
+      printf("unifrog media fb blank ret=%d errno=%d\n", blank_ret, errno);
+   }
    unifrog_audio_debug_dump(NULL, "media_before_play");
    printf("unifrog media hcplayer_play begin\n");
    (void)unifrog_log_flush();
    hcplayer_play(player);
    printf("unifrog media hcplayer_play done\n");
    (void)unifrog_log_flush();
+   if (!audio_only) {
+      HCPlayerVideoInfo current_video;
+
+      memset(&current_video, 0, sizeof(current_video));
+      if (hcplayer_get_cur_video_stream_info(player, &current_video) == 0) {
+         printf("unifrog media stream video current codec=0x%x %dx%d fps=%d\n",
+            current_video.codec_id, current_video.width,
+            current_video.height, (int)current_video.frame_rate);
+         (void)set_video_layer_visible(1, current_video.width,
+            current_video.height, VIDEO_OUTPUT_W, VIDEO_OUTPUT_H);
+         (void)set_player_display_rect(player, current_video.width,
+            current_video.height, VIDEO_OUTPUT_W, VIDEO_OUTPUT_H);
+      } else {
+         printf("unifrog media stream video current unavailable\n");
+      }
+   }
    if (!force_no_audio && !audio_output_enabled) {
       for (unsigned i = 0; i < 5u; i++) {
          msleep(20);

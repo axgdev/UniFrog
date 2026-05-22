@@ -172,6 +172,7 @@ struct native_frontend {
    char last_path[FRONTEND_MAX_PATH];
    char last_core[24];
    struct frontend_item pending_open_item;
+   char pending_open_dir[FRONTEND_MAX_PATH];
    int pending_open_valid;
    char rom_root[FRONTEND_MAX_PATH];
    char rom_root_label[FRONTEND_ROM_ROOT_LABEL_MAX];
@@ -224,6 +225,10 @@ static void show_open_with(struct native_frontend *fe,
    const struct frontend_item *item);
 static void draw(struct native_frontend *fe);
 static void set_status(struct native_frontend *fe, const char *fmt, ...);
+static void restore_view_selection(struct native_frontend *fe,
+   unsigned selected, unsigned scroll);
+static int restore_parent_view(struct native_frontend *fe,
+   enum frontend_view fallback);
 static void ensure_data_dirs(void);
 static int frontend_path_has_dir_prefix(const char *path, const char *root);
 static void alternate_style(struct unifrog_frontend_lvgl_style *style);
@@ -845,6 +850,16 @@ static int is_media_file(const char *path)
 static int media_path_has_native_wav(const char *path)
 {
    return path && unifrog_text_ends_with_ci(path, ".wav");
+}
+
+static int media_path_is_audio(const char *path)
+{
+   static const char *const suffixes[] = {
+      ".mp3", ".wav", ".flac", ".ogg", ".opus", ".aac", ".m4a", ".wma",
+      ".ra",
+   };
+
+   return path && ends_with_any(path, suffixes, ARRAY_SIZE(suffixes));
 }
 
 static int media_path_has_open_with_choices(const char *path)
@@ -4727,10 +4742,23 @@ static void show_open_with(struct native_frontend *fe,
    const struct frontend_item *item)
 {
    char title[96];
+   char dir[FRONTEND_MAX_PATH];
+   char *slash;
 
    if (!fe || !item)
       return;
    fe->pending_open_item = *item;
+   dir[0] = '\0';
+   if (item->path[0]) {
+      unifrog_text_copy(dir, sizeof(dir), item->path);
+      slash = strrchr(dir, '/');
+      if (slash && slash > dir)
+         *slash = '\0';
+      else
+         dir[0] = '\0';
+   }
+   unifrog_text_copy(fe->pending_open_dir, sizeof(fe->pending_open_dir),
+      dir);
    fe->pending_open_valid = 1;
    snprintf(title, sizeof(title), "Open:%.88s", item->name);
    reset_items(fe, title);
@@ -4761,6 +4789,41 @@ static void show_open_with(struct native_frontend *fe,
    add_item(fe, "Back", "launcher", FRONTEND_ITEM_ACTION, "back", NULL);
    set_status(fe, "choose handler");
    log_item_sample(fe, "open_with");
+}
+
+static void return_from_open_with(struct native_frontend *fe)
+{
+   enum frontend_view parent;
+   unsigned selected = 0;
+   unsigned scroll = 0;
+   int had_parent = 0;
+
+   if (!fe)
+      return;
+   if (fe->view_stack_count > 0) {
+      parent = fe->view_stack[fe->view_stack_count - 1u];
+      selected = fe->view_stack_selected[fe->view_stack_count - 1u];
+      scroll = fe->view_stack_scroll[fe->view_stack_count - 1u];
+      had_parent = 1;
+   } else if (fe->has_parent_view) {
+      parent = fe->parent_view;
+   } else {
+      parent = FRONTEND_VIEW_LAUNCH;
+   }
+   if (parent == FRONTEND_VIEW_EXPLORE) {
+      char dir[FRONTEND_MAX_PATH];
+
+      unifrog_text_copy(dir, sizeof(dir), fe->pending_open_dir[0] ?
+         fe->pending_open_dir : frontend_rom_root(fe));
+      fe->pending_open_valid = 0;
+      clear_parent_view(fe);
+      show_explore(fe, dir);
+      if (had_parent)
+         restore_view_selection(fe, selected, scroll);
+      return;
+   }
+   fe->pending_open_valid = 0;
+   restore_parent_view(fe, FRONTEND_VIEW_LAUNCH);
 }
 
 static void show_config(struct native_frontend *fe)
@@ -5562,15 +5625,7 @@ static void browser_back(struct native_frontend *fe)
    if (fe->view == FRONTEND_VIEW_LAUNCH)
       return;
    if (fe->view == FRONTEND_VIEW_OPEN_WITH) {
-      fe->pending_open_valid = 0;
-      if (fe->has_parent_view && fe->parent_view == FRONTEND_VIEW_EXPLORE) {
-         clear_parent_view(fe);
-         show_explore(fe, fe->current_dir[0] ? fe->current_dir :
-            frontend_rom_root(fe));
-         return;
-      }
-      clear_parent_view(fe);
-      show_launch(fe);
+      return_from_open_with(fe);
       return;
    }
    if (fe->view == FRONTEND_VIEW_SYSINFO || fe->view == FRONTEND_VIEW_CORES ||
@@ -5858,7 +5913,8 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
    if (strcmp(item->core, "native") == 0) {
       options.force_native = 1;
    } else if (strcmp(item->core, "hcplayer") == 0) {
-      options.force_hcplayer = 1;
+      if (!media_path_is_audio(item->path))
+         options.force_hcplayer = 1;
    } else if (strcmp(item->core, "hcplayer-audio") == 0) {
       options.force_hcplayer = 1;
       options.force_audio = 1;
@@ -5876,6 +5932,8 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
    set_status(fe, "media returned %d", ret);
    (void)unifrog_ui_open(&fe->ui, 0);
    unifrog_input_clear();
+   if (fe->view == FRONTEND_VIEW_OPEN_WITH)
+      return_from_open_with(fe);
 }
 
 static void launch_script(struct native_frontend *fe, struct frontend_item *item)

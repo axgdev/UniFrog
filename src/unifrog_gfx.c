@@ -416,6 +416,33 @@ void unifrog_gfx_draw_text(const struct unifrog_surface *surface,
    }
 }
 
+int unifrog_gfx_font_height(void)
+{
+   if (lvgl_font) {
+      int div = lvgl_font_div > 0 ? lvgl_font_div : 1;
+      return ((int)lvgl_font->line_height + div - 1) / div;
+   }
+   if (ttf_active)
+      return (int)(TTF_PIXEL_HEIGHT + 0.5f);
+   return 8;
+}
+
+int unifrog_gfx_font_advance(void)
+{
+   if (lvgl_font) {
+      int div = lvgl_font_div > 0 ? lvgl_font_div : 1;
+      int adv = ((int)lvgl_font->line_height + div - 1) / div;
+
+      if (adv > 8)
+         return 8;
+      if (adv < 5)
+         return 5;
+   }
+   if (ttf_active)
+      return 6;
+   return 6;
+}
+
 static int parse_font_line(const char *line, unsigned char *out_code,
    uint8_t cols[5])
 {
