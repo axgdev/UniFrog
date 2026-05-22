@@ -446,11 +446,15 @@ static void draw_row(struct unifrog_ui *ui,
    uint8_t indicator_alpha = focused ?
       theme_alpha(style->list_focus_indicator_alpha) :
       theme_alpha(style->list_indicator_alpha);
+   uint16_t value_fg = muted;
+   uint8_t value_alpha = indicator_alpha;
    int glyph_w = style->list_glyph_w > 0 ? style->list_glyph_w : 16;
    int glyph_h = style->list_glyph_h > 0 ? style->list_glyph_h : 16;
    int glyph_x = style->list_glyph_x >= 0 ? style->list_glyph_x : 5;
    int label_x = style->label_x > 0 ? style->label_x : 28;
    int value_w = style->value_w > 0 ? style->value_w : 90;
+   int bg_y = y;
+   int bg_h = h;
 
    if (x < 0)
       x = 0;
@@ -464,19 +468,29 @@ static void draw_row(struct unifrog_ui *ui,
       label_x = glyph && glyph[0] ? glyph_w + glyph_x + 4 : 4;
    if (value_w > w / 2)
       value_w = w / 2;
-   fill_rect_alpha(&surface, x, y, w, h, bg, bg_alpha);
+   if (focused) {
+      bg_y = y > 0 ? y - 1 : y;
+      bg_h = h + (y > 0 ? 2 : 1);
+      if (bg_y + bg_h > FRONTEND_LVGL_H)
+         bg_h = FRONTEND_LVGL_H - bg_y;
+   }
+   fill_rect_alpha(&surface, x, bg_y, w, bg_h, bg, bg_alpha);
    if (glyph && glyph[0] &&
        (focused ? style->list_focus_glyph_alpha : style->list_glyph_alpha))
       draw_image_path(&surface, glyph, x + glyph_x, y + (h - glyph_h) / 2,
          glyph_w, glyph_h);
+   if (!value_alpha && text_alpha) {
+      value_alpha = text_alpha;
+      value_fg = fg;
+   }
    fg = contrast_text(fg, bg, bg_alpha);
-   muted = contrast_text(muted, bg, bg_alpha);
+   value_fg = contrast_text(value_fg, bg, bg_alpha);
    if (text_alpha)
       unifrog_ui_text_clipped(ui, x + label_x, y + (h - 7) / 2,
          ((w - label_x - value_w - 8) / 6), label, fg, 1);
-   if (indicator_alpha && value && value[0])
+   if (value_alpha && value && value[0])
       unifrog_ui_text_clipped(ui, x + w - value_w, y + (h - 7) / 2,
-         value_w / 6, value, muted, 1);
+         value_w / 6, value, value_fg, 1);
 }
 
 static void draw_list_window(struct unifrog_ui *ui,

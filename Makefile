@@ -332,6 +332,7 @@ CONFIG_DEFINES := \
 	-DUNIFROG_HCRTOS_MEDIA=\"$(HCRTOS_MEDIA)\" \
 	-DUNIFROG_HCRTOS_MEDIA_MODULE=$(if $(filter module,$(HCRTOS_MEDIA)),1,0) \
 	-DUNIFROG_HCRTOS_MEDIA_FIRMWARE=$(if $(filter firmware,$(HCRTOS_MEDIA)),1,0) \
+	-DUNIFROG_ENABLE_HCPLAYER=$(if $(filter firmware,$(HCRTOS_MEDIA)),1,0) \
 	-DUNIFROG_FRONTEND_IMPL=\"$(FRONTEND_IMPL)\" \
 	-DUNIFROG_FRONTEND_NATIVE=$(if $(filter native,$(FRONTEND_IMPL)),1,0) \
 	-DUNIFROG_FRONTEND_MUOS=0 \
@@ -417,6 +418,7 @@ HCRTOS_DISPLAY_LDLIBS := \
 	-lviddrv
 
 HCRTOS_MEDIA_LDLIBS := \
+	-lffplayer \
 	-lavformat \
 	-lavcodec \
 	-lavutil \

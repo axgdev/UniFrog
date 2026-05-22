@@ -3538,8 +3538,7 @@ static void load_theme(struct native_frontend *fe)
    {
       char cache_key[64];
 
-      snprintf(cache_key, sizeof(cache_key), "%s:%d", fe->theme_name,
-         fe->theme_alternate ? 1 : 0);
+      snprintf(cache_key, sizeof(cache_key), "%s", fe->theme_name);
       if (strcmp(fe->resource_cache_key, cache_key) != 0) {
          unifrog_frontend_lvgl_clear_resource_cache();
          unifrog_text_copy(fe->resource_cache_key,
