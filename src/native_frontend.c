@@ -2348,6 +2348,46 @@ static int scheme_set_layout(struct unifrog_frontend_lvgl_style *style,
    else if (strcmp(section, "misc") == 0 &&
             strcmp(key, "NAVIGATION_TYPE") == 0)
       style->navigation_type = v;
+   else if (strcmp(section, "misc") == 0 &&
+            strcmp(key, "CONTENT_ITEM_HEIGHT") == 0) {
+      if (v > 0)
+         style->list_h = v;
+   } else if (strcmp(section, "misc") == 0 &&
+            strcmp(key, "CONTENT_PADDING_LEFT") == 0)
+      style->list_x = v;
+   else if (strcmp(section, "misc") == 0 &&
+            strcmp(key, "CONTENT_PADDING_TOP") == 0)
+      style->list_y = v;
+   else if (strcmp(section, "misc") == 0 &&
+            strcmp(key, "CONTENT_WIDTH") == 0) {
+      if (v > 0)
+         style->list_w = v;
+   } else if (strcmp(section, "grid") == 0 &&
+            strcmp(key, "COLUMN_COUNT") == 0) {
+      style->grid_column_count = v;
+      style->launch_cols = v > 0 ? v : style->launch_cols;
+      style->grid_enabled = style->grid_column_count > 0 &&
+         style->grid_row_count > 0;
+   } else if (strcmp(section, "grid") == 0 &&
+            strcmp(key, "ROW_COUNT") == 0) {
+      style->grid_row_count = v;
+      style->grid_enabled = style->grid_column_count > 0 &&
+         style->grid_row_count > 0;
+   } else if (strcmp(section, "grid") == 0 &&
+            strcmp(key, "LOCATION_X") == 0)
+      style->launch_x = v;
+   else if (strcmp(section, "grid") == 0 &&
+            strcmp(key, "LOCATION_Y") == 0)
+      style->launch_y = v;
+   else if (strcmp(section, "grid") == 0 &&
+            strcmp(key, "COLUMN_PADDING") == 0)
+      style->launch_gap_x = v;
+   else if (strcmp(section, "grid") == 0 &&
+            strcmp(key, "ROW_PADDING") == 0)
+      style->launch_gap_y = v;
+   else if (strcmp(section, "grid") == 0 &&
+            strcmp(key, "NAVIGATION_TYPE") == 0)
+      style->navigation_type = v;
    else if (strcmp(section, "navigation") == 0 &&
             strcmp(key, "ALIGNMENT") == 0)
       style->navigation_type = v;
@@ -2772,8 +2812,6 @@ static unsigned visible_rows_for_style(
 static void visible_item_range(unsigned count, unsigned selected,
    unsigned rows, unsigned *start, unsigned *stop)
 {
-   unsigned visible;
-
    if (!start || !stop) {
       return;
    }
@@ -2784,9 +2822,12 @@ static void visible_item_range(unsigned count, unsigned selected,
    }
    if (selected >= count)
       selected = count - 1u;
-   visible = count < rows ? count : rows;
-   *start = selected >= visible ? selected - visible + 1u : 0u;
-   *stop = *start + visible;
+   *start = 0;
+   if (count > rows && selected >= rows / 2u)
+      *start = selected - rows / 2u;
+   if (*start + rows > count)
+      *start = count > rows ? count - rows : 0;
+   *stop = *start + rows;
    if (*stop > count)
       *stop = count;
 }

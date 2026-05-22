@@ -208,25 +208,27 @@ static void draw_shell(struct unifrog_ui *ui,
    const char *detail, const char *status)
 {
    struct unifrog_surface surface = unifrog_ui_surface(ui);
-   int header_h = style->header_height > 0 ? style->header_height : 28;
-   int footer_h = style->footer_height > 0 ? style->footer_height : 22;
+   int header_h = style->header_height >= 0 ? style->header_height : 28;
+   int footer_h = style->footer_height >= 0 ? style->footer_height : 22;
    int footer_y = FRONTEND_LVGL_H - footer_h;
    uint8_t header_alpha = theme_alpha(style->header_alpha);
    uint8_t footer_alpha = theme_alpha(style->footer_alpha);
 
-   fill_rect_alpha(&surface, 0, 0, FRONTEND_LVGL_W, header_h,
-      style->header_background, header_alpha);
-   fill_rect_alpha(&surface, 0, footer_y, FRONTEND_LVGL_W, footer_h,
-      style->footer_background, footer_alpha);
-   if (style->header_text_alpha)
+   if (header_h > 0)
+      fill_rect_alpha(&surface, 0, 0, FRONTEND_LVGL_W, header_h,
+         style->header_background, header_alpha);
+   if (footer_h > 0)
+      fill_rect_alpha(&surface, 0, footer_y, FRONTEND_LVGL_W, footer_h,
+         style->footer_background, footer_alpha);
+   if (header_h > 0 && style->header_text_alpha)
       unifrog_ui_text_clipped(ui, 10, 9, 30, title ? title : "UniFrog",
          contrast_text(style->header_text, style->header_background,
             header_alpha), 1);
-   if (style->header_text_alpha && detail && detail[0])
+   if (header_h > 0 && style->header_text_alpha && detail && detail[0])
       unifrog_ui_text_clipped(ui, 214, 9, 16, detail,
          contrast_text(style->header_text, style->header_background,
             header_alpha), 1);
-   if (style->footer_text_alpha)
+   if (footer_h > 0 && style->footer_text_alpha)
       unifrog_ui_text_clipped(ui, 10, footer_y + 7, 30,
          status ? status : "", contrast_text(style->footer_text,
             style->footer_background, footer_alpha), 1);
@@ -253,7 +255,7 @@ static void draw_row(struct unifrog_ui *ui,
 {
    struct unifrog_surface surface = unifrog_ui_surface(ui);
    int x = style->list_x > 0 ? style->list_x : 8;
-   int y = (style->header_height > 0 ? style->header_height : 28) +
+   int y = (style->header_height >= 0 ? style->header_height : 28) +
       (style->list_y >= 0 ? style->list_y : 8) +
       (int)row * ((style->list_h > 0 ? style->list_h : 20) +
       (style->list_gap >= 0 ? style->list_gap : 3));
@@ -302,8 +304,8 @@ static void draw_list_window(struct unifrog_ui *ui,
    unsigned visible;
 
    if (style->list_h > 0) {
-      int header_h = style->header_height > 0 ? style->header_height : 28;
-      int footer_h = style->footer_height > 0 ? style->footer_height : 22;
+      int header_h = style->header_height >= 0 ? style->header_height : 28;
+      int footer_h = style->footer_height >= 0 ? style->footer_height : 22;
       int gap = style->list_gap >= 0 ? style->list_gap : 3;
       int area = FRONTEND_LVGL_H - header_h - footer_h -
          (style->list_y >= 0 ? style->list_y : 8) - 4;
@@ -335,31 +337,24 @@ static int launcher_uses_list(const struct unifrog_frontend_lvgl_style *style)
 {
    if (!style)
       return 0;
-   if (style->navigation_type != 0 && style->navigation_type != 2)
+   if (!style->grid_enabled)
       return 1;
-   if (style->launch_cols <= 1)
-      return 1;
-   for (unsigned i = 0; i < FRONTEND_LVGL_LAUNCH_COUNT; i++) {
-      if (style->launch_icon[i][0])
-         return 0;
-      if (style->launch_wallpaper[i][0])
-         return 0;
-   }
-   return style->navigation_type != 0;
+   return 0;
 }
 
 static void draw_launcher_grid(struct unifrog_ui *ui,
    const struct unifrog_frontend_lvgl_style *style, unsigned selected)
 {
    struct unifrog_surface surface = unifrog_ui_surface(ui);
-   int cols = style->launch_cols > 0 ? style->launch_cols : 4;
+   int cols = style->grid_column_count > 0 ? style->grid_column_count :
+      (style->launch_cols > 0 ? style->launch_cols : 4);
    int tile_w = style->launch_tile_w > 0 ? style->launch_tile_w : 68;
    int tile_h = style->launch_tile_h > 0 ? style->launch_tile_h : 58;
    int gap_x = style->launch_gap_x >= 0 ? style->launch_gap_x : 8;
    int gap_y = style->launch_gap_y >= 0 ? style->launch_gap_y : 14;
    int start_x = style->launch_x >= 0 ? style->launch_x : 12;
    int start_y = style->launch_y >= 0 ? style->launch_y :
-      (style->header_height > 0 ? style->header_height : 36) + 18;
+      (style->header_height >= 0 ? style->header_height : 36) + 18;
    int icon_w = style->launch_icon_w > 0 ? style->launch_icon_w : tile_w - 8;
    int icon_h = style->launch_icon_h > 0 ? style->launch_icon_h : 26;
 
@@ -461,6 +456,9 @@ void unifrog_frontend_lvgl_style_default(
    style->launch_y = 54;
    style->launch_icon_w = 60;
    style->launch_icon_h = 26;
+   style->grid_enabled = 0;
+   style->grid_column_count = 0;
+   style->grid_row_count = 0;
 }
 
 void unifrog_frontend_lvgl_set_style(

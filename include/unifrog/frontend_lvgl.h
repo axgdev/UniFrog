@@ -71,6 +71,9 @@ struct unifrog_frontend_lvgl_style {
    int launch_icon_w;
    int launch_icon_h;
    int navigation_type;
+   int grid_enabled;
+   int grid_column_count;
+   int grid_row_count;
    char wallpaper[256];
    char static_image[256];
    char launch_wallpaper[8][256];
