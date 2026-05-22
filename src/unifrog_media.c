@@ -266,8 +266,12 @@ static void media_disk_suspend_begin(const char *tag, const char *path)
          tag ? tag : "", path ? path : "",
          (unsigned long)unifrog_log_pending());
       unifrog_diag_memory_snapshot(tag ? tag : "media.disk_suspend_begin");
-      (void)unifrog_log_flush();
       unifrog_log_set_disk_suspended(1);
+      /*
+       * Suspend log disk writes before any explicit flush attempt.
+       * In unstable SD windows a blocking flush here can deadlock launch.
+       */
+      (void)unifrog_log_flush();
       printf("unifrog media disk_suspend active tag=%s path=%s\n",
          tag ? tag : "", path ? path : "");
    } else {

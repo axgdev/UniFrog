@@ -59,6 +59,7 @@ static const struct storage_mount storage_mounts[] = {
 };
 static unsigned storage_mounted_mask;
 static unsigned storage_mount_attempts;
+static unsigned storage_log_suspend_depth;
 
 int mount(const char *source, const char *target,
    const char *filesystemtype, unsigned long mountflags, const void *data);
@@ -1723,8 +1724,17 @@ void unifrog_platform_set_storage_stage_callback(
 
 void unifrog_platform_set_storage_log_suspended(int suspended)
 {
+   if (suspended) {
+      if (storage_log_suspend_depth < 0xffffffffu)
+         storage_log_suspend_depth++;
+   } else if (storage_log_suspend_depth > 0) {
+      storage_log_suspend_depth--;
+   }
+   suspended = storage_log_suspend_depth > 0 ? 1 : 0;
    fileuart_set_storage_suspended(suspended);
-   unifrog_log("unifrog storage log_suspended=%d\n", suspended ? 1 : 0);
+   unifrog_log_set_disk_suspended(suspended);
+   unifrog_log("unifrog storage log_suspended=%d depth=%u\n",
+      suspended, storage_log_suspend_depth);
 }
 
 void unifrog_platform_note_storage_unstable(unsigned ticks)
