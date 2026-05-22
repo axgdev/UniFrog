@@ -74,6 +74,7 @@ struct unifrog_frontend_lvgl_style {
    int grid_enabled;
    int grid_column_count;
    int grid_row_count;
+   uint8_t theme_chrome;
    char wallpaper[256];
    char static_image[256];
    char launch_wallpaper[8][256];

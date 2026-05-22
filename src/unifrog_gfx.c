@@ -300,7 +300,7 @@ static void lvgl_font_draw_text(const struct unifrog_surface *surface,
             }
          }
       }
-      pen_x += (int)((dsc.adv_w + 8u) >> 4);
+      pen_x += (int)dsc.adv_w;
    }
 }
 

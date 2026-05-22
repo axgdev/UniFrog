@@ -3470,6 +3470,7 @@ static void load_theme(struct native_frontend *fe)
       }
    }
    dir_ms = unifrog_perf_time_ms() - t0;
+   style.theme_chrome = dir_theme_loaded ? 1u : 0u;
    unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_FRONTEND_START,
       unifrog_exception_activity_hash("theme.assets"),
       unifrog_exception_activity_hash(fe->theme_name),

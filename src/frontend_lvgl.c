@@ -1,11 +1,14 @@
 #include <unifrog/frontend_lvgl.h>
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include <unifrog/gfx.h>
 #include <unifrog/log.h>
+#include <unifrog/paths.h>
 #include <unifrog/png.h>
 #include <unifrog/text.h>
 #include <unifrog/ui.h>
@@ -314,6 +317,42 @@ static void draw_image_path(const struct unifrog_surface *surface,
    unifrog_png_draw(surface, image, x, y, w, h);
 }
 
+static void write_screenshot_if_requested(const struct unifrog_surface *surface,
+   const char *tag)
+{
+   char path[256];
+   FILE *file;
+
+   if (!frontend_lvgl.screenshot_request || !surface || !surface->pixels)
+      return;
+   frontend_lvgl.screenshot_request = 0;
+   (void)mkdir(UNIFROG_LOG_ROOT "/reports", 0777);
+   snprintf(path, sizeof(path), UNIFROG_LOG_ROOT "/reports/frontend-%s-%u.ppm",
+      tag ? tag : "screen", frontend_lvgl.frame_seq);
+   file = fopen(path, "wb");
+   if (!file) {
+      unifrog_log("frontend screenshot failed path=%s\n", path);
+      return;
+   }
+   fprintf(file, "P6\n%u %u\n255\n", surface->width, surface->height);
+   for (unsigned y = 0; y < surface->height; y++) {
+      const uint16_t *row = surface->pixels + y * surface->stride;
+
+      for (unsigned x = 0; x < surface->width; x++) {
+         uint16_t p = row[x];
+         unsigned char rgb[3];
+
+         rgb[0] = (unsigned char)((((p >> 11) & 0x1fu) * 255u + 15u) / 31u);
+         rgb[1] = (unsigned char)((((p >> 5) & 0x3fu) * 255u + 31u) / 63u);
+         rgb[2] = (unsigned char)(((p & 0x1fu) * 255u + 15u) / 31u);
+         (void)fwrite(rgb, 1, sizeof(rgb), file);
+      }
+   }
+   fclose(file);
+   unifrog_log("frontend screenshot written path=%s seq=%u tag=%s\n",
+      path, frontend_lvgl.frame_seq, tag ? tag : "");
+}
+
 static const struct unifrog_frontend_lvgl_style *active_style(
    const struct unifrog_ui_theme *theme)
 {
@@ -350,14 +389,22 @@ static void draw_shell(struct unifrog_ui *ui,
       unifrog_ui_text_clipped(ui, 214, 9, 16, detail,
          contrast_text(style->header_text, style->header_background,
             header_alpha), 1);
-   if (header_h > 0 && style->header_text_alpha && detail && detail[0])
+   if (!style->theme_chrome && header_h > 0 && style->header_text_alpha &&
+       detail && detail[0])
       draw_header_battery(ui, style, detail,
          contrast_text(style->header_text, style->header_background,
             header_alpha));
-   if (footer_h > 0 && style->footer_text_alpha)
-      draw_footer_status(ui, style, footer_y + 7, status,
-         contrast_text(style->footer_text, style->footer_background,
-            footer_alpha), style->footer_background, footer_alpha);
+   if (footer_h > 0 && style->footer_text_alpha) {
+      uint16_t color = contrast_text(style->footer_text,
+         style->footer_background, footer_alpha);
+
+      if (style->theme_chrome)
+         unifrog_ui_text_clipped(ui, 10, footer_y + 7, 30,
+            status ? status : "", color, 1);
+      else
+         draw_footer_status(ui, style, footer_y + 7, status, color,
+            style->footer_background, footer_alpha);
+   }
 }
 
 static void begin_frame(struct unifrog_ui *ui,
@@ -664,6 +711,11 @@ int unifrog_frontend_lvgl_draw_launcher(struct unifrog_ui *ui,
    else
       draw_launcher_grid(ui, style, selected);
    frontend_lvgl.frame_seq++;
+   {
+      struct unifrog_surface surface = unifrog_ui_surface(ui);
+
+      write_screenshot_if_requested(&surface, "launcher");
+   }
    unifrog_ui_present(ui);
    return 0;
 }
@@ -686,6 +738,11 @@ int unifrog_frontend_lvgl_draw_menu(struct unifrog_ui *ui,
       status ? status : "A select  B back");
    draw_list_window(ui, style, selected, labels, values, glyphs, count);
    frontend_lvgl.frame_seq++;
+   {
+      struct unifrog_surface surface = unifrog_ui_surface(ui);
+
+      write_screenshot_if_requested(&surface, "menu");
+   }
    unifrog_ui_present(ui);
    return 0;
 }
