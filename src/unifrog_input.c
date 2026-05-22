@@ -30,6 +30,7 @@
 #define KEY_SHIFTER_CLOCK_LOW_US 3u
 #define KEY_SHIFTER_CLOCK_HIGH_US 3u
 #define INPUT_DEBOUNCE_STABLE_POLLS 1
+#define INPUT_VALID_BUTTON_MASK ((1u << UNIFROG_BUTTON_COUNT) - 1u)
 
 static int button_state[UNIFROG_BUTTON_COUNT];
 static int button_prev[UNIFROG_BUTTON_COUNT];
@@ -151,14 +152,14 @@ static uint32_t normalize_local_raw(uint32_t raw)
    uint32_t normalized = 0;
 
    if (detect_local_input_profile() != LOCAL_INPUT_STOCK_BITS)
-      return raw & ((1u << UNIFROG_BUTTON_COUNT) - 1u);
+      return raw & INPUT_VALID_BUTTON_MASK;
 
    for (unsigned i = 0; i < UNIFROG_BUTTON_COUNT; i++) {
       if (raw & (1u << stock_bit_for_button[i]))
          normalized |= UNIFROG_BUTTON_MASK(i);
    }
 
-   return normalized;
+   return normalized & INPUT_VALID_BUTTON_MASK;
 }
 
 void unifrog_input_restore_local_bus(void)
@@ -224,6 +225,8 @@ static uint32_t scan_gb300_local_raw(void)
 
 static void update_button_debounce(uint32_t normalized_mask)
 {
+   normalized_mask &= INPUT_VALID_BUTTON_MASK;
+
    for (unsigned i = 0; i < UNIFROG_BUTTON_COUNT; i++) {
       int raw = (normalized_mask & UNIFROG_BUTTON_MASK(i)) != 0;
 
@@ -412,14 +415,18 @@ void unifrog_input_poll_with_wireless_divisor(unsigned wireless_divisor)
       } else {
          unifrog_input_restore_local_bus();
       }
-      wireless_buttons = unifrog_input_wireless_all_buttons();
+      wireless_buttons = unifrog_input_wireless_all_buttons() &
+         INPUT_VALID_BUTTON_MASK;
    }
 
-   local_norm = local_norm_before_wireless | local_norm_after_wireless;
+   local_norm_before_wireless &= INPUT_VALID_BUTTON_MASK;
+   local_norm_after_wireless &= INPUT_VALID_BUTTON_MASK;
+   local_norm = (local_norm_before_wireless | local_norm_after_wireless) &
+      INPUT_VALID_BUTTON_MASK;
    update_button_debounce(local_norm);
    local_buttons = buttons_from_state();
    local_menu_direct = local_norm ? local_norm : local_buttons;
-   buttons = local_buttons | wireless_buttons;
+   buttons = (local_buttons | wireless_buttons) & INPUT_VALID_BUTTON_MASK;
    if (local_menu_direct) {
       local_menu_guard = 1;
       local_menu_hold_buttons = local_menu_direct;

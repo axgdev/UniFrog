@@ -3950,6 +3950,12 @@ static int quick_muos_run(const struct libretro_core_api *core,
       entry_combo |
       UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_A) |
       UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_B);
+   static const char *labels[QUICK_MUOS_CORE_FIXED_COUNT +
+      LIBRETRO_CORE_OPTION_MAX];
+   static char label_storage[LIBRETRO_CORE_OPTION_MAX]
+      [LIBRETRO_CORE_OPTION_LABEL_MAX];
+   static char detail[QUICK_MUOS_CORE_FIXED_COUNT +
+      LIBRETRO_CORE_OPTION_MAX][28];
 
    (void)core;
    (void)rom_path;
@@ -3978,13 +3984,10 @@ static int quick_muos_run(const struct libretro_core_api *core,
       uint32_t now_ms;
       unsigned draw_buffer;
       struct unifrog_surface surface;
-      const char *labels[QUICK_MUOS_CORE_FIXED_COUNT + LIBRETRO_CORE_OPTION_MAX];
       unsigned row_count;
       unsigned visible_rows;
       unsigned first_row;
       const char *footer;
-      char label_storage[LIBRETRO_CORE_OPTION_MAX][LIBRETRO_CORE_OPTION_LABEL_MAX];
-      char detail[QUICK_MUOS_CORE_FIXED_COUNT + LIBRETRO_CORE_OPTION_MAX][28];
 
       draw_buffer = host.presenter.active_buffer;
       if (host.presenter.buffer_count > 1)
@@ -7771,6 +7774,7 @@ int unifrog_libretro_run_path_ex(const char *path,
       (void)unifrog_log_flush();
       return -1;
    }
+   unifrog_log_set_disk_suspended(0);
    log_defer = experimental_sd_log_defer_begin("libretro_dispatch");
    if (UNIFROG_SD_EXPERIMENTAL)
       printf("unifrog libretro dispatch storage_precheck=skipped mode=%s path=%s\n",
