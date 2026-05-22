@@ -1138,7 +1138,7 @@ $(HCRTOS_FFMPEG_STAMP): deps-ffmpeg Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
 		--enable-bsf=h264_mp4toannexb \
 		--disable-protocols \
 		--enable-protocol=file \
-		--extra-cflags="-EL $(ARCH_CFLAGS) $(OPT_SIZE) -msoft-float -fsigned-char -ffunction-sections -fdata-sections -G0 -w -Wno-error=incompatible-pointer-types -D_FORTIFY_SOURCE=0 -D__have_long64=1 -D__have_longlong64=1 -D__HCRTOS__ -DSOC_HC15XX -DSF2000 -I$(abspath $(BUILD))/hcrtos-ffmpeg/unifrog-compat -I$(abspath $(SDK))/include/newlib -I$(abspath $(SDK))/include/kernel/lib -I$(abspath $(SDK))/include" \
+		--extra-cflags="-EL $(ARCH_CFLAGS) $(OPT_SIZE) -msoft-float -fsigned-char -ffunction-sections -fdata-sections -G0 -Wno-error=incompatible-pointer-types -D_FORTIFY_SOURCE=0 -D__have_long64=1 -D__have_longlong64=1 -D__HCRTOS__ -DSOC_HC15XX -DSF2000 -I$(abspath $(BUILD))/hcrtos-ffmpeg/unifrog-compat -I$(abspath $(SDK))/include/newlib -I$(abspath $(SDK))/include/kernel/lib -I$(abspath $(SDK))/include" \
 		--extra-ldflags="-EL -L$(abspath $(SDK))/lib/core" \
 		--extra-libs="-lc -lm -lgcc"
 	$(Q)sed -i \

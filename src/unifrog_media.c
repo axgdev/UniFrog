@@ -236,15 +236,29 @@ static void media_log_file_probe(const char *path, const char *tag)
    if (!path)
       return;
    memset(&st, 0, sizeof(st));
+   printf("unifrog media probe begin tag=%s path=%s\n",
+      tag ? tag : "", path);
+   (void)unifrog_log_flush();
    if (stat(path, &st) != 0) {
       printf("unifrog media probe tag=%s path=%s stat=-1 errno=%d\n",
          tag ? tag : "", path, errno);
       return;
    }
+   printf("unifrog media probe stat tag=%s path=%s size=%ld\n",
+      tag ? tag : "", path, (long)st.st_size);
+   (void)unifrog_log_flush();
+   errno = 0;
    file = fopen(path, "rb");
+   printf("unifrog media probe open tag=%s path=%s ok=%d errno=%d\n",
+      tag ? tag : "", path, file ? 1 : 0, errno);
+   (void)unifrog_log_flush();
    if (file) {
+      errno = 0;
       got = fread(head, 1, sizeof(head), file);
+      printf("unifrog media probe read tag=%s path=%s got=%lu errno=%d ferror=%d\n",
+         tag ? tag : "", path, (unsigned long)got, errno, ferror(file));
       fclose(file);
+      (void)unifrog_log_flush();
    }
    printf("unifrog media probe tag=%s path=%s size=%ld head_len=%lu "
           "head=%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
@@ -3215,6 +3229,7 @@ int unifrog_media_play_video_ex(const char *path,
       path, audio_only, image_file);
    (void)unifrog_log_flush();
    media_log_file_probe(path, "play_start");
+   media_log_ffmpeg_caps_once();
    if (options && options->preset >= 0 &&
       (unsigned)options->preset < sizeof(playback_presets) / sizeof(playback_presets[0]))
       preset = &playback_presets[options->preset];
@@ -3224,42 +3239,15 @@ int unifrog_media_play_video_ex(const char *path,
       (void)unifrog_log_flush();
       return ret;
    }
-   if (!audio_only && !image_file && !force_no_audio) {
-      AVFormatContext *fmt = NULL;
-
-      media_ffmpeg_register_once();
-      int probe_open = avformat_open_input(&fmt, path, NULL, NULL);
-      int probe_info = probe_open == 0 ?
-         avformat_find_stream_info(fmt, NULL) : 0;
-
-      if (probe_open == 0 && probe_info == 0) {
-         int stream = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1,
-            NULL, 0);
-
-         media_log_format_streams(fmt, path, "hcplayer_probe");
-         if (stream >= 0 && stream < (int)fmt->nb_streams) {
-            AVCodecParameters *par = fmt->streams[stream]->codecpar;
-
-            if (par && par->height > 480 && par->height <= MEDIA_MAX_VIDEO_H) {
-               printf("unifrog media highres native probe %dx%d path=%s\n",
-                  par->width, par->height, path);
-               ret = media_play_native_video(path, options);
-               if (ret == 0) {
-                  unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
-                  (void)unifrog_log_flush();
-                  return ret;
-               }
-               printf("unifrog media highres native fallback ret=%d force_hcplayer=%d path=%s\n",
-                  ret, options && options->force_hcplayer, path);
-            }
-         }
-      } else {
-         printf("unifrog media hcplayer preprobe failed open=%d info=%d path=%s\n",
-            probe_open, probe_info, path);
-         media_log_format_streams(fmt, path, "hcplayer_preprobe_partial");
-      }
-      if (fmt)
-         avformat_close_input(&fmt);
+   if (!audio_only && !image_file) {
+      printf("unifrog media video route=native reason=upstream_ffmpeg "
+             "force_hcplayer=%d disable_audio=%d path=%s\n",
+         options && options->force_hcplayer ? 1 : 0, force_no_audio, path);
+      ret = media_play_native_video(path, options);
+      printf("unifrog media video route=native ret=%d path=%s\n", ret, path);
+      unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
+      (void)unifrog_log_flush();
+      return ret;
    }
    media_init_drivers_once();
 
