@@ -767,6 +767,7 @@ static int sd_runtime_unmount_storage(const char *tag)
           (unmount_ret != 0 && unmount_errno == EINVAL) ||
           (unmount_ret != 0 && unmount_errno == ENOENT)) {
          storage_mounted_mask &= ~(1u << i);
+         storage_update_log_disk_available();
       } else {
          ret = -1;
       }
@@ -1326,6 +1327,7 @@ static int storage_adopt_existing_mount(unsigned index, uint32_t start_ms,
    }
 
    storage_mounted_mask |= 1u << index;
+   storage_update_log_disk_available();
    unifrog_log("unifrog storage mount target=%s adopted=1 reason=%s ms=%lu mask=0x%lx entries=%u package=%u user=%u markers=%u\n",
       storage_mounts[index].target, reason ? reason : "",
       (unsigned long)(unifrog_perf_time_ms() - start_ms),
@@ -1363,11 +1365,13 @@ int unifrog_platform_mount_storage(void)
                storage_mounts[i].target,
                (unsigned long)(unifrog_perf_time_ms() - target_start_ms),
                (unsigned long)storage_mounted_mask);
+            storage_update_log_disk_available();
             return 0;
          }
          unifrog_log("unifrog storage mount stale_mask target=%s bit=%u mask=0x%lx\n",
             storage_mounts[i].target, i, (unsigned long)storage_mounted_mask);
          storage_mounted_mask &= ~(1u << i);
+         storage_update_log_disk_available();
       }
 
       storage_mount_attempts++;
@@ -1378,6 +1382,7 @@ int unifrog_platform_mount_storage(void)
       vfat_errno = errno;
       if (vfat_ret == 0) {
          storage_mounted_mask |= 1u << i;
+         storage_update_log_disk_available();
          mounted = 0;
          unifrog_log("unifrog storage mount attempt=%lu dev=%s target=%s fs=vfat ret=0 errno=%d ms=%lu mask=0x%lx\n",
             (unsigned long)storage_mount_attempts, storage_mounts[i].dev,
@@ -1401,6 +1406,7 @@ int unifrog_platform_mount_storage(void)
       ntfs_errno = errno;
       if (ntfs_ret == 0) {
          storage_mounted_mask |= 1u << i;
+         storage_update_log_disk_available();
          mounted = 0;
          unifrog_log("unifrog storage mount attempt=%lu dev=%s target=%s fs=ntfs ret=0 errno=%d ms=%lu mask=0x%lx\n",
             (unsigned long)storage_mount_attempts, storage_mounts[i].dev,
@@ -1427,6 +1433,7 @@ int unifrog_platform_mount_storage(void)
          (unsigned long)(unifrog_perf_time_ms() - start_ms),
          (unsigned long)storage_mounted_mask,
          (unsigned long)storage_mount_attempts);
+   storage_update_log_disk_available();
    return mounted;
 }
 
@@ -1434,12 +1441,15 @@ int unifrog_platform_storage_ready(void)
 {
    for (unsigned i = 0; i < sizeof(storage_mounts) / sizeof(storage_mounts[0]); i++) {
       if ((storage_mounted_mask & (1u << i)) &&
-          storage_target_looks_ready(storage_mounts[i].target))
+          storage_target_looks_ready(storage_mounts[i].target)) {
+         storage_update_log_disk_available();
          return 1;
+      }
       if (storage_adopt_existing_mount(i, unifrog_perf_time_ms(),
             "ready_probe") == 0)
          return 1;
    }
+   storage_update_log_disk_available();
    return 0;
 }
 

@@ -3503,9 +3503,16 @@ static void load_theme(struct native_frontend *fe)
 
 static void ensure_data_dirs(void)
 {
+   if (!unifrog_log_disk_writes_enabled()) {
+      unifrog_log("frontend ensure_data_dirs disabled reason=log_disk_disabled\n");
+      return;
+   }
    (void)mkdir(FRONTEND_DATA_ROOT, 0777);
    (void)mkdir(FRONTEND_DATA_ROOT "/saves", 0777);
    (void)mkdir(FRONTEND_DATA_ROOT "/cache", 0777);
+   (void)mkdir(UNIFROG_LOG_ROOT, 0777);
+   (void)mkdir(UNIFROG_REPORT_ROOT, 0777);
+   (void)mkdir(UNIFROG_SCREENSHOT_ROOT, 0777);
    (void)mkdir(FRONTEND_SCRIPT_ROOT, 0777);
    (void)mkdir(FRONTEND_ARCHIVE_ROOT, 0777);
    (void)mkdir(FRONTEND_THEME_ROOT, 0777);

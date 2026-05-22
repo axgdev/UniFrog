@@ -9,6 +9,7 @@
 #include <sys/unistd.h>
 
 #include <unifrog/perf.h>
+#include <unifrog/paths.h>
 
 #define MEMLOG_FALLBACK_BYTES (4 * 1024)
 #define MEMLOG_FILE_MAX_BYTES (4 * 1024 * 1024)
@@ -115,37 +116,37 @@ static char memlog_rotated_path[192];
 
 static const struct memlog_location memlog_locations[] = {
    {
-      "/media/mmcblk0/unifrog",
-      "/media/mmcblk0/unifrog/logs",
-      "/media/mmcblk0/unifrog/logs/crashlogs",
-      "/media/mmcblk0/unifrog/logs/rotatedlogs",
+      UNIFROG_DATA_ROOT,
+      UNIFROG_LOG_ROOT,
+      UNIFROG_LOG_ROOT "/crashlogs",
+      UNIFROG_LOG_ROOT "/rotatedlogs",
       "/media/mmcblk0/log.txt",
       "/media/mmcblk0/log-prev.txt",
       "/media/mmcblk0/log-recovery.txt",
    },
    {
-      "/media/mmcblk0p1/unifrog",
-      "/media/mmcblk0p1/unifrog/logs",
-      "/media/mmcblk0p1/unifrog/logs/crashlogs",
-      "/media/mmcblk0p1/unifrog/logs/rotatedlogs",
+      "/media/mmcblk0p1/unifrog_data",
+      "/media/mmcblk0p1/unifrog_data/logs",
+      "/media/mmcblk0p1/unifrog_data/logs/crashlogs",
+      "/media/mmcblk0p1/unifrog_data/logs/rotatedlogs",
       "/media/mmcblk0p1/log.txt",
       "/media/mmcblk0p1/log-prev.txt",
       "/media/mmcblk0p1/log-recovery.txt",
    },
    {
-      "/media/mmcblk0p2/unifrog",
-      "/media/mmcblk0p2/unifrog/logs",
-      "/media/mmcblk0p2/unifrog/logs/crashlogs",
-      "/media/mmcblk0p2/unifrog/logs/rotatedlogs",
+      "/media/mmcblk0p2/unifrog_data",
+      "/media/mmcblk0p2/unifrog_data/logs",
+      "/media/mmcblk0p2/unifrog_data/logs/crashlogs",
+      "/media/mmcblk0p2/unifrog_data/logs/rotatedlogs",
       "/media/mmcblk0p2/log.txt",
       "/media/mmcblk0p2/log-prev.txt",
       "/media/mmcblk0p2/log-recovery.txt",
    },
    {
-      "/unifrog",
-      "/unifrog/logs",
-      "/unifrog/logs/crashlogs",
-      "/unifrog/logs/rotatedlogs",
+      "/unifrog_data",
+      "/unifrog_data/logs",
+      "/unifrog_data/logs/crashlogs",
+      "/unifrog_data/logs/rotatedlogs",
       "/log.txt",
       "/log-prev.txt",
       "/log-recovery.txt",
