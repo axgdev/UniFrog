@@ -3945,6 +3945,7 @@ static void ensure_data_dirs(void)
    (void)mkdir(FRONTEND_DATA_ROOT "/cache", 0777);
    (void)mkdir(UNIFROG_LOG_ROOT, 0777);
    (void)mkdir(UNIFROG_REPORT_ROOT, 0777);
+   (void)mkdir(UNIFROG_LOG_ROOT "/frontend-driver", 0777);
    (void)mkdir(UNIFROG_SCREENSHOT_ROOT, 0777);
    (void)mkdir(FRONTEND_SCRIPT_ROOT, 0777);
    (void)mkdir(FRONTEND_ARCHIVE_ROOT, 0777);

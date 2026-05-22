@@ -286,7 +286,7 @@ static void media_log_ffmpeg_caps_once(void)
    if (media_caps_logged)
       return;
    media_caps_logged = 1;
-   printf("unifrog media ffmpeg caps demuxers=avi,h264,m4v,matroska,mov,mpegps,mpegts,mpegvideo missing_audio_demuxers=mp3,wav,flac,ogg codecs_linked=mp3,aac,pcm,flac,vorbis,opus,wma,h264\n");
+   printf("unifrog media ffmpeg caps source=upstream-4.4 demuxers=avi,h264,m4v,matroska,mov,mpegps,mpegts,mpegvideo,mp3,wav,flac,ogg,aac,ape codecs_linked=mp3,aac,pcm,flac,vorbis,opus,wma,h264,mpeg4,vp8\n");
 }
 
 static void open_display(void)

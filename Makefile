@@ -6,8 +6,11 @@ TOOLCHAIN_URL ?= https://github.com/axgdev/frog-toolchain/releases/download/v1.1
 CROSS_COMPILE ?= $(TOOLCHAIN)/bin/mipsel-mti-elf-
 DEPS ?= .deps
 SDK ?= unifrog-hcrtos-sdk
-HCRTOS_FFMPEG_SOURCE ?= /root/host-frogdev/universal/sf2000_hcrtos/components/ffmpeg/source
+HCRTOS_FFMPEG_URL ?= https://git.ffmpeg.org/ffmpeg.git
+HCRTOS_FFMPEG_REF ?= n4.4.7
+HCRTOS_FFMPEG_SOURCE ?= $(CORE_SUPPORT_ROOT)/ffmpeg-upstream
 HCRTOS_FFMPEG_INSTALL ?= $(CORE_SUPPORT_ROOT)/hcrtos-ffmpeg
+HCRTOS_FFMPEG_PATCHES := patches/hcrtos-ffmpeg-compat.patch
 HCRTOS_FFMPEG_INCLUDE ?= $(firstword \
 	$(patsubst %/libavformat/avformat.h,%,$(wildcard $(HCRTOS_FFMPEG_INSTALL)/include/libavformat/avformat.h)) \
 	$(patsubst %/libavformat/avformat.h,%,$(wildcard $(SDK)/include/newlib/libavformat/avformat.h)) \
@@ -850,7 +853,7 @@ $(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 
 .DELETE_ON_ERROR:
 COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild list-cores core core-archive core-out ffmpeg
-SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores deps-lvgl
+SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores deps-lvgl deps-ffmpeg
 PACKAGE_TARGETS := frontend-package core-package module-package sdcard-package sd-zip install refresh-sd refresh-sd-clean
 VERIFY_TARGETS := asdcheck fastboot-check fastboot-only-check layout-check boot-logo-check js2300-check frontend-check native-frontend-check core-smoke-check
 ADVANCED_TARGETS := sdk dtb lib fastboot fastboot-only size ci-deps ci-toolchain ci-commit-check ci-sd-zip print-config
@@ -949,6 +952,8 @@ print-config:
 	@echo "FRONTEND=$(FRONTEND)"
 	@echo "MQUICKJS_DIR=$(MQUICKJS_DIR)"
 	@echo "LVGL_DIR=$(LVGL_DIR)"
+	@echo "HCRTOS_FFMPEG_URL=$(HCRTOS_FFMPEG_URL)"
+	@echo "HCRTOS_FFMPEG_REF=$(HCRTOS_FFMPEG_REF)"
 	@echo "HCRTOS_FFMPEG_SOURCE=$(HCRTOS_FFMPEG_SOURCE)"
 	@echo "HCRTOS_FFMPEG_INSTALL=$(HCRTOS_FFMPEG_INSTALL)"
 	@echo "HOSTCC=$(HOSTCC)"
@@ -993,7 +998,7 @@ core-archive: $(SELECTED_CORE_LIB)
 core-out: $(SELECTED_CORE_OUT)
 endif
 
-deps: deps-sdk deps-mquickjs deps-lvgl deps-cores ffmpeg
+deps: deps-sdk deps-mquickjs deps-lvgl deps-cores deps-ffmpeg ffmpeg
 
 deps-alpine:
 	apk add git make dtc tcc tcc-libs-static musl-dev ccache curl tar xz zip patch
@@ -1051,9 +1056,35 @@ deps-lvgl:
 		git -C "$(LVGL_DIR)" clean -fdx -q; \
 	fi
 
+deps-ffmpeg: $(HCRTOS_FFMPEG_PATCHES)
+	@mkdir -p "$(dir $(HCRTOS_FFMPEG_SOURCE))"
+	@fresh=0; \
+	if test -d "$(HCRTOS_FFMPEG_SOURCE)/.git"; then \
+		echo "  FETCH   $(HCRTOS_FFMPEG_SOURCE)"; \
+		git -C "$(HCRTOS_FFMPEG_SOURCE)" remote set-url origin "$(HCRTOS_FFMPEG_URL)"; \
+	else \
+		echo "  CLONE   $(HCRTOS_FFMPEG_URL)"; \
+		rm -rf "$(HCRTOS_FFMPEG_SOURCE)"; \
+		git init -q "$(HCRTOS_FFMPEG_SOURCE)"; \
+		git -C "$(HCRTOS_FFMPEG_SOURCE)" remote add origin "$(HCRTOS_FFMPEG_URL)"; \
+		fresh=1; \
+	fi; \
+	if ! git -C "$(HCRTOS_FFMPEG_SOURCE)" cat-file -e "$(HCRTOS_FFMPEG_REF)^{commit}" 2>/dev/null; then \
+		case "$(HCRTOS_FFMPEG_REF)" in \
+			n[0-9]*|v[0-9]*|[0-9]*) git -C "$(HCRTOS_FFMPEG_SOURCE)" fetch --depth 1 origin "refs/tags/$(HCRTOS_FFMPEG_REF):refs/tags/$(HCRTOS_FFMPEG_REF)" ;; \
+			*) git -C "$(HCRTOS_FFMPEG_SOURCE)" fetch --depth 1 origin "$(HCRTOS_FFMPEG_REF)" ;; \
+		esac; \
+	fi; \
+	git -C "$(HCRTOS_FFMPEG_SOURCE)" checkout -q "$(HCRTOS_FFMPEG_REF)"; \
+	git -C "$(HCRTOS_FFMPEG_SOURCE)" reset --hard -q "$(HCRTOS_FFMPEG_REF)"; \
+	if test "$$fresh" -eq 0; then \
+		git -C "$(HCRTOS_FFMPEG_SOURCE)" clean -fdx -q; \
+	fi; \
+	git -C "$(HCRTOS_FFMPEG_SOURCE)" apply "$(abspath patches/hcrtos-ffmpeg-compat.patch)"
+
 ffmpeg: $(HCRTOS_FFMPEG_STAMP)
 
-$(HCRTOS_FFMPEG_STAMP): Makefile | $(BUILD)
+$(HCRTOS_FFMPEG_STAMP): deps-ffmpeg Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
 	@test -f "$(HCRTOS_FFMPEG_SOURCE)/configure" || { echo "missing HCRTOS FFmpeg source: $(HCRTOS_FFMPEG_SOURCE)"; exit 1; }
 	@echo "  FFMPEG  configure"
 	$(Q)rm -rf "$(BUILD)/hcrtos-ffmpeg" "$(HCRTOS_FFMPEG_INSTALL)"
@@ -1325,6 +1356,7 @@ $(FRONTEND_PACKAGE_STAMP): \
 		$(USER_PACKAGE)/saves $(USER_PACKAGE)/cache \
 		$(USER_PACKAGE)/logs $(USER_PACKAGE)/logs/crashlogs \
 		$(USER_PACKAGE)/logs/rotatedlogs $(USER_PACKAGE)/logs/reports \
+		$(USER_PACKAGE)/logs/frontend-driver \
 		$(USER_PACKAGE)/updates $(USER_PACKAGE)/versions \
 		$(USER_PACKAGE)/themes $(USER_PACKAGE)/languages \
 		$(USER_PACKAGE)/archive $(USER_PACKAGE)/scripts \
