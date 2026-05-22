@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -433,6 +434,16 @@ static void media_log_ffmpeg_caps_once(void)
       return;
    media_caps_logged = 1;
    printf("unifrog media ffmpeg caps source=upstream-4.4 math=softfloat/fixed demuxers=avi,h264,m4v,matroska,mov,mpegps,mpegts,mpegvideo,mp3,wav,flac,ogg,aac,ape codecs_linked=mp3,aac_fixed,pcm,flac,vorbis,opus,wma,h264,mpeg4,vp8\n");
+   printf("unifrog media ffmpeg abi hdr_avformat=%lu lib_avformat=%lu hdr_avcodec=%lu lib_avcodec=%lu hdr_avutil=%lu lib_avutil=%lu sizeof_packet=%lu sizeof_stream=%lu off_stream_codecpar=%lu\n",
+      (unsigned long)LIBAVFORMAT_VERSION_INT,
+      (unsigned long)avformat_version(),
+      (unsigned long)LIBAVCODEC_VERSION_INT,
+      (unsigned long)avcodec_version(),
+      (unsigned long)LIBAVUTIL_VERSION_INT,
+      (unsigned long)avutil_version(),
+      (unsigned long)sizeof(AVPacket),
+      (unsigned long)sizeof(AVStream),
+      (unsigned long)offsetof(AVStream, codecpar));
 }
 
 static void open_display(void)

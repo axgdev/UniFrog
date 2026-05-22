@@ -326,6 +326,7 @@ UNIFROG_NATIVE_FRONTEND_GIT_COMMIT := native
 # Treat SDK headers as system headers so third-party/newlib warnings do not
 # obscure warnings from the UniFrog source itself.
 PROJECT_INCLUDES := -Iinclude -Isrc -I$(BUILD) -I$(CORE_SOURCE_ROOT)/libretro-common/include -I$(JS2300)/include -I$(LVGL_DIR) -I$(LVGL_DIR)/src
+FFMPEG_INCLUDES := $(if $(HCRTOS_FFMPEG_INCLUDE),-isystem $(HCRTOS_FFMPEG_INCLUDE))
 SDK_INCLUDES := \
 	-isystem $(SDK)/include \
 	-isystem $(SDK)/include/hcrtos \
@@ -420,8 +421,8 @@ CFLAGS := -EL $(ARCH_CFLAGS) $(OPT_SIZE) -pipe -msoft-float -fsigned-char -W \
 	-Wno-error=int-conversion \
 	$(DEFINES) \
 	$(PROJECT_INCLUDES) \
-	$(SDK_INCLUDES) \
-	$(if $(HCRTOS_FFMPEG_INCLUDE),-isystem $(HCRTOS_FFMPEG_INCLUDE))
+	$(FFMPEG_INCLUDES) \
+	$(SDK_INCLUDES)
 CFLAGS_NOOPT = $(filter-out $(OPT_FLAGS),$(CFLAGS))
 CFLAGS_FAST = $(CFLAGS_NOOPT) $(OPT_FAST)
 CFLAGS_AUDIO = $(CFLAGS_NOOPT) $(OPT_AUDIO)
