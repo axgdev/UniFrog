@@ -480,6 +480,8 @@ static void draw_row(struct unifrog_ui *ui,
    if (font_adv < 5)
       font_adv = 5;
    text_y = y + (h - font_h) / 2;
+   if (!text_alpha && label && label[0])
+      text_alpha = 255u;
    if (focused) {
       unsigned bg_luma = rgb565_luma(bg);
       unsigned screen_luma = rgb565_luma(style->background);

@@ -63,6 +63,8 @@
 #define FRONTEND_NAV_LOG_STEP 16u
 #define FRONTEND_JUMP_FALLBACK_STEP 50u
 #define FRONTEND_ROM_ROOT_LABEL_MAX 48u
+#define FRONTEND_ROM_ROOT_MAX 8u
+#define FRONTEND_ROM_SYSTEM_MAP_MAX 48u
 #define FRONTEND_I18N_MAX 80u
 #define FRONTEND_SCHEME_MAX 96u
 #define FRONTEND_LVGL_LIST_ROWS 8u
@@ -84,6 +86,7 @@ enum frontend_view {
    FRONTEND_VIEW_STORAGE_MODE,
    FRONTEND_VIEW_STORAGE_CONFIRM,
    FRONTEND_VIEW_ROM_SYSTEMS,
+   FRONTEND_VIEW_ROM_SYSTEM_MAPPINGS,
    FRONTEND_VIEW_ROM_ROOTS,
    FRONTEND_VIEW_ROM_ROOT_PICKER,
    FRONTEND_VIEW_OPEN_WITH,
@@ -184,6 +187,11 @@ struct native_frontend {
    int pending_open_valid;
    char rom_root[FRONTEND_MAX_PATH];
    char rom_root_label[FRONTEND_ROM_ROOT_LABEL_MAX];
+   char rom_roots[FRONTEND_ROM_ROOT_MAX][FRONTEND_MAX_PATH];
+   unsigned rom_root_count;
+   char rom_system_name[FRONTEND_ROM_SYSTEM_MAP_MAX][32];
+   char rom_system_core[FRONTEND_ROM_SYSTEM_MAP_MAX][UNIFROG_CORE_MODULE_ID_MAX];
+   unsigned rom_system_count;
    char status[96];
    struct unifrog_battery_status battery;
    uint32_t battery_ms;
@@ -236,6 +244,8 @@ static struct frontend_item *add_item(struct native_frontend *fe,
    const char *name, const char *meta, enum frontend_item_kind kind,
    const char *path, const char *core);
 static void draw(struct native_frontend *fe);
+static const char *rom_system_mapped_core(const struct native_frontend *fe,
+   const char *name);
 static void set_status(struct native_frontend *fe, const char *fmt, ...);
 static void restore_view_selection(struct native_frontend *fe,
    unsigned selected, unsigned scroll);
@@ -1048,6 +1058,94 @@ static const char *frontend_rom_root_label(const struct native_frontend *fe)
    return fe && fe->rom_root_label[0] ? fe->rom_root_label : "ROMs";
 }
 
+static const char *frontend_rom_root_at(const struct native_frontend *fe,
+   unsigned index)
+{
+   if (fe && index < fe->rom_root_count && fe->rom_roots[index][0])
+      return fe->rom_roots[index];
+   return index == 0 ? frontend_rom_root(fe) : NULL;
+}
+
+static unsigned frontend_rom_root_count(const struct native_frontend *fe)
+{
+   if (fe && fe->rom_root_count)
+      return fe->rom_root_count;
+   return 1u;
+}
+
+static int frontend_rom_root_index(const struct native_frontend *fe,
+   const char *path)
+{
+   unsigned count = frontend_rom_root_count(fe);
+
+   if (!path || !path[0])
+      return -1;
+   for (unsigned i = 0; i < count; i++) {
+      const char *root = frontend_rom_root_at(fe, i);
+
+      if (root && strcmp(root, path) == 0)
+         return (int)i;
+   }
+   return -1;
+}
+
+static void frontend_rom_root_sync_primary(struct native_frontend *fe)
+{
+   const char *root;
+
+   if (!fe)
+      return;
+   if (!fe->rom_root_count && fe->rom_root[0])
+      unifrog_text_copy(fe->rom_roots[fe->rom_root_count++],
+         sizeof(fe->rom_roots[0]), fe->rom_root);
+   if (!fe->rom_root_count)
+      unifrog_text_copy(fe->rom_roots[fe->rom_root_count++],
+         sizeof(fe->rom_roots[0]), FRONTEND_ROMS_ROOT);
+   root = fe->rom_roots[0];
+   unifrog_text_copy(fe->rom_root, sizeof(fe->rom_root), root);
+   if (strcmp(root, FRONTEND_ROOT) == 0)
+      unifrog_text_copy(fe->rom_root_label, sizeof(fe->rom_root_label), "SD");
+   else
+      unifrog_text_copy(fe->rom_root_label, sizeof(fe->rom_root_label),
+         basename_const(root));
+}
+
+static int frontend_rom_root_add(struct native_frontend *fe, const char *path)
+{
+   char normalized[FRONTEND_MAX_PATH];
+
+   if (!fe || frontend_normalize_path(normalized, sizeof(normalized),
+       path) != 0)
+      return -1;
+   if (frontend_rom_root_index(fe, normalized) >= 0)
+      return 0;
+   if (fe->rom_root_count >= FRONTEND_ROM_ROOT_MAX)
+      return -1;
+   unifrog_text_copy(fe->rom_roots[fe->rom_root_count++],
+      sizeof(fe->rom_roots[0]), normalized);
+   frontend_rom_root_sync_primary(fe);
+   return 0;
+}
+
+static int frontend_rom_root_remove(struct native_frontend *fe,
+   const char *path)
+{
+   int index;
+
+   if (!fe || fe->rom_root_count <= 1u)
+      return -1;
+   index = frontend_rom_root_index(fe, path);
+   if (index < 0)
+      return -1;
+   for (unsigned i = (unsigned)index + 1u; i < fe->rom_root_count; i++)
+      unifrog_text_copy(fe->rom_roots[i - 1u], sizeof(fe->rom_roots[0]),
+         fe->rom_roots[i]);
+   fe->rom_root_count--;
+   fe->rom_roots[fe->rom_root_count][0] = '\0';
+   frontend_rom_root_sync_primary(fe);
+   return 0;
+}
+
 static int frontend_path_has_dir_prefix(const char *path, const char *root)
 {
    size_t root_len;
@@ -1062,20 +1160,30 @@ static int frontend_path_has_dir_prefix(const char *path, const char *root)
 static int frontend_path_is_rom_root(const struct native_frontend *fe,
    const char *path)
 {
-   return path && strcmp(path, frontend_rom_root(fe)) == 0;
+   return frontend_rom_root_index(fe, path) >= 0;
 }
 
 static int frontend_path_is_inside_rom_root(const struct native_frontend *fe,
    const char *path)
 {
-   return frontend_path_has_dir_prefix(path, frontend_rom_root(fe));
+   unsigned count = frontend_rom_root_count(fe);
+
+   for (unsigned i = 0; i < count; i++) {
+      const char *root = frontend_rom_root_at(fe, i);
+
+      if (frontend_path_has_dir_prefix(path, root))
+         return 1;
+   }
+   return 0;
 }
 
 static const char *frontend_rom_title(const struct native_frontend *fe,
    const char *path)
 {
-   if (frontend_path_is_rom_root(fe, path))
+   if (frontend_rom_root_index(fe, path) == 0)
       return frontend_rom_root_label(fe);
+   if (frontend_path_is_rom_root(fe, path))
+      return basename_const(path);
    return basename_const(path);
 }
 
@@ -2045,7 +2153,8 @@ static const char *core_for_path_component(const char *component)
    return NULL;
 }
 
-static unsigned add_core_candidates_from_path_dirs(const char *path,
+static unsigned add_core_candidates_from_path_dirs(
+   const struct native_frontend *fe, const char *path,
    char ids[][UNIFROG_CORE_MODULE_ID_MAX], unsigned count)
 {
    char copy[FRONTEND_MAX_PATH];
@@ -2066,9 +2175,16 @@ static unsigned add_core_candidates_from_path_dirs(const char *path,
       slash = strchr(p, '/');
       if (slash)
          *slash = '\0';
-      core = core_for_path_component(p);
+      core = rom_system_mapped_core(fe, p);
       if (core)
          count = add_core_candidate(ids, count, core);
+      if (strcasecmp(p, "fc") == 0 || strcasecmp(p, "famicom") == 0 ||
+          strcasecmp(p, "nes") == 0) {
+         count = add_core_candidate(ids, count, "quicknes");
+         count = add_core_candidate(ids, count, "fceumm");
+      } else if ((core = core_for_path_component(p)) != NULL) {
+         count = add_core_candidate(ids, count, core);
+      }
       if (!slash)
          break;
       p = slash + 1;
@@ -2101,13 +2217,14 @@ static unsigned add_core_candidate(char ids[][UNIFROG_CORE_MODULE_ID_MAX],
    return count + 1u;
 }
 
-static unsigned collect_core_candidates(const char *path,
+static unsigned collect_core_candidates(const struct native_frontend *fe,
+   const char *path,
    char ids[][UNIFROG_CORE_MODULE_ID_MAX])
 {
    const struct frontend_catalog *cat = catalog_for_path(path);
    unsigned count = 0;
 
-   count = add_core_candidates_from_path_dirs(path, ids, count);
+   count = add_core_candidates_from_path_dirs(fe, path, ids, count);
    if (cat)
       count = add_core_candidate(ids, count, cat->core);
    if (!count && is_zip_file(path)) {
@@ -2781,6 +2898,12 @@ static void frontend_loading_show(struct native_frontend *fe, const char *title,
    if (stage && stage[0])
       unifrog_gfx_draw_text(&surface, 18, 104, stage,
          UNIFROG_RGB565(160, 174, 188), 1);
+   if (title && strcmp(title, "Now Playing") == 0) {
+      unifrog_gfx_draw_text(&surface, 18, (int)surface.height - 44,
+         "B stop    Left/Right seek", UNIFROG_RGB565(236, 241, 246), 1);
+      unifrog_ui_present(&fe->ui);
+      return;
+   }
 
    bar_x = 18;
    bar_y = (int)surface.height - 54;
@@ -4195,7 +4318,21 @@ static void save_settings(struct native_frontend *fe)
    fprintf(file, "theme_name=%s\n", active_theme_label(fe));
    fprintf(file, "storage_profile=%s\n", fe->storage_profile);
    fprintf(file, "rom_root=%s\n", frontend_rom_root(fe));
+   fprintf(file, "rom_roots=");
+   for (unsigned i = 0; i < frontend_rom_root_count(fe); i++) {
+      const char *root = frontend_rom_root_at(fe, i);
+
+      if (i)
+         fputc('|', file);
+      fprintf(file, "%s", root ? root : "");
+   }
+   fputc('\n', file);
    fprintf(file, "rom_root_label=%s\n", frontend_rom_root_label(fe));
+   for (unsigned i = 0; i < fe->rom_system_count; i++) {
+      if (fe->rom_system_name[i][0] && fe->rom_system_core[i][0])
+         fprintf(file, "rom_system=%s:%s\n", fe->rom_system_name[i],
+            fe->rom_system_core[i]);
+   }
    fprintf(file, "last_path=%s\n", fe->last_path);
    fprintf(file, "last_core=%s\n", fe->last_core);
    if (fclose(file) == 0) {
@@ -4300,27 +4437,54 @@ static void load_settings(struct native_frontend *fe)
          char normalized[FRONTEND_MAX_PATH];
 
          if (frontend_normalize_path(normalized, sizeof(normalized),
-             value) == 0)
+             value) == 0) {
             unifrog_text_copy(fe->rom_root, sizeof(fe->rom_root),
                normalized);
+            if (!fe->rom_root_count)
+               frontend_rom_root_add(fe, normalized);
+         }
       }
       else if ((value = read_key_value(line, "rom_roots")) != NULL) {
-         char first_root[FRONTEND_MAX_PATH];
+         char roots[FRONTEND_MAX_LINE];
          char normalized[FRONTEND_MAX_PATH];
-         char *sep;
+         char *part;
 
-         unifrog_text_copy(first_root, sizeof(first_root), value);
-         sep = strchr(first_root, '|');
-         if (sep)
-            *sep = '\0';
-         if (frontend_normalize_path(normalized, sizeof(normalized),
-             first_root) == 0)
-            unifrog_text_copy(fe->rom_root, sizeof(fe->rom_root),
-               normalized);
+         fe->rom_root_count = 0;
+         unifrog_text_copy(roots, sizeof(roots), value);
+         part = roots;
+         while (part && *part) {
+            char *sep = strpbrk(part, "|;");
+
+            if (sep)
+               *sep = '\0';
+            if (frontend_normalize_path(normalized, sizeof(normalized),
+                part) == 0)
+               (void)frontend_rom_root_add(fe, normalized);
+            part = sep ? sep + 1 : NULL;
+         }
       }
       else if ((value = read_key_value(line, "rom_root_label")) != NULL)
          unifrog_text_copy(fe->rom_root_label, sizeof(fe->rom_root_label),
             value);
+      else if ((value = read_key_value(line, "rom_system")) != NULL) {
+         char entry[96];
+         char *sep;
+
+         unifrog_text_copy(entry, sizeof(entry), value);
+         sep = strchr(entry, ':');
+         if (!sep)
+            sep = strchr(entry, '=');
+         if (sep && fe->rom_system_count < FRONTEND_ROM_SYSTEM_MAP_MAX) {
+            *sep++ = '\0';
+            if (entry[0] && sep[0]) {
+               unifrog_text_copy(fe->rom_system_name[fe->rom_system_count],
+                  sizeof(fe->rom_system_name[0]), entry);
+               unifrog_text_copy(fe->rom_system_core[fe->rom_system_count],
+                  sizeof(fe->rom_system_core[0]), sep);
+               fe->rom_system_count++;
+            }
+         }
+      }
       else if ((value = read_key_value(line, "last_path")) != NULL)
          unifrog_text_copy(fe->last_path, sizeof(fe->last_path), value);
       else if ((value = read_key_value(line, "last_core")) != NULL)
@@ -4328,6 +4492,7 @@ static void load_settings(struct native_frontend *fe)
    }
    fclose(file);
    fe->run_options.state_slot = clamp_state_slot(fe->run_options.state_slot);
+   frontend_rom_root_sync_primary(fe);
    normalize_storage_profile(fe);
 }
 
@@ -4605,10 +4770,92 @@ static void add_rom_system_entry(struct native_frontend *fe, const char *dir,
    if (known_dir) {
       char meta[32];
       unsigned count = count_content_dir_entries(full, fe->show_hidden, 1);
+      const char *core = core_for_path_component(name);
+      const char *mapped = NULL;
 
-      snprintf(meta, sizeof(meta), "%u games", count);
-      add_item(fe, name, meta, FRONTEND_ITEM_DIR, full, NULL);
+      for (unsigned i = 0; i < fe->rom_system_count; i++) {
+         if (strcasecmp(fe->rom_system_name[i], name) == 0) {
+            mapped = fe->rom_system_core[i];
+            break;
+         }
+      }
+      snprintf(meta, sizeof(meta), "%s %u",
+         mapped && mapped[0] ? mapped : (core ? core : "auto"), count);
+      add_item(fe, name, meta, FRONTEND_ITEM_DIR, full,
+         mapped && mapped[0] ? mapped : core);
    }
+}
+
+static const char *rom_system_mapped_core(const struct native_frontend *fe,
+   const char *name)
+{
+   if (!fe || !name)
+      return NULL;
+   for (unsigned i = 0; i < fe->rom_system_count; i++) {
+      if (strcasecmp(fe->rom_system_name[i], name) == 0)
+         return fe->rom_system_core[i];
+   }
+   return NULL;
+}
+
+static unsigned rom_system_core_choices(const char *name,
+   char ids[][UNIFROG_CORE_MODULE_ID_MAX])
+{
+   unsigned count = 0;
+
+   if (name) {
+      if (strcasecmp(name, "fc") == 0 || strcasecmp(name, "famicom") == 0 ||
+          strcasecmp(name, "nes") == 0) {
+         count = add_core_candidate(ids, count, "quicknes");
+         count = add_core_candidate(ids, count, "fceumm");
+      } else {
+         count = add_core_candidate(ids, count, core_for_path_component(name));
+      }
+   }
+   for (unsigned i = 0; i < ARRAY_SIZE(frontend_catalog); i++)
+      count = add_core_candidate(ids, count, frontend_catalog[i].core);
+   return count;
+}
+
+static void cycle_rom_system_core(struct native_frontend *fe,
+   const char *name, int dir)
+{
+   char ids[16][UNIFROG_CORE_MODULE_ID_MAX];
+   const char *current;
+   unsigned count;
+   unsigned index = 0;
+   unsigned slot;
+
+   if (!fe || !name || !name[0])
+      return;
+   count = rom_system_core_choices(name, ids);
+   if (!count)
+      return;
+   current = rom_system_mapped_core(fe, name);
+   if (!current || !current[0])
+      current = core_for_path_component(name);
+   for (unsigned i = 0; i < count; i++) {
+      if (current && strcmp(current, ids[i]) == 0) {
+         index = i;
+         break;
+      }
+   }
+   index = dir < 0 ? (index == 0 ? count - 1u : index - 1u) :
+      (index + 1u) % count;
+   for (slot = 0; slot < fe->rom_system_count; slot++) {
+      if (strcasecmp(fe->rom_system_name[slot], name) == 0)
+         break;
+   }
+   if (slot >= fe->rom_system_count) {
+      if (fe->rom_system_count >= FRONTEND_ROM_SYSTEM_MAP_MAX)
+         return;
+      slot = fe->rom_system_count++;
+      unifrog_text_copy(fe->rom_system_name[slot],
+         sizeof(fe->rom_system_name[0]), name);
+   }
+   unifrog_text_copy(fe->rom_system_core[slot],
+      sizeof(fe->rom_system_core[0]), ids[index]);
+   set_status(fe, "%s -> %s", name, ids[index]);
 }
 
 static void add_firmware_dir_entry(struct native_frontend *fe, const char *dir,
@@ -4673,38 +4920,87 @@ static void show_rom_systems(struct native_frontend *fe)
 {
    DIR *dir;
    struct dirent *entry;
-   const char *root = frontend_rom_root(fe);
    uint32_t start_ms = unifrog_perf_time_ms();
    unsigned seen = 0;
    int limited = 0;
 
-   reset_items(fe, frontend_rom_root_label(fe));
+   frontend_rom_root_sync_primary(fe);
+   reset_items(fe, frontend_rom_root_count(fe) > 1u ? "ROMs" :
+      frontend_rom_root_label(fe));
    fe->view = FRONTEND_VIEW_ROM_SYSTEMS;
-   unifrog_text_copy(fe->current_dir, sizeof(fe->current_dir), root);
+   unifrog_text_copy(fe->current_dir, sizeof(fe->current_dir),
+      frontend_rom_root(fe));
    add_item(fe, "..", "launcher", FRONTEND_ITEM_DIR, "", NULL);
-   dir = opendir(root);
-   if (!dir) {
-      set_status(fe, "open failed: %s", root);
-      unifrog_log("frontend rom_systems open_failed path=%s errno=%d\n",
-         root, errno);
-      return;
-   }
-   while ((entry = readdir(dir)) != NULL) {
-      seen++;
-      if (fe->item_count >= FRONTEND_MAX_ITEMS) {
-         limited = 1;
+   for (unsigned r = 0; r < frontend_rom_root_count(fe); r++) {
+      const char *root = frontend_rom_root_at(fe, r);
+
+      if (!root)
+         continue;
+      dir = opendir(root);
+      if (!dir) {
+         unifrog_log("frontend rom_systems open_failed path=%s errno=%d\n",
+            root, errno);
          continue;
       }
-      add_rom_system_entry(fe, root, entry->d_name, entry->d_type);
+      while ((entry = readdir(dir)) != NULL) {
+         seen++;
+         if (fe->item_count >= FRONTEND_MAX_ITEMS) {
+            limited = 1;
+            continue;
+         }
+         add_rom_system_entry(fe, root, entry->d_name, entry->d_type);
+      }
+      closedir(dir);
    }
-   closedir(dir);
    sort_items(fe);
    set_status(fe, limited ? "%u/%u systems" : "%u systems",
       fe->item_count ? fe->item_count - 1u : 0u, seen);
-   unifrog_log("frontend rom_systems root=%s seen=%u items=%u limited=%d ms=%lu\n",
-      root, seen, fe->item_count, limited,
+   unifrog_log("frontend rom_systems roots=%u seen=%u items=%u limited=%d ms=%lu\n",
+      frontend_rom_root_count(fe), seen, fe->item_count, limited,
       (unsigned long)(unifrog_perf_time_ms() - start_ms));
    log_item_sample(fe, "rom_systems");
+   log_selection(fe, "enter");
+}
+
+static void show_rom_system_mappings(struct native_frontend *fe)
+{
+   DIR *dir;
+   struct dirent *entry;
+   uint32_t start_ms = unifrog_perf_time_ms();
+   unsigned seen = 0;
+   int limited = 0;
+
+   reset_items(fe, "ROM Systems");
+   fe->view = FRONTEND_VIEW_ROM_SYSTEM_MAPPINGS;
+   add_item(fe, "Back", "general", FRONTEND_ITEM_ACTION, "back_config", NULL);
+   for (unsigned r = 0; r < frontend_rom_root_count(fe); r++) {
+      const char *root = frontend_rom_root_at(fe, r);
+
+      if (!root)
+         continue;
+      dir = opendir(root);
+      if (!dir) {
+         unifrog_log("frontend rom_system_map open_failed path=%s errno=%d\n",
+            root, errno);
+         continue;
+      }
+      while ((entry = readdir(dir)) != NULL) {
+         seen++;
+         if (fe->item_count >= FRONTEND_MAX_ITEMS) {
+            limited = 1;
+            continue;
+         }
+         add_rom_system_entry(fe, root, entry->d_name, entry->d_type);
+      }
+      closedir(dir);
+   }
+   sort_items(fe);
+   set_status(fe, limited ? "%u/%u mappings" : "%u mappings",
+      fe->item_count ? fe->item_count - 1u : 0u, seen);
+   unifrog_log("frontend rom_system_map roots=%u seen=%u items=%u limited=%d ms=%lu\n",
+      frontend_rom_root_count(fe), seen, fe->item_count, limited,
+      (unsigned long)(unifrog_perf_time_ms() - start_ms));
+   log_item_sample(fe, "rom_system_map");
    log_selection(fe, "enter");
 }
 
@@ -4712,18 +5008,28 @@ static void show_rom_roots(struct native_frontend *fe)
 {
    reset_items(fe, "ROM Roots");
    fe->view = FRONTEND_VIEW_ROM_ROOTS;
+   frontend_rom_root_sync_primary(fe);
+   for (unsigned i = 0; i < frontend_rom_root_count(fe); i++) {
+      const char *root = frontend_rom_root_at(fe, i);
+      char meta[32];
+
+      snprintf(meta, sizeof(meta), i == 0 ? "active primary" : "active");
+      add_item(fe, root, meta, FRONTEND_ITEM_ACTION, "rom_root_remove",
+         root);
+   }
    for (unsigned i = 0; i < ARRAY_SIZE(frontend_rom_root_choices); i++) {
       const char *root = frontend_rom_root_choices[i];
-      const char *meta = strcmp(frontend_rom_root(fe), root) == 0 ?
-         "active" : "available";
 
-      add_item(fe, root, meta, FRONTEND_ITEM_ACTION, "rom_root_select",
-         root);
+      if (frontend_rom_root_index(fe, root) < 0)
+         add_item(fe, root, "add preset", FRONTEND_ITEM_ACTION,
+            "rom_root_add", root);
    }
    add_item(fe, "Browse for Root", "choose folder", FRONTEND_ITEM_ACTION,
       "rom_root_browse", NULL);
+   add_item(fe, "Remove selected root", "A on active root",
+      FRONTEND_ITEM_ACTION, "rom_root_hint", NULL);
    add_item(fe, "Back", "general", FRONTEND_ITEM_ACTION, "back_config", NULL);
-   set_status(fe, "choose ROM root");
+   set_status(fe, "%u active roots", frontend_rom_root_count(fe));
 }
 
 static void show_rom_root_picker(struct native_frontend *fe, const char *path)
@@ -4976,7 +5282,7 @@ static void show_open_with(struct native_frontend *fe,
    fe->view = FRONTEND_VIEW_OPEN_WITH;
    if (item->kind == FRONTEND_ITEM_GAME) {
       char ids[16][UNIFROG_CORE_MODULE_ID_MAX];
-      unsigned count = collect_core_candidates(item->path, ids);
+      unsigned count = collect_core_candidates(fe, item->path, ids);
 
       for (unsigned i = 0; i < count; i++)
          add_item(fe, ids[i], i == 0 ? "default core" : "compatible core",
@@ -5903,6 +6209,10 @@ static void browser_back(struct native_frontend *fe)
       show_launch(fe);
       return;
    }
+   if (fe->view == FRONTEND_VIEW_ROM_SYSTEM_MAPPINGS) {
+      show_launch_settings(fe);
+      return;
+   }
    if (fe->view == FRONTEND_VIEW_POWER || fe->view == FRONTEND_VIEW_STORAGE ||
        fe->view == FRONTEND_VIEW_LAUNCH_SETTINGS || fe->view == FRONTEND_VIEW_UPDATES) {
       restore_parent_view(fe, FRONTEND_VIEW_CONFIG);
@@ -6351,7 +6661,7 @@ static void activate(struct native_frontend *fe)
    if (fe->view == FRONTEND_VIEW_LAUNCH_SETTINGS) {
       if (strcmp(item.path, "rom_systems") == 0) {
          clear_parent_view(fe);
-         show_rom_systems(fe);
+         show_rom_system_mappings(fe);
          return;
       }
       if (strcmp(item.path, "rom_roots") == 0) {
@@ -6367,22 +6677,32 @@ static void activate(struct native_frontend *fe)
       return;
    }
    if (fe->view == FRONTEND_VIEW_ROM_ROOTS) {
-      if (strcmp(item.path, "rom_root_select") == 0 && item.core[0]) {
-         unifrog_text_copy(fe->rom_root, sizeof(fe->rom_root), item.core);
-         if (strcmp(fe->rom_root, FRONTEND_ROOT) == 0)
-            unifrog_text_copy(fe->rom_root_label,
-               sizeof(fe->rom_root_label), "SD");
-         else
-            unifrog_text_copy(fe->rom_root_label,
-               sizeof(fe->rom_root_label), basename_const(fe->rom_root));
+      if (strcmp(item.path, "rom_root_add") == 0 && item.core[0]) {
+         if (frontend_rom_root_add(fe, item.core) != 0)
+            set_status(fe, "root list full");
          save_settings(fe);
          show_rom_roots(fe);
          fe->selected = selected;
          clamp_selection(fe);
          return;
       }
+      if (strcmp(item.path, "rom_root_remove") == 0 && item.core[0]) {
+         if (frontend_rom_root_remove(fe, item.core) != 0)
+            set_status(fe, "keep at least one root");
+         save_settings(fe);
+         show_rom_roots(fe);
+         if (selected >= fe->item_count)
+            selected = fe->item_count ? fe->item_count - 1u : 0;
+         fe->selected = selected;
+         clamp_selection(fe);
+         return;
+      }
       if (strcmp(item.path, "rom_root_browse") == 0) {
          show_rom_root_picker(fe, FRONTEND_ROOT);
+         return;
+      }
+      if (strcmp(item.path, "rom_root_hint") == 0) {
+         set_status(fe, "select an active root to remove it");
          return;
       }
       if (strcmp(item.path, "back_config") == 0) {
@@ -6392,11 +6712,8 @@ static void activate(struct native_frontend *fe)
    }
    if (fe->view == FRONTEND_VIEW_ROM_ROOT_PICKER) {
       if (strcmp(item.path, "rom_root_use_current") == 0) {
-         unifrog_text_copy(fe->rom_root, sizeof(fe->rom_root),
-            fe->current_dir);
-         unifrog_text_copy(fe->rom_root_label, sizeof(fe->rom_root_label),
-            strcmp(fe->rom_root, FRONTEND_ROOT) == 0 ? "SD" :
-            basename_const(fe->rom_root));
+         if (frontend_rom_root_add(fe, fe->current_dir) != 0)
+            set_status(fe, "root list full");
          save_settings(fe);
          show_rom_roots(fe);
          return;
@@ -6406,6 +6723,20 @@ static void activate(struct native_frontend *fe)
             show_rom_root_picker(fe, item.path);
          else
             browser_back(fe);
+         return;
+      }
+   }
+   if (fe->view == FRONTEND_VIEW_ROM_SYSTEM_MAPPINGS) {
+      if (strcmp(item.path, "back_config") == 0) {
+         show_launch_settings(fe);
+         return;
+      }
+      if (item.kind == FRONTEND_ITEM_DIR && item.name[0]) {
+         cycle_rom_system_core(fe, item.name, 1);
+         save_settings(fe);
+         show_rom_system_mappings(fe);
+         fe->selected = selected;
+         clamp_selection(fe);
          return;
       }
    }
@@ -7190,6 +7521,17 @@ static void loop_once(struct native_frontend *fe)
       change_config(fe, 1);
       fe->needs_draw = 1;
    }
+   if (!combo_handled && fe->view == FRONTEND_VIEW_ROM_SYSTEM_MAPPINGS &&
+       fe->selected < fe->item_count &&
+       fe->items[fe->selected].kind == FRONTEND_ITEM_DIR &&
+       (unifrog_ui_pressed(&fe->ui, UNIFROG_UI_LEFT) ||
+        unifrog_ui_pressed(&fe->ui, UNIFROG_UI_RIGHT))) {
+      cycle_rom_system_core(fe, fe->items[fe->selected].name,
+         unifrog_ui_pressed(&fe->ui, UNIFROG_UI_LEFT) ? -1 : 1);
+      save_settings(fe);
+      show_rom_system_mappings(fe);
+      fe->needs_draw = 1;
+   }
    if (!combo_handled && !select_down &&
        unifrog_ui_pressed(&fe->ui, UNIFROG_UI_X)) {
       clear_parent_view(fe);
@@ -7235,7 +7577,9 @@ int unifrog_native_frontend_main(void)
    unifrog_text_copy(fe.storage_profile, sizeof(fe.storage_profile), "boot");
    unifrog_text_copy(fe.rom_root, sizeof(fe.rom_root), FRONTEND_ROMS_ROOT);
    unifrog_text_copy(fe.rom_root_label, sizeof(fe.rom_root_label), "ROMs");
+   (void)frontend_rom_root_add(&fe, FRONTEND_ROMS_ROOT);
    load_settings(&fe);
+   frontend_rom_root_sync_primary(&fe);
    unifrog_log_set_auto_flush_bytes(fe.log_flush_every ? 1u :
       (size_t)UNIFROG_LOG_AUTO_FLUSH_BYTES);
    if (fe.language_index < 0)
