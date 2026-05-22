@@ -11,11 +11,22 @@ HCRTOS_FFMPEG_REF ?= n4.4.7
 HCRTOS_FFMPEG_SOURCE ?= $(CORE_SUPPORT_ROOT)/ffmpeg-upstream
 HCRTOS_FFMPEG_INSTALL ?= $(CORE_SUPPORT_ROOT)/hcrtos-ffmpeg
 HCRTOS_FFMPEG_PATCHES := patches/hcrtos-ffmpeg-compat.patch
-HCRTOS_FFMPEG_INCLUDE ?= $(firstword \
-	$(patsubst %/libavformat/avformat.h,%,$(wildcard $(HCRTOS_FFMPEG_INSTALL)/include/libavformat/avformat.h)) \
-	$(patsubst %/libavformat/avformat.h,%,$(wildcard $(SDK)/include/newlib/libavformat/avformat.h)) \
-	$(patsubst %/libavformat/avformat.h,%,$(wildcard /root/host-frogdev/universal/sf2000_hcrtos/output/staging/usr/include/libavformat/avformat.h)) \
-	$(patsubst %/libavformat/avformat.h,%,$(wildcard /root/host-frogdev/universal/sf2000_hcrtos/components/ffmpeg/source/libavformat/avformat.h)))
+HCRTOS_FFMPEG_INCLUDE ?= $(HCRTOS_FFMPEG_INSTALL)/include
+HCRTOS_FFMPEG_ABI_CFLAGS := \
+	-U__INT32_TYPE__ -U__UINT32_TYPE__ \
+	-D__INT32_TYPE__=int -D__UINT32_TYPE__=unsigned \
+	-D__have_long64=0 -D__have_longlong64=1
+HCRTOS_FFMPEG_WARN_CFLAGS := \
+	-Wno-error=incompatible-pointer-types \
+	-Wno-array-parameter \
+	-Wno-declaration-after-statement \
+	-Wno-discarded-qualifiers \
+	-Wno-format-truncation \
+	-Wno-redundant-decls \
+	-Wno-stringop-overread \
+	-Wno-unused-but-set-variable \
+	-Wno-unused-function \
+	-Wno-unused-variable
 CORES ?= cores
 CORE_SOURCE_ROOT ?= $(DEPS)/cores
 CORE_SUPPORT_ROOT ?= $(DEPS)/support
@@ -42,7 +53,7 @@ HCRTOS_FFMPEG_PARSERS ?= \
 	webp vp8 rv30 rv40
 HCRTOS_FFMPEG_DECODERS ?= \
 	aac aac_fixed aac_latm alac ape flac mp1 mp2 mp3 \
-	mp3float opus vorbis wavpack gsm gsm_ms bmp gif png mjpeg tiff \
+	opus vorbis wavpack gsm gsm_ms bmp gif png mjpeg tiff \
 	webp targa pcm_alaw pcm_bluray pcm_dvd pcm_f32be pcm_f32le pcm_f64be \
 	pcm_f64le pcm_mulaw pcm_s16be pcm_s16be_planar pcm_s16le \
 	pcm_s16le_planar pcm_s24be pcm_s24le pcm_s32be pcm_s32le pcm_s8 \
@@ -1090,6 +1101,8 @@ $(HCRTOS_FFMPEG_STAMP): deps-ffmpeg Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
 	$(Q)rm -rf "$(BUILD)/hcrtos-ffmpeg" "$(HCRTOS_FFMPEG_INSTALL)"
 	$(Q)mkdir -p "$(BUILD)/hcrtos-ffmpeg" "$(HCRTOS_FFMPEG_INSTALL)"
 	$(Q)mkdir -p "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/sys" "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/hcuapi"
+	$(Q)printf '%s\n' '#!/bin/sh' 'case "$$1" in --version) echo 0.0; exit 0 ;; esac' 'exit 1' > "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/pkg-config"
+	$(Q)chmod +x "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/pkg-config"
 	$(Q)printf '%s\n' '#pragma once' '#include_next <assert.h>' > "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/assert.h"
 	$(Q)printf '%s\n' '#pragma once' 'struct winsize { unsigned short ws_row, ws_col, ws_xpixel, ws_ypixel; };' 'int ioctl(int fd, unsigned long request, ...);' 'int close(int fd);' '#define TIOCGWINSZ 0' > "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/sys/ioctl.h"
 	$(Q)printf '%s\n' '#pragma once' 'struct dsc_buffer { void *buffer; int size; };' 'struct dsc_algo_params { int algo_type; int crypto_mode; int chaining_mode; int residue_mode; struct dsc_buffer key; struct dsc_buffer iv; };' 'struct dsc_crypt { const void *input; void *output; int size; };' '#define DSC_ALGO_AES 1' '#define DSC_DECRYPT 0' '#define DSC_MODE_CTR 1' '#define DSC_RESIDUE_AS_ATSC 0' '#define DSC_DO_DECRYPT 0x1001' '#define DSC_CONFIG 0x1002' > "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/hcuapi/dsc.h"
@@ -1102,7 +1115,7 @@ $(HCRTOS_FFMPEG_STAMP): deps-ffmpeg Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
 		--cc="$(CROSS_COMPILE)gcc" \
 		--ar="$(AR)" \
 		--nm="$(NM)" \
-		--pkg-config=/bin/true \
+		--pkg-config="$(abspath $(BUILD))/hcrtos-ffmpeg/unifrog-compat/pkg-config" \
 		--disable-stripping \
 		--disable-programs \
 		--disable-doc \
@@ -1122,6 +1135,8 @@ $(HCRTOS_FFMPEG_STAMP): deps-ffmpeg Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
 		--disable-postproc \
 		--disable-hwaccels \
 		--disable-asm \
+		--disable-faan \
+		--disable-mipsfpu \
 		--enable-small \
 		--enable-static \
 		--disable-shared \
@@ -1141,7 +1156,7 @@ $(HCRTOS_FFMPEG_STAMP): deps-ffmpeg Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
 		--enable-bsf=h264_mp4toannexb \
 		--disable-protocols \
 		--enable-protocol=file \
-		--extra-cflags="-EL $(ARCH_CFLAGS) $(OPT_SIZE) -msoft-float -fsigned-char -ffunction-sections -fdata-sections -G0 -Wno-error=incompatible-pointer-types -Wno-array-parameter -Wno-declaration-after-statement -Wno-discarded-qualifiers -Wno-format-truncation -Wno-redundant-decls -Wno-stringop-overread -Wno-unused-but-set-variable -Wno-unused-function -Wno-unused-variable -U__INT32_TYPE__ -U__UINT32_TYPE__ -D__INT32_TYPE__=int -D__UINT32_TYPE__=unsigned -D_FORTIFY_SOURCE=0 -D__have_long64=0 -D__have_longlong64=1 -D__HCRTOS__ -DSOC_HC15XX -DSF2000 -I$(abspath $(BUILD))/hcrtos-ffmpeg/unifrog-compat -I$(abspath $(SDK))/include/newlib -I$(abspath $(SDK))/include/kernel/lib -I$(abspath $(SDK))/include" \
+		--extra-cflags="-EL $(ARCH_CFLAGS) $(OPT_SIZE) -msoft-float -fsigned-char -ffunction-sections -fdata-sections -G0 $(HCRTOS_FFMPEG_WARN_CFLAGS) $(HCRTOS_FFMPEG_ABI_CFLAGS) -D_FORTIFY_SOURCE=0 -D__HCRTOS__ -DSOC_HC15XX -DSF2000 -I$(abspath $(BUILD))/hcrtos-ffmpeg/unifrog-compat -I$(abspath $(SDK))/include/newlib -I$(abspath $(SDK))/include/kernel/lib -I$(abspath $(SDK))/include" \
 		--extra-ldflags="-EL -L$(abspath $(SDK))/lib/core" \
 		--extra-libs="-lz -lc -lm -lgcc"
 	$(Q)sed -i \
@@ -1496,6 +1511,8 @@ $(BUILD)/unifrog_fb.o $(BUILD)/unifrog_ge.o $(BUILD)/unifrog_presenter.o $(BUILD
 $(BUILD)/unifrog_gfx.o $(BUILD)/unifrog_perf.o $(BUILD)/unifrog_scpu.o: CFLAGS := $(CFLAGS_FAST)
 $(BUILD)/unifrog_audio.o: CFLAGS := $(CFLAGS_AUDIO)
 $(BUILD)/unifrog_media.o $(BUILD)/native_modules/unifrog_media.o: $(HCRTOS_FFMPEG_STAMP)
+$(BUILD)/unifrog_media.o: CFLAGS += $(HCRTOS_FFMPEG_ABI_CFLAGS)
+$(BUILD)/native_modules/unifrog_media.o: CORE_MODULE_CFLAGS += $(HCRTOS_FFMPEG_ABI_CFLAGS)
 $(BUILD)/unifrog_libretro_host.o: CFLAGS := $(CFLAGS_AUDIO) -I$(ZSTD_DIR)
 
 $(BUILD)/%.o: src/%.S | $(BUILD)

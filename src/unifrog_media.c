@@ -321,7 +321,7 @@ static void media_log_ffmpeg_caps_once(void)
    if (media_caps_logged)
       return;
    media_caps_logged = 1;
-   printf("unifrog media ffmpeg caps source=upstream-4.4 demuxers=avi,h264,m4v,matroska,mov,mpegps,mpegts,mpegvideo,mp3,wav,flac,ogg,aac,ape codecs_linked=mp3,aac,pcm,flac,vorbis,opus,wma,h264,mpeg4,vp8\n");
+   printf("unifrog media ffmpeg caps source=upstream-4.4 math=softfloat/fixed demuxers=avi,h264,m4v,matroska,mov,mpegps,mpegts,mpegvideo,mp3,wav,flac,ogg,aac,ape codecs_linked=mp3,aac_fixed,pcm,flac,vorbis,opus,wma,h264,mpeg4,vp8\n");
 }
 
 static void open_display(void)
@@ -3274,7 +3274,11 @@ int unifrog_media_play_video_ex(const char *path,
    if (options && options->preset >= 0 &&
       (unsigned)options->preset < sizeof(playback_presets) / sizeof(playback_presets[0]))
       preset = &playback_presets[options->preset];
-   if (audio_only && (!options || !options->force_hcplayer)) {
+   if (audio_only) {
+      printf("unifrog media audio route=direct reason=upstream_ffmpeg "
+             "force_hcplayer=%d force_audio=%d path=%s\n",
+         options && options->force_hcplayer ? 1 : 0, force_audio,
+         path ? path : "");
       ret = media_play_direct_audio(path);
       unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
       (void)unifrog_log_flush();

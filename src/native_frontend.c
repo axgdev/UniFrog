@@ -5319,11 +5319,11 @@ static void show_open_with(struct native_frontend *fe,
          add_item(fe, "Homemade WAV", "native low latency",
             FRONTEND_ITEM_ACTION, "open_with_media_native", NULL);
 #if UNIFROG_HCRTOS_MEDIA_FIRMWARE
-      add_item(fe, "HCPlayer Auto", "quiet unless audio is verified",
+      add_item(fe, "Media Auto", "quiet unless audio is verified",
          FRONTEND_ITEM_ACTION, "open_with_media_hcplayer", NULL);
-      add_item(fe, "HCPlayer Audio", "force speaker output",
+      add_item(fe, "Media Audio", "force speaker output",
          FRONTEND_ITEM_ACTION, "open_with_media_hcplayer_audio", NULL);
-      add_item(fe, "HCPlayer Muted", "video or preview only",
+      add_item(fe, "Media Muted", "video or preview only",
          FRONTEND_ITEM_ACTION, "open_with_media_hcplayer_muted", NULL);
 #endif
    }
