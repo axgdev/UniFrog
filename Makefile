@@ -1164,6 +1164,7 @@ $(HCRTOS_FFMPEG_STAMP): deps-ffmpeg Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
 	$(Q)sed -i \
 		-e '/^#define getenv(x) NULL/d' \
 		-e 's/^#define HAVE_HYPOT 0/#define HAVE_HYPOT 1/' \
+		-e 's/^#define HAVE_MEMALIGN 0/#define HAVE_MEMALIGN 1/' \
 		"$(BUILD)/hcrtos-ffmpeg/config.h"
 	$(Q)sed -i \
 		-e 's|^CFLAGS=\(.*\)|CFLAGS=\1 -Wno-declaration-after-statement -Wno-redundant-decls|' \

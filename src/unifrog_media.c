@@ -357,15 +357,45 @@ static void media_log_file_probe(const char *path, const char *tag)
 static void media_log_format_streams(AVFormatContext *fmt, const char *path,
    const char *tag)
 {
+   AVStream **stream_list;
+   unsigned stream_count;
+
    if (!fmt)
       return;
-   printf("unifrog media format tag=%s path=%s streams=%lu duration=%lld bitrate=%lld\n",
-      tag ? tag : "", path ? path : "", (unsigned long)fmt->nb_streams,
-      (long long)fmt->duration, (long long)fmt->bit_rate);
+   stream_count = fmt->nb_streams;
+   stream_list = fmt->streams;
+   printf("unifrog media format tag=%s path=%s streams=%lu stream_list=0x%08lx duration=%lld bitrate=%lld\n",
+      tag ? tag : "", path ? path : "", (unsigned long)stream_count,
+      (unsigned long)(uintptr_t)stream_list, (long long)fmt->duration,
+      (long long)fmt->bit_rate);
    (void)unifrog_log_flush();
-   for (unsigned i = 0; i < fmt->nb_streams; i++) {
-      AVStream *stream = fmt->streams[i];
-      AVCodecParameters *par = stream ? stream->codecpar : NULL;
+   if (!stream_list) {
+      printf("unifrog media stream_list missing tag=%s path=%s streams=%lu\n",
+         tag ? tag : "", path ? path : "", (unsigned long)stream_count);
+      (void)unifrog_log_flush();
+      return;
+   }
+   if (stream_count > 32u) {
+      printf("unifrog media stream_list clamp tag=%s streams=%lu max=32\n",
+         tag ? tag : "", (unsigned long)stream_count);
+      stream_count = 32u;
+      (void)unifrog_log_flush();
+   }
+   for (unsigned i = 0; i < stream_count; i++) {
+      AVStream *stream;
+      AVCodecParameters *par;
+
+      printf("unifrog media stream_probe begin tag=%s idx=%u slot=0x%08lx\n",
+         tag ? tag : "", i, (unsigned long)(uintptr_t)&stream_list[i]);
+      (void)unifrog_log_flush();
+      stream = stream_list[i];
+      printf("unifrog media stream_probe stream tag=%s idx=%u stream=0x%08lx\n",
+         tag ? tag : "", i, (unsigned long)(uintptr_t)stream);
+      (void)unifrog_log_flush();
+      par = stream ? stream->codecpar : NULL;
+      printf("unifrog media stream_probe par tag=%s idx=%u par=0x%08lx\n",
+         tag ? tag : "", i, (unsigned long)(uintptr_t)par);
+      (void)unifrog_log_flush();
 
       if (!stream || !par) {
          printf("unifrog media stream tag=%s idx=%u missing stream=%d par=%d\n",
@@ -373,9 +403,9 @@ static void media_log_format_streams(AVFormatContext *fmt, const char *path,
          (void)unifrog_log_flush();
          continue;
       }
-      printf("unifrog media stream tag=%s idx=%u type=%d codec=%d/%s %dx%d rate=%d ch=%d bits=%d extra=%d tb=%d/%d\n",
+      printf("unifrog media stream tag=%s idx=%u type=%d codec=%d tag=0x%lx %dx%d rate=%d ch=%d bits=%d extra=%d tb=%d/%d\n",
          tag ? tag : "", i, par->codec_type, par->codec_id,
-         media_avcodec_name(par->codec_id), par->width, par->height,
+         (unsigned long)par->codec_tag, par->width, par->height,
          par->sample_rate, par->channels, par->bits_per_coded_sample,
          par->extradata_size, stream->time_base.num, stream->time_base.den);
       (void)unifrog_log_flush();
@@ -725,7 +755,11 @@ static int media_ffmpeg_open_audio(const char *path, AVFormatContext **fmt_out,
       goto fail;
    }
    media_log_format_streams(fmt, path, "ffmpeg_open");
-   stream = av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
+   printf("unifrog media ffmpeg find_audio begin streams=%u path=%s\n",
+      fmt ? fmt->nb_streams : 0, path ? path : "");
+   stream = media_find_stream_type(fmt, AVMEDIA_TYPE_AUDIO);
+   printf("unifrog media ffmpeg find_audio done stream=%d path=%s\n",
+      stream, path ? path : "");
    if (stream < 0) {
       printf("unifrog media ffmpeg audio_stream missing ret=%d streams=%u path=%s\n",
          stream, fmt->nb_streams, path);
@@ -1003,7 +1037,11 @@ static int media_play_native_audio_compressed(const char *path)
       goto out;
    }
    media_log_format_streams(fmt, path, "auddec_open");
-   stream = av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
+   printf("unifrog media auddec find_audio begin streams=%u path=%s\n",
+      fmt ? fmt->nb_streams : 0, path ? path : "");
+   stream = media_find_stream_type(fmt, AVMEDIA_TYPE_AUDIO);
+   printf("unifrog media auddec find_audio done stream=%d path=%s\n",
+      stream, path ? path : "");
    if (stream < 0) {
       printf("unifrog media auddec audio_stream missing ret=%d path=%s\n",
          stream, path);
