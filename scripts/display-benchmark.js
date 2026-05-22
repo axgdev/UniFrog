@@ -1,6 +1,6 @@
 // Display benchmark runner.
 
-var reportPath = "/media/mmcblk0/unifrog_data/display-benchmark.txt";
+var reportPath = "/media/mmcblk0/unifrog_data/logs/reports/display-benchmark.txt";
 var start = JS2300.now();
 var ret;
 var report = "";
@@ -26,7 +26,7 @@ try {
 } catch (e2) {}
 
 try {
-  JS2300.fs.writeText("/media/mmcblk0/unifrog_data/display-benchmark-last.txt",
+  JS2300.fs.writeText("/media/mmcblk0/unifrog_data/logs/reports/display-benchmark-last.txt",
     report + "runner_ms=" + (JS2300.now() - start) + "\n" +
     "runner_ret=" + ret + "\n");
 } catch (writeErr) {}

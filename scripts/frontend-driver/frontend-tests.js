@@ -140,7 +140,7 @@ FD.frontendTests = [
     var ret = JS2300.system.action("developer:display_benchmark");
     var report = "";
     try {
-      report = JS2300.fs.readText("/media/mmcblk0/unifrog_data/display-benchmark.txt");
+      report = JS2300.fs.readText("/media/mmcblk0/unifrog_data/logs/reports/display-benchmark.txt") || "";
     } catch (e) {}
     FD.append((ret > 0 ? "PASS " : "FAIL ") +
       "display_benchmark ret=" + ret + " ms=" + (JS2300.now() - start) +

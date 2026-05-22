@@ -673,6 +673,14 @@ hcrtos {
 	     interrupts = <44>;
 	     status = "okay";
      	}; 
+
+	viddec {
+		kshm_size = <0x1000000>;
+	};
+
+	auddec {
+		kshm_size = <0x200000>;
+	};
 };
 };
 

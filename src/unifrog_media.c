@@ -74,6 +74,7 @@
 #define MEDIA_WAV_CHUNK_FRAMES 512u
 #define MEDIA_FFMPEG_CHUNK_FRAMES 512u
 #define MEDIA_AUDIO_KSHM_SIZE 0x000a0000u
+#define MEDIA_VIDEO_KSHM_SIZE 0x00800000u
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define MEDIA_SEEK_STEP_MS 10000
 #define MEDIA_SWVIDEO_MMZ_ID 0
@@ -2321,7 +2322,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    cfg.independent_url = 1;
    cfg.combine_enable = 0;
    cfg.sync_mode = 0;
-   cfg.decode_mode = VDEC_WORK_MODE_NORMAL;
+   cfg.decode_mode = VDEC_WORK_MODE_KSHM;
    cfg.decoder_flag = 0;
    cfg.rotate_by_cfg = 1;
    cfg.rotate_enable = 0;
@@ -2349,7 +2350,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    cfg.rotate_type = ROTATE_TYPE_0;
    cfg.bit_rate = par->bit_rate > 0 && par->bit_rate < INT32_MAX ?
       (int)par->bit_rate : 0;
-   cfg.kshm_size = 0;
+   cfg.kshm_size = MEDIA_VIDEO_KSHM_SIZE;
    cfg.buffering_start = 200;
    cfg.buffering_end = 1000;
    cfg.scan_type = YUV420_YH1V2;
@@ -2381,7 +2382,6 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
       return -1;
    }
    printf("unifrog media native video open_viddec done fd=%d\n", fd);
-   open_display_controller();
    printf("unifrog media native video init begin fd=%d dis=%d vidsink=%d\n",
       fd, dis_fd, vidsink_fd);
    errno = 0;
@@ -2423,6 +2423,8 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    start_errno = errno;
    printf("unifrog media native video start done fd=%d ret=%d errno=%d\n",
       fd, start_ret, start_errno);
+   if (start_ret == 0)
+      open_display_controller();
    if (start_ret == 0 && dis_fd >= 0) {
       dis_win_onoff_t win;
 

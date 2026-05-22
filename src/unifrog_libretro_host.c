@@ -6851,6 +6851,11 @@ static int run_core(const struct libretro_core_api *core, const char *path,
    if (!libretro_core_available(core) || !path || !path[0])
       return -1;
 
+   unifrog_log_sync("libretro run enter core=%s path=%s external=%d gp=0x%08lx",
+      core->id ? core->id : "", path, core->external,
+      (unsigned long)core_call_gp(core));
+   libretro_activity_set(core, path, UNIFROG_ACTIVITY_PHASE_LIBRETRO_BEGIN,
+      core->external ? 1u : 0u);
    total_start_us = host_time_us();
    old_log_auto_flush = unifrog_log_auto_flush_bytes();
    unifrog_log_set_auto_flush_bytes(LIBRETRO_LOG_AUTO_FLUSH_BYTES);
@@ -6884,7 +6889,15 @@ static int run_core(const struct libretro_core_api *core, const char *path,
    host_apply_runtime_options();
    (void)unifrog_log_flush();
    loading_draw("LOADING GAME", "START", 2);
+   unifrog_log_sync("libretro api_version begin core=%s gp=0x%08lx fn=0x%08lx",
+      core->id ? core->id : "",
+      (unsigned long)core_call_gp(core),
+      (unsigned long)(uintptr_t)core->api_version);
+   libretro_activity_set_core_call(core,
+      UNIFROG_ACTIVITY_PHASE_LIBRETRO_API, 1u, core->api_version);
    api_version = CORE_CALL0_RET(core, core->api_version);
+   unifrog_log_sync("libretro api_version done core=%s api=%u",
+      core->id ? core->id : "", api_version);
    printf("unifrog libretro %s api=%u\n", core->id, api_version);
    unifrog_diag_memory_snapshot("libretro.after_api_version");
    (void)unifrog_log_flush();
@@ -7358,6 +7371,7 @@ out_finish:
    unifrog_input_recover_after_core();
    printf("unifrog libretro %s end ret=%d video=%ux%u pitch=%u\n",
       core->id, ret, host.video_width, host.video_height, host.video_pitch);
+   unifrog_exception_activity_clear();
    unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
    (void)unifrog_log_flush();
    return ret;
@@ -7476,9 +7490,15 @@ static int libretro_load_external_core(const char *id, const char *core_path,
    unifrog_log_sync("external_core done core=%s path=%s ms=%u",
       id, path, host_elapsed_ms(load_start_us, load_done_us));
    (void)unifrog_log_flush();
-   unifrog_diag_memory_snapshot("libretro.after_external_core_load");
 
    exports = loaded->exports;
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_EXTERNAL_CORE_API,
+      unifrog_exception_activity_hash(id), (uint32_t)(uintptr_t)exports,
+      (uint32_t)loaded->gp_addr);
+   unifrog_log_sync("external_core api begin core=%s exports=0x%08lx size=%u gp=0x%08lx image=%u memory=%u",
+      id, (unsigned long)(uintptr_t)exports,
+      exports ? exports->size : 0u, (unsigned long)loaded->gp_addr,
+      (unsigned)loaded->image_size, (unsigned)loaded->memory_size);
    memset(api, 0, sizeof(*api));
    api->id = exports->core_id;
    api->call_gp = loaded->gp_addr;
@@ -7515,10 +7535,24 @@ static int libretro_load_external_core(const char *id, const char *core_path,
    }
    if (!libretro_core_available(api)) {
       printf("unifrog libretro external_core incomplete id=%s\n", id);
+      unifrog_log_sync("external_core api incomplete core=%s exports=0x%08lx id=0x%08lx init=0x%08lx api=0x%08lx load=0x%08lx run=0x%08lx",
+         id, (unsigned long)(uintptr_t)exports,
+         (unsigned long)(uintptr_t)api->id,
+         (unsigned long)(uintptr_t)api->init,
+         (unsigned long)(uintptr_t)api->api_version,
+         (unsigned long)(uintptr_t)api->load_game,
+         (unsigned long)(uintptr_t)api->run);
       unifrog_core_module_unload(loaded);
       unifrog_diag_memory_snapshot("libretro.external_core_unloaded_incomplete");
       goto out_restore_log;
    }
+   unifrog_log_sync("external_core api ready core=%s id=%s gp=0x%08lx api=0x%08lx init=0x%08lx load=0x%08lx run=0x%08lx",
+      id, api->id ? api->id : "",
+      (unsigned long)api->call_gp,
+      (unsigned long)(uintptr_t)api->api_version,
+      (unsigned long)(uintptr_t)api->init,
+      (unsigned long)(uintptr_t)api->load_game,
+      (unsigned long)(uintptr_t)api->run);
    ret = 0;
 
 out_restore_log:
