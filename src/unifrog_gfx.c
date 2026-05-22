@@ -109,6 +109,7 @@ static stbtt_bakedchar ttf_chars[TTF_CHAR_COUNT];
 static int ttf_active;
 static int ttf_baseline_offset;
 static lv_font_t *lvgl_font;
+static int lvgl_font_div = 1;
 static int lvgl_fs_ready;
 
 static int font_space(char c)
@@ -162,6 +163,7 @@ static void lvgl_font_clear(void)
    if (lvgl_font)
       lv_font_free(lvgl_font);
    lvgl_font = NULL;
+   lvgl_font_div = 1;
 }
 
 static uint16_t blend_rgb565(uint16_t dst, uint16_t src, unsigned alpha)
@@ -258,11 +260,12 @@ static void lvgl_font_draw_text(const struct unifrog_surface *surface,
    int x, int y, const char *text, uint16_t color)
 {
    int pen_x = x;
+   int div = lvgl_font_div > 0 ? lvgl_font_div : 1;
    int baseline;
 
    if (!surface_is_valid(surface) || !text || !lvgl_font)
       return;
-   baseline = y + lvgl_font->base_line;
+   baseline = y + (lvgl_font->base_line + div - 1) / div;
    while (*text) {
       unsigned char ch = (unsigned char)*text++;
       lv_font_glyph_dsc_t dsc;
@@ -276,22 +279,34 @@ static void lvgl_font_draw_text(const struct unifrog_surface *surface,
          continue;
       bitmap = lvgl_font->get_glyph_bitmap(lvgl_font, ch);
       if (bitmap && dsc.box_w && dsc.box_h) {
-         int gx = pen_x + dsc.ofs_x;
-         int gy = baseline - dsc.ofs_y - dsc.box_h;
+         int box_w = ((int)dsc.box_w + div - 1) / div;
+         int box_h = ((int)dsc.box_h + div - 1) / div;
+         int gx = pen_x + dsc.ofs_x / div;
+         int gy = baseline - dsc.ofs_y / div - box_h;
 
-         for (unsigned yy = 0; yy < dsc.box_h; yy++) {
-            int dy = gy + (int)yy;
+         for (int yy = 0; yy < box_h; yy++) {
+            int dy = gy + yy;
 
             if (dy < 0 || dy >= (int)surface->height)
                continue;
-            for (unsigned xx = 0; xx < dsc.box_w; xx++) {
-               int dx = gx + (int)xx;
-               unsigned alpha;
+            for (int xx = 0; xx < box_w; xx++) {
+               int dx = gx + xx;
+               unsigned alpha = 0;
 
                if (dx < 0 || dx >= (int)surface->width)
                   continue;
-               alpha = lvgl_glyph_alpha(bitmap, yy * dsc.box_w + xx,
-                  dsc.bpp ? dsc.bpp : 4u);
+               for (int sy = yy * div; sy < (yy + 1) * div &&
+                    sy < (int)dsc.box_h; sy++) {
+                  for (int sx = xx * div; sx < (xx + 1) * div &&
+                       sx < (int)dsc.box_w; sx++) {
+                     unsigned a = lvgl_glyph_alpha(bitmap,
+                        (unsigned)sy * dsc.box_w + (unsigned)sx,
+                        dsc.bpp ? dsc.bpp : 4u);
+
+                     if (a > alpha)
+                        alpha = a;
+                  }
+               }
                if (alpha) {
                   uint16_t *dst = &surface->pixels[(unsigned)dy *
                      surface->stride + (unsigned)dx];
@@ -300,7 +315,7 @@ static void lvgl_font_draw_text(const struct unifrog_surface *surface,
             }
          }
       }
-      pen_x += (int)dsc.adv_w;
+      pen_x += ((int)dsc.adv_w + div - 1) / div;
    }
 }
 
@@ -557,6 +572,8 @@ static int load_lvgl_bin_font(const char *path)
    lvgl_font_clear();
    ttf_clear();
    lvgl_font = font;
+   if (font->line_height > 12)
+      lvgl_font_div = 2;
    return 95;
 }
 
