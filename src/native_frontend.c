@@ -226,6 +226,7 @@ static void draw(struct native_frontend *fe);
 static void set_status(struct native_frontend *fe, const char *fmt, ...);
 static void ensure_data_dirs(void);
 static int frontend_path_has_dir_prefix(const char *path, const char *root);
+static void alternate_style(struct unifrog_frontend_lvgl_style *style);
 
 static const char *const storage_config_profiles[] = {
    "boot", "wide1", "wide2", "wide4", "wide8", "wide10", "wide12",
@@ -291,9 +292,11 @@ static const struct frontend_catalog frontend_catalog[] = {
 };
 
 static const char *const media_suffixes[] = {
-   ".mp4", ".mov", ".mkv", ".avi", ".ts", ".m2ts", ".mpg", ".mpeg",
-   ".h264", ".264", ".mp3", ".wav", ".flac", ".ogg", ".opus", ".aac",
-   ".m4a", ".jpg", ".jpeg", ".png", ".gif", ".bmp",
+   ".mp4", ".m4v", ".mov", ".mkv", ".avi", ".flv", ".webm", ".wmv",
+   ".ts", ".m2ts", ".mts", ".vob", ".mpg", ".mpeg", ".3gp", ".3g2",
+   ".rm", ".rmvb", ".h264", ".264", ".mp3", ".wav", ".flac", ".ogg",
+   ".opus", ".aac", ".m4a", ".wma", ".ra", ".jpg", ".jpeg", ".png",
+   ".gif", ".bmp", ".webp",
 };
 
 static int frontend_sort_desc;
@@ -2985,6 +2988,81 @@ static int load_muos_named_scheme(const char *dir, const char *scheme,
    return -1;
 }
 
+static int load_muos_alternate_scheme(const char *dir,
+   struct unifrog_ui_theme *theme, struct unifrog_frontend_lvgl_style *style)
+{
+   char alternate_dir[FRONTEND_MAX_PATH];
+   char active_path[FRONTEND_MAX_PATH];
+   char active[64] = "";
+   char path[FRONTEND_MAX_PATH];
+   FILE *file;
+
+   if (!dir || !theme || !style ||
+       path_join(alternate_dir, sizeof(alternate_dir), dir, "alternate") != 0)
+      return -1;
+   if (path_join(active_path, sizeof(active_path), dir, "active.txt") == 0) {
+      file = fopen(active_path, "rb");
+      if (file) {
+         if (fgets(active, sizeof(active), file))
+            strip_eol(active);
+         fclose(file);
+      }
+   }
+   if (active[0]) {
+      char rel[96];
+
+      snprintf(rel, sizeof(rel), "%s.ini", active);
+      if (path_join(path, sizeof(path), alternate_dir, rel) == 0 &&
+          load_muos_scheme_file(path, theme, style) == 0) {
+         unifrog_log("frontend theme alternate loaded active=%s path=%s\n",
+            active, path);
+         return 0;
+      }
+   }
+   {
+      DIR *scan = opendir(alternate_dir);
+      struct dirent *entry;
+
+      if (!scan)
+         return -1;
+      while ((entry = readdir(scan)) != NULL) {
+         if (entry->d_name[0] == '.' ||
+             !unifrog_text_ends_with_ci(entry->d_name, ".ini"))
+            continue;
+         if (path_join(path, sizeof(path), alternate_dir,
+             entry->d_name) == 0 &&
+             load_muos_scheme_file(path, theme, style) == 0) {
+            closedir(scan);
+            unifrog_log("frontend theme alternate loaded path=%s\n", path);
+            return 0;
+         }
+      }
+      closedir(scan);
+   }
+   return -1;
+}
+
+static int apply_muos_alternate(struct native_frontend *fe,
+   struct unifrog_ui_theme *theme, struct unifrog_frontend_lvgl_style *style)
+{
+   char dir[FRONTEND_MAX_PATH];
+
+   if (!fe || !fe->theme_alternate || !theme || !style)
+      return 0;
+   if (strcmp(fe->theme_name, "muos") != 0 &&
+       path_join(dir, sizeof(dir), FRONTEND_THEME_ROOT, fe->theme_name) == 0 &&
+       load_muos_alternate_scheme(dir, theme, style) == 0)
+      return 1;
+   {
+      uint16_t tmp = theme->focus;
+
+      theme->focus = theme->accent;
+      theme->accent = tmp;
+      alternate_style(style);
+   }
+   return 0;
+}
+
 static void theme_apply_wallpapers(struct unifrog_frontend_lvgl_style *style,
    const char *dir, const char *module, int include_launch)
 {
@@ -3298,7 +3376,7 @@ static const struct unifrog_frontend_lvgl_style *frontend_screen_style(
        &fe->screen_style[screen]) != 0)
       fe->screen_style[screen] = fe->active_style;
    else if (fe->theme_alternate)
-      alternate_style(&fe->screen_style[screen]);
+      apply_muos_alternate(fe, &style_theme, &fe->screen_style[screen]);
    fe->screen_style_valid[screen] = 1;
    unifrog_log("frontend theme screen style loaded name=%s screen=%d module=%s ms=%u text=%04x/%04x alpha=%u/%u\n",
       fe->theme_name, (int)screen, lvgl_screen_module(screen),
@@ -3503,11 +3581,7 @@ static void load_theme(struct native_frontend *fe)
       }
    }
    if (fe->theme_alternate) {
-      uint16_t tmp = theme.focus;
-
-      theme.focus = theme.accent;
-      theme.accent = tmp;
-      alternate_style(&style);
+      apply_muos_alternate(fe, &theme, &style);
    }
    fe->active_theme = theme;
    fe->base_theme = base_theme;
@@ -3516,8 +3590,6 @@ static void load_theme(struct native_frontend *fe)
    fe->dir_theme_loaded = dir_theme_loaded;
    if (!dir_theme_loaded)
       fe->list_style = style;
-   else if (fe->theme_alternate)
-      alternate_style(&fe->list_style);
    fe->applied_style_id = -1;
    t0 = unifrog_perf_time_ms();
    for (unsigned i = 0; i <= UNIFROG_FRONTEND_LVGL_VISUAL; i++) {

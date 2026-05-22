@@ -50,12 +50,38 @@
 #define VIDEO_OUTPUT_H 1080
 #define MEDIA_MAX_VIDEO_W 1280
 #define MEDIA_MAX_VIDEO_H 720
+#define VIDEO_EXIT_HOLD_POLLS 12u
+#define VIDEO_MONITOR_POLLS 30u
+#define VIDEO_STALL_LIMIT 8u
 #define VIDEO_LOG_AUTO_FLUSH_BYTES (64u * 1024u)
 #define MEDIA_AUDIO_VOLUME 75u
 #define MEDIA_WAV_CHUNK_FRAMES 512u
 #define MEDIA_FFMPEG_CHUNK_FRAMES 512u
 #define MEDIA_AUDIO_KSHM_SIZE 0x000a0000u
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
+#ifndef UNIFROG_ENABLE_HCPLAYER
+#define UNIFROG_ENABLE_HCPLAYER 0
+#endif
+
+struct playback_preset {
+   const char *name;
+   HCPlayerSyncType sync_type;
+   bool quick_mode;
+   int qm_drop_thresh;
+   int audio_flush_thres;
+   bool buffering_enable;
+};
+
+static const struct playback_preset playback_presets[] = {
+   { "audio loose", HCPLAYER_AUDIO_MASTER, false, 3, 0, false },
+   { "stc sync", HCPLAYER_SYNC_STC, false, 1, 0, false },
+   { "freerun", HCPLAYER_FREERUN, false, 1, 0, false },
+   { "audio quick", HCPLAYER_AUDIO_MASTER, true, 1, 0, false },
+   { "video master", HCPLAYER_VIDEO_MASTER, false, 1, 0, false },
+   { "stc buffered", HCPLAYER_SYNC_STC, false, 1, 0, true },
+   { "audio buffered", HCPLAYER_AUDIO_MASTER, false, 3, 0, true },
+};
 
 struct media_auddec {
    int fd;
@@ -253,6 +279,30 @@ static int set_video_layer_visible(int visible, int src_w, int src_h,
       visible, zoom.src_area.w, zoom.src_area.h,
       zoom.dst_area.w, zoom.dst_area.h, order_ret, zoom_ret);
    return order_ret == 0 && zoom_ret == 0 ? 0 : -1;
+}
+
+static int set_player_display_rect(void *player, int src_w, int src_h,
+   int dst_w, int dst_h)
+{
+   struct vdec_dis_rect rect;
+   int ret;
+
+   if (!player)
+      return -1;
+   memset(&rect, 0, sizeof(rect));
+   rect.src_rect.x = 0;
+   rect.src_rect.y = 0;
+   rect.src_rect.w = (uint16_t)(src_w > 0 ? src_w : VIDEO_SOURCE_W);
+   rect.src_rect.h = (uint16_t)(src_h > 0 ? src_h : VIDEO_SOURCE_H);
+   rect.dst_rect.x = 0;
+   rect.dst_rect.y = 0;
+   rect.dst_rect.w = (uint16_t)(dst_w > 0 ? dst_w : VIDEO_OUTPUT_W);
+   rect.dst_rect.h = (uint16_t)(dst_h > 0 ? dst_h : VIDEO_OUTPUT_H);
+   ret = hcplayer_set_display_rect(player, &rect);
+   printf("unifrog media player rect src=%ux%u dst=%ux%u ret=%d\n",
+      rect.src_rect.w, rect.src_rect.h, rect.dst_rect.w, rect.dst_rect.h,
+      ret);
+   return ret;
 }
 
 static void media_set_aspect_mode(dis_tv_mode_e ratio, dis_mode_e mode)
@@ -3000,11 +3050,8 @@ int unifrog_media_play_video_ex(const char *path,
    void *player = NULL;
    unsigned exit_hold = 0;
    unsigned monitor_polls = 0;
-   unsigned audio_gate_polls = 0;
    unsigned stall_count = 0;
-   struct media_audio_gate_state audio_gate;
    int audio_output_enabled = 0;
-   int audio_probe = -1;
    int audio_only = media_is_audio_path(path);
    int image_file = media_is_image_path(path);
    int force_no_audio = options && options->disable_audio;
@@ -3015,7 +3062,6 @@ int unifrog_media_play_video_ex(const char *path,
 
    if (!path || !path[0])
       return -1;
-   memset(&audio_gate, 0, sizeof(audio_gate));
    if (options && options->preset >= 0 &&
       (unsigned)options->preset < sizeof(playback_presets) / sizeof(playback_presets[0]))
       preset = &playback_presets[options->preset];
@@ -3079,7 +3125,7 @@ int unifrog_media_play_video_ex(const char *path,
       preset->name, init_args.sync_type, init_args.quick_mode ? 1 : 0,
       init_args.qm_drop_thresh, init_args.audio_flush_thres,
       init_args.buffering_enable ? 1 : 0,
-      (unsigned)VIDEO_STREAM_CACHE_BYTES, audio_only, image_file,
+      (unsigned)MEDIA_AUDIO_KSHM_SIZE, audio_only, image_file,
       force_no_audio, force_audio);
    (void)unifrog_log_flush();
    printf("unifrog media hcplayer_init begin\n");
@@ -3104,12 +3150,14 @@ int unifrog_media_play_video_ex(const char *path,
    printf("unifrog media audio config snd_devs=0x%lx audsink=%d\n",
       (unsigned long)init_args.snd_devs, init_args.enable_audsink ? 1 : 0);
 
-   audio_probe = force_no_audio ? 0 :
-      probe_audio_stream(player, "create", &audio_info);
-   if (!force_no_audio && audio_probe > 0) {
+   if (!force_no_audio &&
+       hcplayer_get_nth_audio_stream_info(player, 0, &audio_info) == 0) {
       audio_output_enabled = 1;
       (void)hcplayer_set_audio_output_dev(player, AUDDEV_I2SO);
-      (void)media_probe_audio_device("create", NULL);
+      printf("unifrog media stream audio codec=0x%x rate=%d ch=%d\n",
+         audio_info.codec_id, audio_info.sample_rate, audio_info.channels);
+   } else if (!force_no_audio) {
+      printf("unifrog media stream audio unavailable\n");
    }
 
    memset(&video_info, 0, sizeof(video_info));
@@ -3140,41 +3188,18 @@ int unifrog_media_play_video_ex(const char *path,
    hcplayer_play(player);
    printf("unifrog media hcplayer_play done\n");
    (void)unifrog_log_flush();
-   if (!force_no_audio && audio_probe < 0) {
-      for (unsigned i = 0; i < 5u && audio_probe < 0; i++) {
-         msleep(20);
-         audio_probe = probe_audio_stream(player, "play", &audio_info);
-      }
-      if (audio_probe > 0) {
-         audio_output_enabled = 1;
-         (void)hcplayer_set_audio_output_dev(player, AUDDEV_I2SO);
-         (void)media_probe_audio_device("play_probe", NULL);
-      } else if (audio_probe < 0) {
-         printf("unifrog media stream audio fallback disabled after unknown probe audio_only=%d\n",
-            audio_only);
-      }
-   }
    if (audio_output_enabled) {
-      struct media_audio_device_probe device_probe;
-
       (void)hcplayer_set_audio_output_dev(player, AUDDEV_I2SO);
       (void)unifrog_audio_set_system_volume(MEDIA_AUDIO_VOLUME);
       msleep(60);
-      (void)media_probe_audio_device("before_gate", &device_probe);
-      if (force_audio || audio_only ||
-          media_audio_device_is_playing(&device_probe)) {
+      if (force_audio || audio_only || !force_no_audio) {
          unifrog_audio_set_system_output_enabled(1);
-         audio_gate.enabled = 1;
-         audio_gate.last_want_enabled = 1;
          printf("unifrog media audio gate enabled after player start reason=%s\n",
-            force_audio ? "force" : (audio_only ? "audio_only" : "status"));
+            force_audio ? "force" : (audio_only ? "audio_only" : "stream"));
       } else {
          audio_output_enabled = 0;
          unifrog_audio_set_system_output_enabled(0);
-         printf("unifrog media audio gate suppressed reason=status_unverified audio_only=%d status_ret=%d play=%u mute=%u errno=%d\n",
-            audio_only, device_probe.status_ret,
-            device_probe.status.play_state, device_probe.status.mute_state,
-            device_probe.errno_value);
+         printf("unifrog media audio gate suppressed reason=no_audio\n");
       }
    } else {
       unifrog_audio_set_system_output_enabled(0);
@@ -3191,12 +3216,6 @@ int unifrog_media_play_video_ex(const char *path,
          }
       } else {
          exit_hold = 0;
-      }
-
-      if (audio_output_enabled && ++audio_gate_polls >= VIDEO_AUDIO_GATE_POLLS) {
-         audio_gate_polls = 0;
-         media_audio_gate_update(&audio_gate, audio_output_enabled,
-            force_audio, audio_only, "playback");
       }
 
       if (!image_file && ++monitor_polls >= VIDEO_MONITOR_POLLS) {
@@ -3236,7 +3255,6 @@ out:
    }
    unifrog_audio_set_system_output_enabled(0);
    close_display();
-   close_stream();
    printf("unifrog media end ret=%d path=%s\n", ret, path ? path : "");
    unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
    (void)unifrog_log_flush();
