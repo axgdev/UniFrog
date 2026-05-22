@@ -3208,8 +3208,6 @@ int unifrog_media_play_video_ex(const char *path,
    if (options && options->preset >= 0 &&
       (unsigned)options->preset < sizeof(playback_presets) / sizeof(playback_presets[0]))
       preset = &playback_presets[options->preset];
-   else if (!audio_only && !image_file)
-      preset = &playback_presets[4];
    if (audio_only && (!options || !options->force_hcplayer)) {
       ret = media_play_direct_audio(path);
       unifrog_log_set_auto_flush_bytes(old_log_auto_flush);

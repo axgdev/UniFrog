@@ -489,6 +489,7 @@ struct libretro_host {
    volatile int loading_task_stop;
    unsigned loading_anim_tick;
    unsigned loading_percent;
+   unsigned loading_visual_percent;
    char loading_title[32];
    char loading_detail[64];
    unsigned loading_log_stage_hash;
@@ -2012,7 +2013,6 @@ static void loading_draw_frame(const char *title, const char *detail,
 
    if (percent > 100)
       percent = 100;
-   host.loading_percent = percent;
    libretro_watchdog_load_progress(detail ? detail : title, percent, 100);
    buffer = host.loading_fb.current_buffer;
    if (host.loading_fb.buffer_count > 1)
@@ -2053,8 +2053,11 @@ static void loading_task(void *arg)
       vTaskDelay(250 / portTICK_PERIOD_MS);
       if (host.loading_open) {
          host.loading_anim_tick++;
+         if (host.loading_visual_percent < 95u &&
+             host.loading_visual_percent <= host.loading_percent + 12u)
+            host.loading_visual_percent++;
          loading_draw_frame(host.loading_title, host.loading_detail,
-            host.loading_percent);
+            host.loading_visual_percent);
       }
    }
    host.loading_task_running = 0;
@@ -2090,6 +2093,14 @@ static void loading_close(void)
 
 static void loading_draw(const char *title, const char *detail, unsigned percent)
 {
+   unsigned old_percent = host.loading_percent;
+
+   if (percent > 100u)
+      percent = 100u;
+   host.loading_percent = percent;
+   if (!host.loading_open || percent < old_percent ||
+       host.loading_visual_percent < percent || percent >= 100u)
+      host.loading_visual_percent = percent;
    unifrog_text_copy(host.loading_title, sizeof(host.loading_title),
       title ? title : "LOADING");
    unifrog_text_copy(host.loading_detail, sizeof(host.loading_detail),

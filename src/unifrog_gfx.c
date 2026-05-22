@@ -265,7 +265,12 @@ static void lvgl_font_draw_text(const struct unifrog_surface *surface,
 
    if (!surface_is_valid(surface) || !text || !lvgl_font)
       return;
-   baseline = y + (lvgl_font->base_line + div - 1) / div;
+   /*
+    * LVGL's base_line is the distance from the baseline to the bottom of the
+    * line box. Convert the caller's top y to a baseline position.
+    */
+   baseline = y + ((int)lvgl_font->line_height -
+      (int)lvgl_font->base_line + div - 1) / div;
    while (*text) {
       unsigned char ch = (unsigned char)*text++;
       lv_font_glyph_dsc_t dsc;

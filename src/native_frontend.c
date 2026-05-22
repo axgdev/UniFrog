@@ -84,6 +84,8 @@ enum frontend_view {
    FRONTEND_VIEW_STORAGE_MODE,
    FRONTEND_VIEW_STORAGE_CONFIRM,
    FRONTEND_VIEW_ROM_SYSTEMS,
+   FRONTEND_VIEW_ROM_ROOTS,
+   FRONTEND_VIEW_ROM_ROOT_PICKER,
    FRONTEND_VIEW_OPEN_WITH,
    FRONTEND_VIEW_OPEN_WITH_OTHER,
    FRONTEND_VIEW_THEME,
@@ -313,6 +315,8 @@ static const struct frontend_core_alias frontend_core_aliases[] = {
    { "gbc", "gambatte" },
    { "gameboy", "gambatte" },
    { "nes", "quicknes" },
+   { "fc", "quicknes" },
+   { "famicom", "quicknes" },
    { "fds", "fceumm" },
    { "snes", "snes9x2005" },
    { "supernintendo", "snes9x2005" },
@@ -4704,6 +4708,71 @@ static void show_rom_systems(struct native_frontend *fe)
    log_selection(fe, "enter");
 }
 
+static void show_rom_roots(struct native_frontend *fe)
+{
+   reset_items(fe, "ROM Roots");
+   fe->view = FRONTEND_VIEW_ROM_ROOTS;
+   for (unsigned i = 0; i < ARRAY_SIZE(frontend_rom_root_choices); i++) {
+      const char *root = frontend_rom_root_choices[i];
+      const char *meta = strcmp(frontend_rom_root(fe), root) == 0 ?
+         "active" : "available";
+
+      add_item(fe, root, meta, FRONTEND_ITEM_ACTION, "rom_root_select",
+         root);
+   }
+   add_item(fe, "Browse for Root", "choose folder", FRONTEND_ITEM_ACTION,
+      "rom_root_browse", NULL);
+   add_item(fe, "Back", "general", FRONTEND_ITEM_ACTION, "back_config", NULL);
+   set_status(fe, "choose ROM root");
+}
+
+static void show_rom_root_picker(struct native_frontend *fe, const char *path)
+{
+   DIR *dir;
+   struct dirent *entry;
+   unsigned seen = 0;
+   int limited = 0;
+
+   if (!path || !path[0])
+      path = FRONTEND_ROOT;
+   reset_items(fe, fe->title_include_root ? path : frontend_rom_title(fe, path));
+   fe->view = FRONTEND_VIEW_ROM_ROOT_PICKER;
+   unifrog_text_copy(fe->current_dir, sizeof(fe->current_dir), path);
+   add_item(fe, "Use This Folder", path, FRONTEND_ITEM_ACTION,
+      "rom_root_use_current", NULL);
+   add_item(fe, "..", "up", FRONTEND_ITEM_DIR, "", NULL);
+   dir = opendir(path);
+   if (!dir) {
+      set_status(fe, "open failed: %s", path);
+      return;
+   }
+   while ((entry = readdir(dir)) != NULL) {
+      char full[FRONTEND_MAX_PATH];
+      struct stat st;
+      int known_dir = entry->d_type == DT_DIR;
+
+      if (!entry->d_name || strcmp(entry->d_name, ".") == 0 ||
+          strcmp(entry->d_name, "..") == 0 ||
+          (!fe->show_hidden && entry->d_name[0] == '.'))
+         continue;
+      seen++;
+      if (fe->item_count >= FRONTEND_MAX_ITEMS) {
+         limited = 1;
+         continue;
+      }
+      if (path_join(full, sizeof(full), path, entry->d_name) != 0)
+         continue;
+      if (!known_dir) {
+         if (stat(full, &st) != 0 || !S_ISDIR(st.st_mode))
+            continue;
+      }
+      add_item(fe, entry->d_name, "folder", FRONTEND_ITEM_DIR, full, NULL);
+   }
+   closedir(dir);
+   set_status(fe, limited ? "%u/%u folders" : "%u folders",
+      fe->item_count > 2u ? fe->item_count - 2u : 0u, seen);
+}
+
 static void show_explore(struct native_frontend *fe, const char *path)
 {
    DIR *dir;
@@ -5023,8 +5092,8 @@ static void show_launch_settings(struct native_frontend *fe)
       backlight = 0;
    snprintf(detail, sizeof(detail), "%u", backlight);
    add_item(fe, "Backlight", detail, FRONTEND_ITEM_ACTION, "backlight", NULL);
-   add_item(fe, "ROM Root", frontend_rom_root(fe), FRONTEND_ITEM_ACTION,
-      "rom_root", NULL);
+   add_item(fe, "ROM Roots", frontend_rom_root(fe), FRONTEND_ITEM_ACTION,
+      "rom_roots", NULL);
    add_item(fe, "ROM Systems", "defaults", FRONTEND_ITEM_ACTION,
       "rom_systems", NULL);
    add_item(fe, "Back", "config", FRONTEND_ITEM_ACTION, "back_config", NULL);
@@ -5775,6 +5844,22 @@ static void browser_back(struct native_frontend *fe)
       return_from_open_with(fe);
       return;
    }
+   if (fe->view == FRONTEND_VIEW_ROM_ROOTS) {
+      show_launch_settings(fe);
+      return;
+   }
+   if (fe->view == FRONTEND_VIEW_ROM_ROOT_PICKER) {
+      char parent_dir[FRONTEND_MAX_PATH];
+
+      unifrog_text_copy(parent_dir, sizeof(parent_dir), fe->current_dir);
+      slash = strrchr(parent_dir, '/');
+      if (slash && slash > parent_dir)
+         *slash = '\0';
+      else
+         unifrog_text_copy(parent_dir, sizeof(parent_dir), FRONTEND_ROOT);
+      show_rom_root_picker(fe, parent_dir);
+      return;
+   }
    if (fe->view == FRONTEND_VIEW_SYSINFO || fe->view == FRONTEND_VIEW_CORES ||
        fe->view == FRONTEND_VIEW_PACKAGE_CHECK) {
       restore_parent_view(fe, FRONTEND_VIEW_INFO);
@@ -6143,6 +6228,7 @@ static void change_config(struct native_frontend *fe, int dir)
    selected = fe->selected;
    item = &fe->items[fe->selected];
    if (strcmp(item->path, "rom_systems") == 0 ||
+       strcmp(item->path, "rom_roots") == 0 ||
        strcmp(item->path, "back_config") == 0)
       return;
    if (strcmp(item->path, "rom_root") == 0) {
@@ -6268,12 +6354,60 @@ static void activate(struct native_frontend *fe)
          show_rom_systems(fe);
          return;
       }
+      if (strcmp(item.path, "rom_roots") == 0) {
+         clear_parent_view(fe);
+         show_rom_roots(fe);
+         return;
+      }
       if (strcmp(item.path, "back_config") == 0) {
          restore_parent_view(fe, FRONTEND_VIEW_CONFIG);
          return;
       }
       change_config(fe, 1);
       return;
+   }
+   if (fe->view == FRONTEND_VIEW_ROM_ROOTS) {
+      if (strcmp(item.path, "rom_root_select") == 0 && item.core[0]) {
+         unifrog_text_copy(fe->rom_root, sizeof(fe->rom_root), item.core);
+         if (strcmp(fe->rom_root, FRONTEND_ROOT) == 0)
+            unifrog_text_copy(fe->rom_root_label,
+               sizeof(fe->rom_root_label), "SD");
+         else
+            unifrog_text_copy(fe->rom_root_label,
+               sizeof(fe->rom_root_label), basename_const(fe->rom_root));
+         save_settings(fe);
+         show_rom_roots(fe);
+         fe->selected = selected;
+         clamp_selection(fe);
+         return;
+      }
+      if (strcmp(item.path, "rom_root_browse") == 0) {
+         show_rom_root_picker(fe, FRONTEND_ROOT);
+         return;
+      }
+      if (strcmp(item.path, "back_config") == 0) {
+         show_launch_settings(fe);
+         return;
+      }
+   }
+   if (fe->view == FRONTEND_VIEW_ROM_ROOT_PICKER) {
+      if (strcmp(item.path, "rom_root_use_current") == 0) {
+         unifrog_text_copy(fe->rom_root, sizeof(fe->rom_root),
+            fe->current_dir);
+         unifrog_text_copy(fe->rom_root_label, sizeof(fe->rom_root_label),
+            strcmp(fe->rom_root, FRONTEND_ROOT) == 0 ? "SD" :
+            basename_const(fe->rom_root));
+         save_settings(fe);
+         show_rom_roots(fe);
+         return;
+      }
+      if (item.kind == FRONTEND_ITEM_DIR) {
+         if (item.path[0])
+            show_rom_root_picker(fe, item.path);
+         else
+            browser_back(fe);
+         return;
+      }
    }
    if (fe->view == FRONTEND_VIEW_OPEN_WITH ||
        fe->view == FRONTEND_VIEW_OPEN_WITH_OTHER) {
