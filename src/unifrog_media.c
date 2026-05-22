@@ -2994,6 +2994,33 @@ static void media_init_drivers_once(void)
    initialized = 1;
 }
 
+static int media_play_direct_audio(const char *path)
+{
+   int ret;
+
+   if (media_is_wav_path(path)) {
+      ret = media_play_wav_pcm(path);
+      if (ret != 0) {
+         printf("unifrog media direct wav fallback auddec path=%s\n", path);
+         ret = media_play_native_audio_compressed(path);
+      }
+      if (ret != 0) {
+         printf("unifrog media direct wav fallback ffmpeg path=%s\n", path);
+         ret = media_play_ffmpeg_audio(path);
+      }
+   } else {
+      ret = media_play_native_audio_compressed(path);
+      if (ret != 0) {
+         printf("unifrog media direct auddec fallback ffmpeg path=%s\n",
+            path);
+         ret = media_play_ffmpeg_audio(path);
+      }
+   }
+   printf("unifrog media direct audio end ret=%d path=%s\n", ret,
+      path ? path : "");
+   return ret;
+}
+
 int unifrog_media_play_video_ex(const char *path,
    const struct unifrog_media_video_options *options)
 {
@@ -3056,6 +3083,9 @@ int unifrog_media_play_video_ex(const char *path,
    int image_file = media_is_image_path(path);
    int force_no_audio = options && options->disable_audio;
    int force_audio = options && options->force_audio;
+   int direct_audio_fallback = 0;
+   int audio_stream_count = -1;
+   int video_stream_count = -1;
    int64_t last_pos = -1;
    size_t old_log_auto_flush;
    int ret = -1;
@@ -3072,15 +3102,40 @@ int unifrog_media_play_video_ex(const char *path,
       path, audio_only, image_file);
    (void)unifrog_log_flush();
    if (audio_only && (!options || !options->force_hcplayer)) {
-      ret = media_play_ffmpeg_audio(path);
-      if (ret != 0 && media_is_wav_path(path)) {
-         printf("unifrog media ffmpeg audio fallback wav path=%s\n", path);
-         ret = media_play_wav_pcm(path);
-      }
-      printf("unifrog media direct audio end ret=%d path=%s\n", ret, path);
+      ret = media_play_direct_audio(path);
       unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
       (void)unifrog_log_flush();
       return ret;
+   }
+   if (!audio_only && !image_file && (!options || !options->force_hcplayer) &&
+       !force_no_audio) {
+      AVFormatContext *fmt = NULL;
+
+      media_ffmpeg_register_once();
+      if (avformat_open_input(&fmt, path, NULL, NULL) == 0 &&
+          avformat_find_stream_info(fmt, NULL) == 0) {
+         int stream = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1,
+            NULL, 0);
+
+         if (stream >= 0 && stream < (int)fmt->nb_streams) {
+            AVCodecParameters *par = fmt->streams[stream]->codecpar;
+
+            if (par && par->height > 480 && par->height <= MEDIA_MAX_VIDEO_H) {
+               printf("unifrog media highres native probe %dx%d path=%s\n",
+                  par->width, par->height, path);
+               ret = media_play_native_video(path, options);
+               if (ret == 0) {
+                  unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
+                  (void)unifrog_log_flush();
+                  return ret;
+               }
+               printf("unifrog media highres native fallback ret=%d path=%s\n",
+                  ret, path);
+            }
+         }
+      }
+      if (fmt)
+         avformat_close_input(&fmt);
    }
    media_init_drivers_once();
 
@@ -3154,12 +3209,20 @@ int unifrog_media_play_video_ex(const char *path,
    }
    printf("unifrog media audio config snd_devs=0x%lx audsink=%d\n",
       (unsigned long)init_args.snd_devs, init_args.enable_audsink ? 1 : 0);
-   if (!force_no_audio)
-      printf("unifrog media audio streams count=%d\n",
-         hcplayer_get_audio_streams_count(player));
-   if (!audio_only)
-      printf("unifrog media video streams count=%d\n",
-         hcplayer_get_video_streams_count(player));
+   if (!force_no_audio) {
+      audio_stream_count = hcplayer_get_audio_streams_count(player);
+      printf("unifrog media audio streams count=%d\n", audio_stream_count);
+   }
+   if (!audio_only) {
+      video_stream_count = hcplayer_get_video_streams_count(player);
+      printf("unifrog media video streams count=%d\n", video_stream_count);
+   }
+   if (audio_only && !force_no_audio && audio_stream_count <= 0) {
+      printf("unifrog media hcplayer audio unavailable fallback direct count=%d force_audio=%d path=%s\n",
+         audio_stream_count, force_audio, path);
+      direct_audio_fallback = 1;
+      goto out;
+   }
 
    if (!force_no_audio &&
        hcplayer_get_nth_audio_stream_info(player, 0, &audio_info) == 0) {
@@ -3306,6 +3369,8 @@ out:
    }
    unifrog_audio_set_system_output_enabled(0);
    close_display();
+   if (direct_audio_fallback)
+      ret = media_play_direct_audio(path);
    printf("unifrog media end ret=%d path=%s\n", ret, path ? path : "");
    unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
    (void)unifrog_log_flush();

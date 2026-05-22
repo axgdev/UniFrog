@@ -852,16 +852,6 @@ static int media_path_has_native_wav(const char *path)
    return path && unifrog_text_ends_with_ci(path, ".wav");
 }
 
-static int media_path_is_audio(const char *path)
-{
-   static const char *const suffixes[] = {
-      ".mp3", ".wav", ".flac", ".ogg", ".opus", ".aac", ".m4a", ".wma",
-      ".ra",
-   };
-
-   return path && ends_with_any(path, suffixes, ARRAY_SIZE(suffixes));
-}
-
 static int media_path_has_open_with_choices(const char *path)
 {
    if (!path || !is_media_file(path))
@@ -5913,8 +5903,7 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
    if (strcmp(item->core, "native") == 0) {
       options.force_native = 1;
    } else if (strcmp(item->core, "hcplayer") == 0) {
-      if (!media_path_is_audio(item->path))
-         options.force_hcplayer = 1;
+      options.force_hcplayer = 0;
    } else if (strcmp(item->core, "hcplayer-audio") == 0) {
       options.force_hcplayer = 1;
       options.force_audio = 1;

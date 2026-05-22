@@ -78,7 +78,7 @@ static uint16_t contrast_text(uint16_t fg, uint16_t bg, uint8_t bg_alpha)
    fl = rgb565_luma(fg);
    bl = rgb565_luma(bg);
    diff = fl > bl ? fl - bl : bl - fl;
-   if (diff >= 72u)
+   if (diff >= 92u)
       return fg;
    return bl < 128u ? UNIFROG_RGB565(248, 248, 240) :
       UNIFROG_RGB565(12, 14, 18);
@@ -486,10 +486,10 @@ static void draw_row(struct unifrog_ui *ui,
       unsigned diff = bg_luma > screen_luma ? bg_luma - screen_luma :
          screen_luma - bg_luma;
 
-      if (draw_bg_alpha < 48u || (draw_bg_alpha < 160u && diff < 24u)) {
+      if (draw_bg_alpha < 48u || diff < 24u) {
          draw_bg = style->list_focus_indicator_alpha ?
             style->list_focus_indicator : style->list_focus_text;
-         draw_bg_alpha = 92u;
+         draw_bg_alpha = 112u;
       }
    }
    contrast_bg = draw_bg;
@@ -560,6 +560,12 @@ static int launcher_uses_list(const struct unifrog_frontend_lvgl_style *style)
 {
    if (!style)
       return 0;
+   if (style->theme_chrome) {
+      for (unsigned i = 0; i < FRONTEND_LVGL_LAUNCH_COUNT; i++) {
+         if (style->launch_wallpaper[i][0] || style->launch_icon[i][0])
+            return 0;
+      }
+   }
    if (!style->grid_enabled)
       return 1;
    return 0;
@@ -601,7 +607,7 @@ static void draw_launcher_grid(struct unifrog_ui *ui,
       if (style->launch_wallpaper[i][0])
          draw_image_path(&surface, style->launch_wallpaper[i], x, y,
             tile_w, tile_h);
-      else
+      else if (!style->theme_chrome || !style->launch_wallpaper[selected][0])
          fill_rect_alpha(&surface, x, y, tile_w, tile_h, bg, bg_alpha);
       if (style->launch_icon[i][0])
          draw_image_path(&surface, style->launch_icon[i],
