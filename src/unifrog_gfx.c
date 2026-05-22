@@ -310,7 +310,15 @@ static void lvgl_font_draw_text(const struct unifrog_surface *surface,
                if (alpha) {
                   uint16_t *dst = &surface->pixels[(unsigned)dy *
                      surface->stride + (unsigned)dx];
-                  *dst = blend_rgb565(*dst, color, alpha);
+                  unsigned draw_alpha = alpha + ((255u - alpha) / 2u);
+
+                  *dst = blend_rgb565(*dst, color, draw_alpha);
+                  if (div > 1 && draw_alpha > 192u &&
+                      dx + 1 < (int)surface->width) {
+                     uint16_t *next = dst + 1;
+
+                     *next = blend_rgb565(*next, color, draw_alpha / 4u);
+                  }
                }
             }
          }

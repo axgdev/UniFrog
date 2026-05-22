@@ -487,9 +487,16 @@ static void draw_row(struct unifrog_ui *ui,
          screen_luma - bg_luma;
 
       if (draw_bg_alpha < 48u || diff < 24u) {
-         draw_bg = style->list_focus_indicator_alpha ?
+         uint16_t fallback = style->list_focus_indicator_alpha ?
             style->list_focus_indicator : style->list_focus_text;
-         draw_bg_alpha = 112u;
+         unsigned fallback_luma = rgb565_luma(fallback);
+         unsigned fallback_diff = fallback_luma > screen_luma ?
+            fallback_luma - screen_luma : screen_luma - fallback_luma;
+
+         draw_bg = fallback_diff >= 48u ? fallback :
+            (screen_luma < 128u ? UNIFROG_RGB565(104, 104, 100) :
+             UNIFROG_RGB565(28, 30, 32));
+         draw_bg_alpha = 144u;
       }
    }
    contrast_bg = draw_bg;
@@ -560,12 +567,6 @@ static int launcher_uses_list(const struct unifrog_frontend_lvgl_style *style)
 {
    if (!style)
       return 0;
-   if (style->theme_chrome) {
-      for (unsigned i = 0; i < FRONTEND_LVGL_LAUNCH_COUNT; i++) {
-         if (style->launch_wallpaper[i][0] || style->launch_icon[i][0])
-            return 0;
-      }
-   }
    if (!style->grid_enabled)
       return 1;
    return 0;
@@ -742,11 +743,14 @@ int unifrog_frontend_lvgl_draw_launcher(struct unifrog_ui *ui,
    const char *labels[FRONTEND_LVGL_LAUNCH_COUNT];
    const char *values[FRONTEND_LVGL_LAUNCH_COUNT];
    const char *glyphs[FRONTEND_LVGL_LAUNCH_COUNT];
+   int fullscreen_launch_wallpaper;
 
    if (!ui)
       return -1;
    if (selected >= FRONTEND_LVGL_LAUNCH_COUNT)
       selected = 0;
+   fullscreen_launch_wallpaper = style->theme_chrome &&
+      style->launch_wallpaper[selected][0];
    for (unsigned i = 0; i < FRONTEND_LVGL_LAUNCH_COUNT; i++) {
       labels[i] = launch_labels[i];
       values[i] = "";
@@ -761,11 +765,13 @@ int unifrog_frontend_lvgl_draw_launcher(struct unifrog_ui *ui,
    }
    draw_shell(ui, style, "UniFrog", detail,
       status ? status : "A open  L/R page");
-   if (launcher_uses_list(style))
-      draw_list_window(ui, style, selected, labels, values, glyphs,
-         FRONTEND_LVGL_LAUNCH_COUNT);
-   else
-      draw_launcher_grid(ui, style, selected);
+   if (!fullscreen_launch_wallpaper) {
+      if (launcher_uses_list(style))
+         draw_list_window(ui, style, selected, labels, values, glyphs,
+            FRONTEND_LVGL_LAUNCH_COUNT);
+      else
+         draw_launcher_grid(ui, style, selected);
+   }
    frontend_lvgl.frame_seq++;
    {
       struct unifrog_surface surface = unifrog_ui_surface(ui);

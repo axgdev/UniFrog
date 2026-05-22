@@ -2996,7 +2996,7 @@ static void media_init_drivers_once(void)
 
 static int media_play_direct_audio(const char *path)
 {
-   int ret;
+   int ret = -1;
 
    if (media_is_wav_path(path)) {
       ret = media_play_wav_pcm(path);
@@ -3004,17 +3004,41 @@ static int media_play_direct_audio(const char *path)
          printf("unifrog media direct wav fallback auddec path=%s\n", path);
          ret = media_play_native_audio_compressed(path);
       }
+   } else if (media_is_mp3_path(path)) {
+      ret = media_play_mp3_auddec(path);
       if (ret != 0) {
-         printf("unifrog media direct wav fallback ffmpeg path=%s\n", path);
-         ret = media_play_ffmpeg_audio(path);
+         printf("unifrog media direct mp3 fallback container path=%s\n",
+            path);
+         ret = media_play_native_audio_compressed(path);
+      }
+   } else if (media_is_aac_path(path)) {
+      ret = media_play_aac_adts_auddec(path);
+      if (ret != 0) {
+         printf("unifrog media direct aac fallback container path=%s\n",
+            path);
+         ret = media_play_native_audio_compressed(path);
+      }
+   } else if (media_is_flac_path(path)) {
+      ret = media_play_flac_auddec(path);
+      if (ret != 0) {
+         printf("unifrog media direct flac fallback container path=%s\n",
+            path);
+         ret = media_play_native_audio_compressed(path);
+      }
+   } else if (media_is_ogg_path(path)) {
+      ret = media_play_ogg_auddec(path);
+      if (ret != 0) {
+         printf("unifrog media direct ogg fallback container path=%s\n",
+            path);
+         ret = media_play_native_audio_compressed(path);
       }
    } else {
       ret = media_play_native_audio_compressed(path);
-      if (ret != 0) {
-         printf("unifrog media direct auddec fallback ffmpeg path=%s\n",
-            path);
-         ret = media_play_ffmpeg_audio(path);
-      }
+   }
+   if (ret != 0) {
+      printf("unifrog media direct fallback ffmpeg path=%s ret=%d\n",
+         path ? path : "", ret);
+      ret = media_play_ffmpeg_audio(path);
    }
    printf("unifrog media direct audio end ret=%d path=%s\n", ret,
       path ? path : "");

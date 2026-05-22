@@ -304,6 +304,11 @@ static const char *const media_suffixes[] = {
    ".gif", ".bmp", ".webp",
 };
 
+static const char *const media_audio_suffixes[] = {
+   ".mp3", ".wav", ".flac", ".ogg", ".opus", ".aac", ".m4a", ".wma",
+   ".ra",
+};
+
 static int frontend_sort_desc;
 
 static int is_back_item(const struct frontend_item *item)
@@ -845,6 +850,12 @@ static const struct frontend_catalog *catalog_for_path(const char *path)
 static int is_media_file(const char *path)
 {
    return ends_with_any(path, media_suffixes, ARRAY_SIZE(media_suffixes));
+}
+
+static int media_path_is_audio(const char *path)
+{
+   return ends_with_any(path, media_audio_suffixes,
+      ARRAY_SIZE(media_audio_suffixes));
 }
 
 static int media_path_has_native_wav(const char *path)
@@ -5896,8 +5907,13 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
       return;
    }
    unifrog_log("frontend launch media path=%s\n", item->path);
-   if (fe->launch_splash)
-      frontend_loading_show(fe, "Media", item->name, "playing", 8);
+   if (fe->launch_splash) {
+      if (media_path_is_audio(item->path))
+         frontend_loading_show(fe, "Now Playing", item->name,
+            "B stop  Left/Right seek", 100);
+      else
+         frontend_loading_show(fe, "Media", item->name, "loading", 20);
+   }
    memset(&options, 0, sizeof(options));
    options.preset = -1;
    if (strcmp(item->core, "native") == 0) {
