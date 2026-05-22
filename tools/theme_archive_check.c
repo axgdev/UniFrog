@@ -83,8 +83,9 @@ static int needed_entry(const char *name)
       return 0;
    if (strcmp(rel, "version.txt") == 0 || strcmp(rel, "credits.txt") == 0)
       return 1;
-   if (strncmp(rel, "scheme/", 7) == 0 || strncmp(rel, "font/", 5) == 0 ||
-       strncmp(rel, "glyph/", 6) == 0)
+   if (strncmp(rel, "scheme/", 7) == 0)
+      return rel == name || preferred_resolution(name);
+   if (strncmp(rel, "font/", 5) == 0 || strncmp(rel, "glyph/", 6) == 0)
       return 1;
    if (strcmp(rel, "image/wall/default.png") == 0 ||
        strcmp(rel, "image/wall/muxlaunch.png") == 0)

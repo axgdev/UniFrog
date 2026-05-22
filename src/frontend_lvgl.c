@@ -73,6 +73,8 @@ static uint16_t contrast_text(uint16_t fg, uint16_t bg, uint8_t bg_alpha)
    unsigned bl;
    unsigned diff;
 
+   if (bg_alpha < 64u)
+      return fg;
    fl = rgb565_luma(fg);
    bl = rgb565_luma(bg);
    diff = fl > bl ? fl - bl : bl - fl;
@@ -450,6 +452,18 @@ static void draw_row(struct unifrog_ui *ui,
    int label_x = style->label_x > 0 ? style->label_x : 28;
    int value_w = style->value_w > 0 ? style->value_w : 90;
 
+   if (x < 0)
+      x = 0;
+   if (w > FRONTEND_LVGL_W - x)
+      w = FRONTEND_LVGL_W - x;
+   if (w <= 0)
+      return;
+   if (h > FRONTEND_LVGL_H)
+      h = FRONTEND_LVGL_H;
+   if (label_x >= w)
+      label_x = glyph && glyph[0] ? glyph_w + glyph_x + 4 : 4;
+   if (value_w > w / 2)
+      value_w = w / 2;
    fill_rect_alpha(&surface, x, y, w, h, bg, bg_alpha);
    if (glyph && glyph[0] &&
        (focused ? style->list_focus_glyph_alpha : style->list_glyph_alpha))
@@ -665,6 +679,8 @@ void unifrog_frontend_lvgl_preload_style_images(
       return;
    (void)load_cached_image(style->wallpaper);
    (void)load_cached_image(style->static_image);
+   for (unsigned i = 0; i < FRONTEND_LVGL_LAUNCH_COUNT; i++)
+      (void)load_cached_image(style->launch_wallpaper[i]);
    for (unsigned i = 0; i < FRONTEND_LVGL_LAUNCH_COUNT; i++)
       (void)load_cached_image(style->launch_icon[i]);
 }

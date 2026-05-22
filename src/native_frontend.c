@@ -1136,20 +1136,23 @@ static int theme_archive_entry_needed(const struct frontend_zip_entry *entries,
    unsigned count, const char *name)
 {
    const char *rel;
+   int rank;
 
    if (!name || !name[0])
       return 0;
    if (zip_entry_name_is_dir(name))
       return 0;
    rel = theme_archive_rel(name);
+   rank = theme_archive_resolution_rank(name);
    if (theme_archive_has_lower_duplicate(entries, count, name))
       return 0;
    if (strcmp(rel, "version.txt") == 0 ||
        strcmp(rel, "credits.txt") == 0 ||
        strcmp(rel, "preview.png") == 0)
       return 1;
-   if (strncmp(rel, "scheme/", 7) == 0 || strncmp(rel, "font/", 5) == 0 ||
-       strncmp(rel, "glyph/", 6) == 0)
+   if (strncmp(rel, "scheme/", 7) == 0)
+      return rank == 0 || rank == 1 || rank == 2;
+   if (strncmp(rel, "font/", 5) == 0 || strncmp(rel, "glyph/", 6) == 0)
       return 1;
    if (strncmp(rel, "image/", 6) == 0 &&
        unifrog_text_ends_with_ci(rel, ".png"))
@@ -1168,7 +1171,7 @@ static int theme_archive_stamp(char *stamp, size_t stamp_size,
    if (!stamp || stamp_size == 0 || !archive_path ||
        stat(archive_path, &st) != 0)
       return -1;
-   wrote = snprintf(stamp, stamp_size, "extractor=4\nsize=%lu\nmtime=%lu\n",
+   wrote = snprintf(stamp, stamp_size, "extractor=5\nsize=%lu\nmtime=%lu\n",
       (unsigned long)st.st_size, (unsigned long)st.st_mtime);
    return wrote > 0 && (size_t)wrote < stamp_size ? 0 : -1;
 }
@@ -2882,11 +2885,6 @@ static void fill_visible_item_glyphs(struct native_frontend *fe,
 static const char *const frontend_scheme_prefixes[] = {
    "320x240/scheme",
    "640x480/scheme",
-   "720x480/scheme",
-   "720x576/scheme",
-   "720x720/scheme",
-   "1024x768/scheme",
-   "1280x720/scheme",
    "scheme",
 };
 
@@ -6044,6 +6042,7 @@ static void activate(struct native_frontend *fe)
    if (item.kind == FRONTEND_ITEM_THEME_ARCHIVE) {
       char installed[96];
       struct frontend_install_progress progress;
+      size_t old_auto_flush;
       int ret;
 
       memset(&progress, 0, sizeof(progress));
@@ -6055,10 +6054,17 @@ static void activate(struct native_frontend *fe)
          item.path, item.name);
       unifrog_frontend_lvgl_clear_resource_cache();
       fe->resource_cache_key[0] = '\0';
+      old_auto_flush = unifrog_log_auto_flush_bytes();
+      unifrog_log_set_auto_flush_bytes(0);
+      unifrog_log_defer_begin();
       ret = install_theme_archive(item.path, installed, sizeof(installed),
          frontend_install_progress_update, &progress);
+      unifrog_log_defer_end();
+      unifrog_log_set_auto_flush_bytes(old_auto_flush);
+      unifrog_log_note_storage_quiet(500u);
       unifrog_log("frontend theme archive activate done path=%s ret=%d installed=%s\n",
          item.path, ret, ret == 0 ? installed : "");
+      (void)unifrog_log_flush();
       if (ret == 0) {
          unifrog_text_copy(fe->theme_name, sizeof(fe->theme_name), installed);
          fe->resource_cache_key[0] = '\0';
