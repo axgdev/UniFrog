@@ -6053,6 +6053,8 @@ static void activate(struct native_frontend *fe)
       frontend_install_progress_update(&progress, "installing", 0, 100);
       unifrog_log("frontend theme archive activate path=%s name=%s\n",
          item.path, item.name);
+      unifrog_frontend_lvgl_clear_resource_cache();
+      fe->resource_cache_key[0] = '\0';
       ret = install_theme_archive(item.path, installed, sizeof(installed),
          frontend_install_progress_update, &progress);
       unifrog_log("frontend theme archive activate done path=%s ret=%d installed=%s\n",

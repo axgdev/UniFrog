@@ -73,8 +73,6 @@ static uint16_t contrast_text(uint16_t fg, uint16_t bg, uint8_t bg_alpha)
    unsigned bl;
    unsigned diff;
 
-   if (bg_alpha < 64u)
-      return fg;
    fl = rgb565_luma(fg);
    bl = rgb565_luma(bg);
    diff = fl > bl ? fl - bl : bl - fl;
@@ -667,10 +665,8 @@ void unifrog_frontend_lvgl_preload_style_images(
       return;
    (void)load_cached_image(style->wallpaper);
    (void)load_cached_image(style->static_image);
-   for (unsigned i = 0; i < FRONTEND_LVGL_LAUNCH_COUNT; i++) {
-      (void)load_cached_image(style->launch_wallpaper[i]);
+   for (unsigned i = 0; i < FRONTEND_LVGL_LAUNCH_COUNT; i++)
       (void)load_cached_image(style->launch_icon[i]);
-   }
 }
 
 void unifrog_frontend_lvgl_request_screenshot(void)
