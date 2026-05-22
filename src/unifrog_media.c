@@ -31,6 +31,7 @@
 
 #include <unifrog/abi.h>
 #include <unifrog/audio.h>
+#include <unifrog/diag.h>
 #include <unifrog/hcrtos_media_compat.h>
 #include <unifrog/input.h>
 #include <unifrog/log.h>
@@ -208,6 +209,7 @@ static int dis_fd = -1;
 static int fb_fd = -1;
 static unsigned media_video_debug_packets;
 static int media_caps_logged;
+static unsigned media_sd_read_depth;
 
 extern unsigned long _padec_start;
 extern unsigned long _padec_end;
@@ -225,6 +227,40 @@ static int media_auddec_send_packet(struct media_auddec *auddec,
 static void media_auddec_finish(struct media_auddec *auddec,
    unsigned timeout_ms);
 static void media_auddec_close(struct media_auddec *auddec);
+
+static void media_sd_read_begin(const char *tag, const char *path)
+{
+   if (media_sd_read_depth++ == 0) {
+      printf("unifrog media sd_read begin tag=%s path=%s pending=%lu\n",
+         tag ? tag : "", path ? path : "",
+         (unsigned long)unifrog_log_pending());
+      unifrog_diag_memory_snapshot(tag ? tag : "media.sd_read_begin");
+      (void)unifrog_log_flush();
+      unifrog_log_set_disk_suspended(1);
+      printf("unifrog media sd_read disk_suspended=1 tag=%s path=%s\n",
+         tag ? tag : "", path ? path : "");
+   } else {
+      printf("unifrog media sd_read nested depth=%u tag=%s path=%s\n",
+         media_sd_read_depth, tag ? tag : "", path ? path : "");
+   }
+}
+
+static void media_sd_read_end(const char *tag, const char *path)
+{
+   if (media_sd_read_depth == 0)
+      return;
+   media_sd_read_depth--;
+   if (media_sd_read_depth == 0) {
+      printf("unifrog media sd_read end tag=%s path=%s pending=%lu\n",
+         tag ? tag : "", path ? path : "",
+         (unsigned long)unifrog_log_pending());
+      unifrog_diag_memory_snapshot(tag ? tag : "media.sd_read_end");
+      unifrog_log_set_disk_suspended(0);
+   } else {
+      printf("unifrog media sd_read nested_end depth=%u tag=%s path=%s\n",
+         media_sd_read_depth, tag ? tag : "", path ? path : "");
+   }
+}
 
 static void media_log_file_probe(const char *path, const char *tag)
 {
@@ -613,16 +649,27 @@ static int media_ffmpeg_open_audio(const char *path, AVFormatContext **fmt_out,
    AVCodec *decoder = NULL;
    int stream;
    int ret;
+   int sd_read_active = 0;
 
    media_ffmpeg_register_once();
+   media_sd_read_begin("ffmpeg_audio_open", path);
+   sd_read_active = 1;
+   printf("unifrog media ffmpeg open_input begin path=%s\n",
+      path ? path : "");
    ret = avformat_open_input(&fmt, path, NULL, NULL);
+   printf("unifrog media ffmpeg open_input done ret=%d fmt=0x%08lx path=%s\n",
+      ret, (unsigned long)(uintptr_t)fmt, path ? path : "");
    if (ret < 0) {
       printf("unifrog media ffmpeg open_input failed ret=%d path=%s\n",
          ret, path);
       media_log_file_probe(path, "ffmpeg_open_failed");
-      return -1;
+      goto fail;
    }
+   printf("unifrog media ffmpeg stream_info begin path=%s\n",
+      path ? path : "");
    ret = avformat_find_stream_info(fmt, NULL);
+   printf("unifrog media ffmpeg stream_info done ret=%d streams=%u path=%s\n",
+      ret, fmt ? fmt->nb_streams : 0, path ? path : "");
    if (ret < 0) {
       printf("unifrog media ffmpeg stream_info failed ret=%d path=%s\n",
          ret, path);
@@ -678,6 +725,7 @@ static int media_ffmpeg_open_audio(const char *path, AVFormatContext **fmt_out,
    *stream_out = stream;
    if (decoder_out)
       *decoder_out = decoder;
+   sd_read_active = 0;
    return 0;
 
 fail:
@@ -685,6 +733,8 @@ fail:
       avcodec_free_context(&codec_ctx);
    if (fmt)
       avformat_close_input(&fmt);
+   if (sd_read_active)
+      media_sd_read_end("ffmpeg_audio_open_fail", path);
    return -1;
 }
 
@@ -866,6 +916,7 @@ out:
       avcodec_free_context(&codec_ctx);
    if (fmt)
       avformat_close_input(&fmt);
+   media_sd_read_end("ffmpeg_audio_close", path);
    return ret;
 }
 
@@ -879,12 +930,23 @@ static int media_play_native_audio_compressed(const char *path)
    unsigned finish_timeout_ms = 600000u;
    uint32_t loop_polls = 0;
    uint32_t start_ms = unifrog_perf_time_ms();
+   int sd_read_active = 0;
 
    memset(&auddec, 0, sizeof(auddec));
    auddec.fd = -1;
    media_ffmpeg_register_once();
+   media_sd_read_begin("auddec_open", path);
+   sd_read_active = 1;
+   printf("unifrog media auddec open_input begin path=%s\n",
+      path ? path : "");
    int open_ret = avformat_open_input(&fmt, path, NULL, NULL);
+   printf("unifrog media auddec open_input done ret=%d fmt=0x%08lx path=%s\n",
+      open_ret, (unsigned long)(uintptr_t)fmt, path ? path : "");
+   printf("unifrog media auddec stream_info begin path=%s\n",
+      path ? path : "");
    int info_ret = open_ret == 0 ? avformat_find_stream_info(fmt, NULL) : 0;
+   printf("unifrog media auddec stream_info done ret=%d streams=%u path=%s\n",
+      info_ret, fmt ? fmt->nb_streams : 0, path ? path : "");
 
    if (open_ret < 0 || info_ret < 0) {
       printf("unifrog media auddec open_input failed open=%d info=%d path=%s\n",
@@ -953,6 +1015,8 @@ out:
       av_packet_free(&packet);
    if (fmt)
       avformat_close_input(&fmt);
+   if (sd_read_active)
+      media_sd_read_end("auddec_close", path);
    return ret;
 }
 
@@ -1932,14 +1996,25 @@ static int media_play_native_video(const char *path,
    unsigned long frames_decoded = 0;
    unsigned long frames_displayed = 0;
    int disable_audio = options && options->disable_audio;
+   int sd_read_active = 0;
 
    memset(&audio, 0, sizeof(audio));
    audio.fd = -1;
    memset(&auddec, 0, sizeof(auddec));
    auddec.fd = -1;
    media_ffmpeg_register_once();
+   media_sd_read_begin("native_video_open", path);
+   sd_read_active = 1;
+   printf("unifrog media native open_input begin path=%s\n",
+      path ? path : "");
    int open_ret = avformat_open_input(&fmt, path, NULL, NULL);
+   printf("unifrog media native open_input done ret=%d fmt=0x%08lx path=%s\n",
+      open_ret, (unsigned long)(uintptr_t)fmt, path ? path : "");
+   printf("unifrog media native stream_info begin path=%s\n",
+      path ? path : "");
    int info_ret = open_ret == 0 ? avformat_find_stream_info(fmt, NULL) : 0;
+   printf("unifrog media native stream_info done ret=%d streams=%u path=%s\n",
+      info_ret, fmt ? fmt->nb_streams : 0, path ? path : "");
 
    if (open_ret < 0 || info_ret < 0) {
       printf("unifrog media native open failed open=%d info=%d path=%s\n",
@@ -2128,6 +2203,8 @@ out:
       avcodec_free_context(&audio_ctx);
    if (fmt)
       avformat_close_input(&fmt);
+   if (sd_read_active)
+      media_sd_read_end("native_video_close", path);
    return ret;
 }
 
