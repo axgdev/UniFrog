@@ -4014,6 +4014,21 @@ static void reset_items(struct native_frontend *fe, const char *title)
    fe->needs_draw = 1;
 }
 
+static int item_path_already_listed(const struct native_frontend *fe,
+   enum frontend_item_kind kind, const char *path)
+{
+   if (!fe || !path || !path[0])
+      return 0;
+   for (unsigned i = 0; i < fe->item_count; i++) {
+      const struct frontend_item *item = &fe->items[i];
+
+      if (item->kind == kind && item->path[0] &&
+          strcmp(item->path, path) == 0)
+         return 1;
+   }
+   return 0;
+}
+
 static struct frontend_item *add_item(struct native_frontend *fe, const char *name,
    const char *meta, enum frontend_item_kind kind, const char *path,
    const char *core)
@@ -4022,6 +4037,12 @@ static struct frontend_item *add_item(struct native_frontend *fe, const char *na
 
    if (fe->item_count >= FRONTEND_MAX_ITEMS)
       return NULL;
+   if (kind == FRONTEND_ITEM_DIR || kind == FRONTEND_ITEM_GAME ||
+       kind == FRONTEND_ITEM_MEDIA || kind == FRONTEND_ITEM_SCRIPT ||
+       kind == FRONTEND_ITEM_FIRMWARE) {
+      if (item_path_already_listed(fe, kind, path))
+         return NULL;
+   }
    item = &fe->items[fe->item_count++];
    memset(item, 0, sizeof(*item));
    unifrog_text_copy(item->name, sizeof(item->name),

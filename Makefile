@@ -6,7 +6,10 @@ TOOLCHAIN_URL ?= https://github.com/axgdev/frog-toolchain/releases/download/v1.1
 CROSS_COMPILE ?= $(TOOLCHAIN)/bin/mipsel-mti-elf-
 DEPS ?= .deps
 SDK ?= unifrog-hcrtos-sdk
+HCRTOS_FFMPEG_SOURCE ?= /root/host-frogdev/universal/sf2000_hcrtos/components/ffmpeg/source
+HCRTOS_FFMPEG_INSTALL ?= $(CORE_SUPPORT_ROOT)/hcrtos-ffmpeg
 HCRTOS_FFMPEG_INCLUDE ?= $(firstword \
+	$(patsubst %/libavformat/avformat.h,%,$(wildcard $(HCRTOS_FFMPEG_INSTALL)/include/libavformat/avformat.h)) \
 	$(patsubst %/libavformat/avformat.h,%,$(wildcard $(SDK)/include/newlib/libavformat/avformat.h)) \
 	$(patsubst %/libavformat/avformat.h,%,$(wildcard /root/host-frogdev/universal/sf2000_hcrtos/output/staging/usr/include/libavformat/avformat.h)) \
 	$(patsubst %/libavformat/avformat.h,%,$(wildcard /root/host-frogdev/universal/sf2000_hcrtos/components/ffmpeg/source/libavformat/avformat.h)))
@@ -21,6 +24,38 @@ MQUICKJS_REF ?= ee50431eac9b14b99f722b537ec4cac0c8dd75ab
 LVGL_DIR ?= $(DEPS)/support/lvgl
 LVGL_URL ?= https://github.com/lvgl/lvgl.git
 LVGL_REF ?= 0019fc541f759b3323add63034502b0248afc58f
+HCRTOS_FFMPEG_DEMUXERS ?= \
+	gsm mp3 aac ac3 avi asf amr ape amrnb amrwb dts dvbsub dvbtxt eac3 \
+	flac flv h261 h263 h264 hls mjpeg m4v mov mpegps mpegts mpegtsraw \
+	mjpeg_2000 mpegvideo mpjpeg matroska ogg pcm_alaw pcm_f32be pcm_f32le \
+	pcm_f64be pcm_f64le pcm_mulaw pcm_s16be pcm_s16le pcm_s24be pcm_s24le \
+	pcm_s32be pcm_s32le pcm_s8 pcm_u16be pcm_u16le pcm_u24be pcm_u24le \
+	pcm_u32be pcm_u32le pcm_u8 rm spdif wav image2 image2pipe \
+	image_bmp_pipe image_gif_pipe image_jpeg_pipe image_jpegls_pipe \
+	image_png_pipe srt ass microdvd mpl2 sami webvtt vobsub ico lrc
+HCRTOS_FFMPEG_PARSERS ?= \
+	gsm aac aac_latm ac3 flac gif h261 h263 h264 jpeg2000 mjpeg \
+	mpeg4video mpegaudio mpegvideo opus vc1 vorbis dvbsub dvdsub cook \
+	webp vp8 rv30 rv40
+HCRTOS_FFMPEG_DECODERS ?= \
+	aac aac_fixed aac_latm aac_latm_fixed alac ape flac mp1 mp2 mp3 \
+	mp3float opus vorbis wavpack gsm gsm_ms bmp gif png mjpeg tiff ico \
+	webp targa pcm_alaw pcm_bluray pcm_dvd pcm_f32be pcm_f32le pcm_f64be \
+	pcm_f64le pcm_mulaw pcm_s16be pcm_s16be_planar pcm_s16le \
+	pcm_s16le_planar pcm_s24be pcm_s24le pcm_s32be pcm_s32le pcm_s8 \
+	pcm_u16be pcm_u16le pcm_u24be pcm_u24le pcm_u32be pcm_u32le pcm_u8 \
+	h261 h263 h264 mpeg2video mpeg4 vp8 rv30 rv40 vc1 wmalossless wmapro \
+	pgssub srt dvbsub dvdsub ass movtext ssa microdvd sami mpl2 webvtt \
+	vplayer stl pjs subviewer1 text subrip adpcm_4xm adpcm_afc adpcm_agm \
+	adpcm_aica adpcm_argo adpcm_ct adpcm_dtk adpcm_ea adpcm_ea_maxis_xa \
+	adpcm_ea_r1 adpcm_ea_r2 adpcm_ea_r3 adpcm_ea_xas adpcm_ima_amv \
+	adpcm_ima_apc adpcm_ima_apm adpcm_ima_cunning adpcm_ima_dat4 \
+	adpcm_ima_dk3 adpcm_ima_dk4 adpcm_ima_ea_eacs adpcm_ima_ea_sead \
+	adpcm_ima_iss adpcm_ima_moflex adpcm_ima_mtf adpcm_ima_oki \
+	adpcm_ima_qt adpcm_ima_rad adpcm_ima_smjpeg adpcm_ima_wav \
+	adpcm_ima_ws adpcm_ms adpcm_mtaf adpcm_psx adpcm_sbpro_2 \
+	adpcm_sbpro_3 adpcm_sbpro_4 adpcm_swf adpcm_thp_le adpcm_thp \
+	adpcm_xa adpcm_yamaha adpcm_zork
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 SD_MODE ?= wide20
@@ -388,6 +423,7 @@ CFLAGS_AUDIO_NO_IDENTITY = $(CFLAGS_NOOPT_NO_IDENTITY) $(OPT_AUDIO)
 CFLAGS_VIDEO_NO_IDENTITY = $(CFLAGS_FAST_NO_IDENTITY)
 
 LIBDIRS := \
+	-L$(HCRTOS_FFMPEG_INSTALL)/lib \
 	-L$(SDK)/lib/core \
 	-L$(SDK)/lib/vendor \
 	-L$(SDK)/lib/plugins/audio \
@@ -422,6 +458,7 @@ HCRTOS_MEDIA_LDLIBS := \
 	-lavformat \
 	-lavcodec \
 	-lavutil \
+	-lswresample \
 	-lswscale \
 	-lntfs
 
@@ -782,6 +819,7 @@ DTS_MODE_STAMP := $(BUILD)/sd-mode.stamp
 CORE_REV_STAMP := $(BUILD)/core-config.stamp
 SDK_BUILD_STAMP := $(BUILD)/sdk-build.stamp
 SDK_KERNEL_LIB := $(SDK)/lib/core/libkernel.a
+HCRTOS_FFMPEG_STAMP := $(HCRTOS_FFMPEG_INSTALL)/.unifrog-ffmpeg.stamp
 JS2300_CONFIG_STAMP := $(BUILD)/js2300-config.stamp
 FRONTEND_CONFIG_STAMP := $(BUILD)/frontend-config.stamp
 FRONTEND_PACKAGE_STAMP := $(FRONTEND_PACKAGE)/.package.$(FRONTEND_CONFIG_TOKEN).stamp
@@ -811,7 +849,7 @@ $(FASTBOOT_OBJECTS): $(FASTBOOT_CONFIG_STAMP)
 $(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 
 .DELETE_ON_ERROR:
-COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild list-cores core core-archive core-out
+COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild list-cores core core-archive core-out ffmpeg
 SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores deps-lvgl
 PACKAGE_TARGETS := frontend-package core-package module-package sdcard-package sd-zip install refresh-sd refresh-sd-clean
 VERIFY_TARGETS := asdcheck fastboot-check fastboot-only-check layout-check boot-logo-check js2300-check frontend-check native-frontend-check core-smoke-check
@@ -835,6 +873,7 @@ help:
 	@echo "  make verify        Build and verify firmware, fastboot, JS, and layout"
 	@echo "  make deps          Same as make setup"
 	@echo "  make deps-status   Show pins vs policy, or override MODE=head|tag"
+	@echo "  make ffmpeg        Build patched HCRTOS FFmpeg for local media"
 	@echo "  make upgrade-deps  Bump pins by policy, or override MODE=head|tag"
 	@echo "  make check         Build firmware, SD files, and link layout check"
 	@echo "  make list-cores    List libretro CORE= ids"
@@ -910,6 +949,8 @@ print-config:
 	@echo "FRONTEND=$(FRONTEND)"
 	@echo "MQUICKJS_DIR=$(MQUICKJS_DIR)"
 	@echo "LVGL_DIR=$(LVGL_DIR)"
+	@echo "HCRTOS_FFMPEG_SOURCE=$(HCRTOS_FFMPEG_SOURCE)"
+	@echo "HCRTOS_FFMPEG_INSTALL=$(HCRTOS_FFMPEG_INSTALL)"
 	@echo "HOSTCC=$(HOSTCC)"
 	@echo "DTC=$(DTC)"
 	@echo "SD_MODE=$(SD_MODE)"
@@ -952,7 +993,7 @@ core-archive: $(SELECTED_CORE_LIB)
 core-out: $(SELECTED_CORE_OUT)
 endif
 
-deps: deps-sdk deps-mquickjs deps-lvgl deps-cores
+deps: deps-sdk deps-mquickjs deps-lvgl deps-cores ffmpeg
 
 deps-alpine:
 	apk add git make dtc tcc tcc-libs-static musl-dev ccache curl tar xz zip patch
@@ -1009,6 +1050,75 @@ deps-lvgl:
 	if test "$$fresh" -eq 0; then \
 		git -C "$(LVGL_DIR)" clean -fdx -q; \
 	fi
+
+ffmpeg: $(HCRTOS_FFMPEG_STAMP)
+
+$(HCRTOS_FFMPEG_STAMP): Makefile | $(BUILD)
+	@test -f "$(HCRTOS_FFMPEG_SOURCE)/configure" || { echo "missing HCRTOS FFmpeg source: $(HCRTOS_FFMPEG_SOURCE)"; exit 1; }
+	@echo "  FFMPEG  configure"
+	$(Q)rm -rf "$(BUILD)/hcrtos-ffmpeg" "$(HCRTOS_FFMPEG_INSTALL)"
+	$(Q)mkdir -p "$(BUILD)/hcrtos-ffmpeg" "$(HCRTOS_FFMPEG_INSTALL)"
+	$(Q)mkdir -p "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/sys" "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/hcuapi"
+	$(Q)printf '%s\n' '#pragma once' 'struct winsize { unsigned short ws_row, ws_col, ws_xpixel, ws_ypixel; };' 'int ioctl(int fd, unsigned long request, ...);' 'int close(int fd);' '#define TIOCGWINSZ 0' > "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/sys/ioctl.h"
+	$(Q)printf '%s\n' '#pragma once' 'struct dsc_buffer { void *buffer; int size; };' 'struct dsc_algo_params { int algo_type; int crypto_mode; int chaining_mode; int residue_mode; struct dsc_buffer key; struct dsc_buffer iv; };' 'struct dsc_crypt { const void *input; void *output; int size; };' '#define DSC_ALGO_AES 1' '#define DSC_DECRYPT 0' '#define DSC_MODE_CTR 1' '#define DSC_RESIDUE_AS_ATSC 0' '#define DSC_DO_DECRYPT 0x1001' '#define DSC_CONFIG 0x1002' > "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/hcuapi/dsc.h"
+	$(Q)cd "$(BUILD)/hcrtos-ffmpeg" && "$(abspath $(HCRTOS_FFMPEG_SOURCE))/configure" \
+		--prefix="$(abspath $(HCRTOS_FFMPEG_INSTALL))" \
+		--enable-cross-compile \
+		--cross-prefix="$(CROSS_COMPILE)" \
+		--arch=mips \
+		--target-os=none \
+		--cc="$(CROSS_COMPILE)gcc" \
+		--ar="$(AR)" \
+		--nm="$(NM)" \
+		--disable-stripping \
+		--disable-programs \
+		--disable-doc \
+		--disable-debug \
+		--disable-network \
+		--disable-pthreads \
+		--disable-iconv \
+		--disable-bzlib \
+		--disable-lzma \
+		--disable-securetransport \
+		--disable-xlib \
+		--disable-sdl2 \
+		--disable-avdevice \
+		--disable-avfilter \
+		--enable-swresample \
+		--disable-postproc \
+		--disable-hwaccels \
+		--disable-asm \
+		--enable-small \
+		--enable-static \
+		--disable-shared \
+		--enable-avcodec \
+		--enable-avformat \
+		--enable-avutil \
+		--enable-swscale \
+		--disable-encoders \
+		--disable-muxers \
+		--disable-demuxers \
+		$(foreach f,$(HCRTOS_FFMPEG_DEMUXERS),--enable-demuxer=$(f)) \
+		--disable-parsers \
+		$(foreach f,$(HCRTOS_FFMPEG_PARSERS),--enable-parser=$(f)) \
+		--disable-decoders \
+		$(foreach f,$(HCRTOS_FFMPEG_DECODERS),--enable-decoder=$(f)) \
+		--disable-bsfs \
+		--enable-bsf=h264_mp4toannexb \
+		--disable-protocols \
+		--enable-protocol=file \
+		--extra-cflags="-EL $(ARCH_CFLAGS) $(OPT_SIZE) -msoft-float -fsigned-char -ffunction-sections -fdata-sections -G0 -Wno-error=incompatible-pointer-types -D__HCRTOS__ -DSOC_HC15XX -DSF2000 -I$(abspath $(BUILD))/hcrtos-ffmpeg/unifrog-compat -I$(abspath $(SDK))/include/newlib -I$(abspath $(SDK))/include/kernel/lib -I$(abspath $(SDK))/include" \
+		--extra-ldflags="-EL -L$(abspath $(SDK))/lib/core" \
+		--extra-libs="-lc -lm -lgcc"
+	$(Q)sed -i \
+		-e '/^#define getenv(x) NULL/d' \
+		-e 's/^#define HAVE_HYPOT 0/#define HAVE_HYPOT 1/' \
+		"$(BUILD)/hcrtos-ffmpeg/config.h"
+	@echo "  FFMPEG  build"
+	$(Q)$(MAKE) -C "$(BUILD)/hcrtos-ffmpeg" -j$(JOBS)
+	@echo "  FFMPEG  install"
+	$(Q)$(MAKE) -C "$(BUILD)/hcrtos-ffmpeg" install
+	$(Q)touch $@
 
 deps-status:
 	@set -e; \
@@ -1098,6 +1208,7 @@ doctor:
 	@test -d "$(SDK)/lib" || { echo "missing: $(SDK)/lib"; exit 1; }
 	@test -f "$(SDK)/Makefile" || { echo "missing SDK checkout: $(SDK)"; exit 1; }
 	@test -f "$(SDK)/lib/core/libm.a" || { echo "missing: $(SDK)/lib/core/libm.a"; exit 1; }
+	@test -f "$(HCRTOS_FFMPEG_SOURCE)/configure" || { echo "missing HCRTOS FFmpeg source: $(HCRTOS_FFMPEG_SOURCE)"; exit 1; }
 	@test -f "$(DTS)" || { echo "missing: $(DTS)"; exit 1; }
 	@test -f "$(CORES)/Makefile" || { echo "missing: $(CORES)/Makefile"; exit 1; }
 	@test -e "$(CORE_SOURCE_ROOT)/libretro-common/.git" || { echo "missing core checkout; run: make deps-cores"; exit 1; }
@@ -1299,7 +1410,7 @@ $(HCRTOS_MEDIA_MODULE_ARCHIVE): $(HCRTOS_MEDIA_MODULE_OBJECTS) | $(OUT)
 
 $(HCRTOS_MEDIA_MODULE_OUT): $(HCRTOS_MEDIA_MODULE_ARCHIVE) \
 	linker/core-module.ld linker/hc15xx/peripherals.ld \
-	$(SDK_BUILD_STAMP) $(BUILD_CONFIG_STAMP) | $(OUT)
+	$(SDK_BUILD_STAMP) $(HCRTOS_FFMPEG_STAMP) $(BUILD_CONFIG_STAMP) | $(OUT)
 	@echo "  LD      $@"
 	$(Q)$(LD) $(CORE_MODULE_LDFLAGS) -o $@ -Map $@.map -u unifrog_core_module_entry --start-group $(HCRTOS_MEDIA_MODULE_ARCHIVE) $(HCRTOS_MEDIA_MODULE_LDLIBS) --whole-archive $(HCRTOS_MEDIA_WHOLE_LIBS) --no-whole-archive --end-group
 
@@ -1459,7 +1570,7 @@ $(LIBUNIFROG): $(UNIFROG_OBJECTS) $(BUILD_CONFIG_STAMP) | $(OUT)
 
 $(OUT)/$(TARGET).out: $(APP_OBJECTS) $(LIBUNIFROG) $(LIBJS2300_IF) \
 	$(LIBRETRO_COMMON_LIB) $(FIRMWARE_LIBRETRO_CORE_LIBS) \
-	$(SDK_BUILD_STAMP) $(BUILD_CONFIG_STAMP) | $(OUT)
+	$(SDK_BUILD_STAMP) $(HCRTOS_FFMPEG_STAMP) $(BUILD_CONFIG_STAMP) | $(OUT)
 	@echo "  LD      $@"
 	$(Q)$(LD) $(LDFLAGS) -o $@ -Map $@.map --start-group $(filter %.o %.a,$^) $(LDLIBS) --whole-archive $(WHOLE_LIBS) --no-whole-archive --end-group
 
