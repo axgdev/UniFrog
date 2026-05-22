@@ -281,18 +281,39 @@ static void media_log_format_streams(AVFormatContext *fmt, const char *path,
    printf("unifrog media format tag=%s path=%s streams=%lu duration=%lld bitrate=%lld\n",
       tag ? tag : "", path ? path : "", (unsigned long)fmt->nb_streams,
       (long long)fmt->duration, (long long)fmt->bit_rate);
+   (void)unifrog_log_flush();
    for (unsigned i = 0; i < fmt->nb_streams; i++) {
-      AVCodecParameters *par = fmt->streams[i]->codecpar;
+      AVStream *stream = fmt->streams[i];
+      AVCodecParameters *par = stream ? stream->codecpar : NULL;
 
-      if (!par)
+      if (!stream || !par) {
+         printf("unifrog media stream tag=%s idx=%u missing stream=%d par=%d\n",
+            tag ? tag : "", i, stream ? 1 : 0, par ? 1 : 0);
+         (void)unifrog_log_flush();
          continue;
+      }
       printf("unifrog media stream tag=%s idx=%u type=%d codec=%d/%s %dx%d rate=%d ch=%d bits=%d extra=%d tb=%d/%d\n",
          tag ? tag : "", i, par->codec_type, par->codec_id,
          media_avcodec_name(par->codec_id), par->width, par->height,
          par->sample_rate, par->channels, par->bits_per_coded_sample,
-         par->extradata_size, fmt->streams[i]->time_base.num,
-         fmt->streams[i]->time_base.den);
+         par->extradata_size, stream->time_base.num, stream->time_base.den);
+      (void)unifrog_log_flush();
    }
+}
+
+static int media_find_stream_type(AVFormatContext *fmt,
+   enum AVMediaType codec_type)
+{
+   if (!fmt)
+      return -1;
+   for (unsigned i = 0; i < fmt->nb_streams; i++) {
+      AVStream *stream = fmt->streams[i];
+      AVCodecParameters *par = stream ? stream->codecpar : NULL;
+
+      if (par && par->codec_type == codec_type)
+         return (int)i;
+   }
+   return -1;
 }
 
 static void media_log_ffmpeg_caps_once(void)
@@ -1928,11 +1949,12 @@ static int media_play_native_video(const char *path,
       goto out;
    }
    media_log_format_streams(fmt, path, "native_video_open");
-   video_stream = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1,
-      NULL, 0);
+   video_stream = media_find_stream_type(fmt, AVMEDIA_TYPE_VIDEO);
    if (!disable_audio)
-      audio_stream = av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1,
-         NULL, 0);
+      audio_stream = media_find_stream_type(fmt, AVMEDIA_TYPE_AUDIO);
+   printf("unifrog media native streams selected video=%d audio=%d disable_audio=%d path=%s\n",
+      video_stream, audio_stream, disable_audio, path ? path : "");
+   (void)unifrog_log_flush();
    if (video_stream < 0) {
       printf("unifrog media native no video audio=%d path=%s\n",
          audio_stream, path);
@@ -1940,19 +1962,38 @@ static int media_play_native_video(const char *path,
          ret = media_play_native_audio_compressed(path);
       goto out;
    }
+   printf("unifrog media native init_drivers begin\n");
+   (void)unifrog_log_flush();
    media_init_drivers_once();
-   if (!disable_audio && audio_stream >= 0)
+   printf("unifrog media native init_drivers done\n");
+   (void)unifrog_log_flush();
+   if (!disable_audio && audio_stream >= 0) {
+      printf("unifrog media native auddec_open begin stream=%d\n",
+         audio_stream);
+      (void)unifrog_log_flush();
       (void)media_auddec_open(fmt, audio_stream, 2, &auddec);
+      printf("unifrog media native auddec_open done fd=%d\n", auddec.fd);
+      (void)unifrog_log_flush();
+   }
    media_video_debug_packets = 0;
+   printf("unifrog media native video_open begin stream=%d audio_fd=%d\n",
+      video_stream, auddec.fd);
+   (void)unifrog_log_flush();
    video_fd = media_video_open_decoder(fmt, video_stream, disable_audio ||
       auddec.fd < 0);
+   printf("unifrog media native video_open done fd=%d\n", video_fd);
+   (void)unifrog_log_flush();
    if (video_fd < 0)
       goto out;
+   printf("unifrog media native bsf begin stream=%d\n", video_stream);
+   (void)unifrog_log_flush();
    (void)media_video_bsf_init(fmt->streams[video_stream], &video_bsf);
-   if (audio_stream >= 0 && auddec.fd < 0) {
-      (void)av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1,
-         &audio_decoder, 0);
-   }
+   printf("unifrog media native bsf done enabled=%d\n", video_bsf ? 1 : 0);
+   (void)unifrog_log_flush();
+   if (audio_stream >= 0 && auddec.fd < 0 &&
+       fmt->streams[audio_stream] && fmt->streams[audio_stream]->codecpar)
+      audio_decoder = avcodec_find_decoder(
+         fmt->streams[audio_stream]->codecpar->codec_id);
    if (audio_stream >= 0 && auddec.fd < 0 && audio_decoder) {
       audio_ctx = avcodec_alloc_context3(audio_decoder);
       if (audio_ctx &&

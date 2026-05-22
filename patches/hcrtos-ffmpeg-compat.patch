@@ -5,7 +5,7 @@ index 0c33e65..6cfc58b 100644
 @@ -25,8 +25,8 @@
  #include "internal.h"
  #include "msrledec.h"
- 
+
 -static int bmp_decode_frame(AVCodecContext *avctx,
 -                            void *data, int *got_frame,
 +int avcodec_decode_bmp_frame(AVCodecContext *avctx,
@@ -21,6 +21,28 @@ index 0c33e65..6cfc58b 100644
 +    .decode         = avcodec_decode_bmp_frame,
      .capabilities   = AV_CODEC_CAP_DR1,
  };
+diff --git a/configure b/configure
+index 7f3bf5a..e3a5b44 100755
+--- a/configure
++++ b/configure
+@@ -6304,8 +6304,7 @@ enabled vaapi &&
+     fi
+ fi
+
+-enabled  zlib && { check_pkg_config zlib zlib "zlib.h" zlibVersion ||
+-                   check_lib zlib   zlib.h      zlibVersion    -lz; }
++enabled  zlib && enable zlib
+ enabled bzlib && check_lib bzlib bzlib.h BZ2_bzlibVersion    -lbz2
+ enabled  lzma && check_lib lzma   lzma.h lzma_version_number -llzma
+
+@@ -5143,6 +5142,5 @@ elif enabled mips; then
+     else
+         disable mipsdsp
+         disable mipsdspr2
+-        # Disable DSP stuff for generic CPU, it can't be detected at runtime.
+-        warn 'generic cpu selected'
++        # Disable DSP stuff for generic CPU, it can't be detected at runtime.
+     fi
 diff --git a/libavcodec/avcodec.h b/libavcodec/avcodec.h
 index 62f4c9f..86ea91e 100644
 --- a/libavcodec/avcodec.h

@@ -41,8 +41,8 @@ HCRTOS_FFMPEG_PARSERS ?= \
 	mpeg4video mpegaudio mpegvideo opus vc1 vorbis dvbsub dvdsub cook \
 	webp vp8 rv30 rv40
 HCRTOS_FFMPEG_DECODERS ?= \
-	aac aac_fixed aac_latm aac_latm_fixed alac ape flac mp1 mp2 mp3 \
-	mp3float opus vorbis wavpack gsm gsm_ms bmp gif png mjpeg tiff ico \
+	aac aac_fixed aac_latm alac ape flac mp1 mp2 mp3 \
+	mp3float opus vorbis wavpack gsm gsm_ms bmp gif png mjpeg tiff \
 	webp targa pcm_alaw pcm_bluray pcm_dvd pcm_f32be pcm_f32le pcm_f64be \
 	pcm_f64le pcm_mulaw pcm_s16be pcm_s16be_planar pcm_s16le \
 	pcm_s16le_planar pcm_s24be pcm_s24le pcm_s32be pcm_s32le pcm_s8 \
@@ -1090,6 +1090,7 @@ $(HCRTOS_FFMPEG_STAMP): deps-ffmpeg Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
 	$(Q)rm -rf "$(BUILD)/hcrtos-ffmpeg" "$(HCRTOS_FFMPEG_INSTALL)"
 	$(Q)mkdir -p "$(BUILD)/hcrtos-ffmpeg" "$(HCRTOS_FFMPEG_INSTALL)"
 	$(Q)mkdir -p "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/sys" "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/hcuapi"
+	$(Q)printf '%s\n' '#pragma once' '#include_next <assert.h>' > "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/assert.h"
 	$(Q)printf '%s\n' '#pragma once' 'struct winsize { unsigned short ws_row, ws_col, ws_xpixel, ws_ypixel; };' 'int ioctl(int fd, unsigned long request, ...);' 'int close(int fd);' '#define TIOCGWINSZ 0' > "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/sys/ioctl.h"
 	$(Q)printf '%s\n' '#pragma once' 'struct dsc_buffer { void *buffer; int size; };' 'struct dsc_algo_params { int algo_type; int crypto_mode; int chaining_mode; int residue_mode; struct dsc_buffer key; struct dsc_buffer iv; };' 'struct dsc_crypt { const void *input; void *output; int size; };' '#define DSC_ALGO_AES 1' '#define DSC_DECRYPT 0' '#define DSC_MODE_CTR 1' '#define DSC_RESIDUE_AS_ATSC 0' '#define DSC_DO_DECRYPT 0x1001' '#define DSC_CONFIG 0x1002' > "$(BUILD)/hcrtos-ffmpeg/unifrog-compat/hcuapi/dsc.h"
 	$(Q)cd "$(BUILD)/hcrtos-ffmpeg" && "$(abspath $(HCRTOS_FFMPEG_SOURCE))/configure" \
@@ -1101,6 +1102,7 @@ $(HCRTOS_FFMPEG_STAMP): deps-ffmpeg Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
 		--cc="$(CROSS_COMPILE)gcc" \
 		--ar="$(AR)" \
 		--nm="$(NM)" \
+		--pkg-config=/bin/true \
 		--disable-stripping \
 		--disable-programs \
 		--disable-doc \
@@ -1108,6 +1110,7 @@ $(HCRTOS_FFMPEG_STAMP): deps-ffmpeg Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
 		--disable-network \
 		--disable-pthreads \
 		--disable-iconv \
+		--enable-zlib \
 		--disable-bzlib \
 		--disable-lzma \
 		--disable-securetransport \
@@ -1138,15 +1141,18 @@ $(HCRTOS_FFMPEG_STAMP): deps-ffmpeg Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
 		--enable-bsf=h264_mp4toannexb \
 		--disable-protocols \
 		--enable-protocol=file \
-		--extra-cflags="-EL $(ARCH_CFLAGS) $(OPT_SIZE) -msoft-float -fsigned-char -ffunction-sections -fdata-sections -G0 -Wno-error=incompatible-pointer-types -D_FORTIFY_SOURCE=0 -D__have_long64=1 -D__have_longlong64=1 -D__HCRTOS__ -DSOC_HC15XX -DSF2000 -I$(abspath $(BUILD))/hcrtos-ffmpeg/unifrog-compat -I$(abspath $(SDK))/include/newlib -I$(abspath $(SDK))/include/kernel/lib -I$(abspath $(SDK))/include" \
+		--extra-cflags="-EL $(ARCH_CFLAGS) $(OPT_SIZE) -msoft-float -fsigned-char -ffunction-sections -fdata-sections -G0 -Wno-error=incompatible-pointer-types -Wno-array-parameter -Wno-declaration-after-statement -Wno-discarded-qualifiers -Wno-format-truncation -Wno-redundant-decls -Wno-stringop-overread -Wno-unused-but-set-variable -Wno-unused-function -Wno-unused-variable -U__INT32_TYPE__ -U__UINT32_TYPE__ -D__INT32_TYPE__=int -D__UINT32_TYPE__=unsigned -D_FORTIFY_SOURCE=0 -D__have_long64=0 -D__have_longlong64=1 -D__HCRTOS__ -DSOC_HC15XX -DSF2000 -I$(abspath $(BUILD))/hcrtos-ffmpeg/unifrog-compat -I$(abspath $(SDK))/include/newlib -I$(abspath $(SDK))/include/kernel/lib -I$(abspath $(SDK))/include" \
 		--extra-ldflags="-EL -L$(abspath $(SDK))/lib/core" \
-		--extra-libs="-lc -lm -lgcc"
+		--extra-libs="-lz -lc -lm -lgcc"
 	$(Q)sed -i \
 		-e '/^#define getenv(x) NULL/d' \
 		-e 's/^#define HAVE_HYPOT 0/#define HAVE_HYPOT 1/' \
 		"$(BUILD)/hcrtos-ffmpeg/config.h"
+	$(Q)sed -i \
+		-e 's|^CFLAGS=\(.*\)|CFLAGS=\1 -Wno-declaration-after-statement -Wno-redundant-decls|' \
+		"$(BUILD)/hcrtos-ffmpeg/ffbuild/config.mak"
 	@echo "  FFMPEG  build"
-	$(Q)$(MAKE) -C "$(BUILD)/hcrtos-ffmpeg" -j$(JOBS)
+	$(Q)$(MAKE) -C "$(BUILD)/hcrtos-ffmpeg"
 	@echo "  FFMPEG  install"
 	$(Q)$(MAKE) -C "$(BUILD)/hcrtos-ffmpeg" install
 	$(Q)touch $@
