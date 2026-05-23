@@ -145,6 +145,10 @@ Set these in `config.mk` or on the `make` command line:
   `/dev/viddec` clocks to reduce an over-ahead condition. If the hardware clock
   stalls after repeated seeks, UniFrog caps its internal feed timestamp and
   resumes instead of risking a watchdog reset.
+- `MEDIA_VIDEO_STUCK_BEHIND_MS`: post-seek recovery threshold. When viddec times
+  out and its clock remains this far behind auddec, UniFrog resets the HCRTOS
+  AVSYNC timebase to the audio clock and flushes viddec with the stock-style
+  `1.0` flush rate before feeding more packets.
 - `MEDIA_SEEK_ACCELERATE_FRAMES`: set to `1` to show the older visible
   fast-forward catch-up after seeks. The default `0` keeps the video plane
   hidden until the decoder reaches the requested timestamp. Compressed reference
@@ -255,6 +259,8 @@ unifrog media seek video request cur=... target=...
 unifrog media seek viddec_flush tag=video ...
 unifrog media seek auddec_flush tag=video ...
 unifrog media seek demux tag=video target=...
+unifrog media seek avsync_set tag=video target=...
+unifrog media seek video recover reason=viddec_timeout ...
 ```
 
 For audio-only playback, the same contract uses `tag=audio`. The overlay draws

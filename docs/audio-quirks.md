@@ -49,11 +49,12 @@ or `src/unifrog_media.c`.
 - UniFrog-owned UI/theme playback prefers the SND backend because the silence
   gate can inspect PCM buffers before transfer. The audsink backend remains a
   fallback for those short sounds.
-- Libretro core playback uses the HCRTOS AUDSINK path explicitly with mono PCM
-  routed through the left speaker path. Earlier device testing found this route
-  lower-cost and closer to the stock speaker behavior than direct one-channel
-  SND playback. The libretro host still controls the outer SND mute and amp
-  gate so silence does not hold the analog path open.
+- Libretro core playback uses the HCRTOS AUDSINK path explicitly. SF2000 keeps
+  the lower-cost mono-left route. GB300 or a stock-bit GB300 input bus requests
+  stereo frames, matching the old stock multicore path; GB300 diagnostics should
+  show `pref_ch=2` and `route=gb300_audsink_stereo`. The libretro host still
+  controls the outer SND mute and amp gate so silence does not hold the analog
+  path open.
 - Audio-only and native video-container audio playback prefer compressed
   packets through `/dev/auddec` when the linked HCRTOS plugin supports the
   codec. Unsupported or failed software-only routes still fall back to
@@ -130,6 +131,12 @@ or `src/unifrog_media.c`.
   decoder clock remains stuck after a seek, UniFrog logs `hw_ahead timeout`,
   caps its internal feed timestamp, and continues instead of waiting until the
   watchdog resets the device.
+- Video seeks also reset `/dev/avsync0` with `AVSYNC_SET_STC_MS`, which matches
+  the HCRTOS cast player timebase path. If repeated seeks still leave viddec
+  behind audio by more than `MEDIA_VIDEO_STUCK_BEHIND_MS`, UniFrog logs
+  `seek video recover`, flushes viddec with the stock-style `1.0` flush rate,
+  resets AVSYNC to the audio clock, and hides the video layer until post-seek
+  catch-up reaches the requested timestamp.
 - MP4/M4A AAC must be passed like HCPlayer does: AudioSpecificConfig in
   `audio_config.extra_data`, then raw demuxed AAC access units as ES packets.
   Wrapping those raw MP4 packets in synthetic ADTS headers initialized the
@@ -150,7 +157,8 @@ there, but the important behavioral clues are:
 - keep output muted until real PCM exists;
 - avoid software gain as a noise mask;
 - prefer the left-speaker/duplicate-left route over differential or fake
-  stereo output on SF2000 hardware;
+  stereo output on SF2000 hardware, but keep real stereo frame delivery on
+  GB300 because its stock libretro ring path wrote stereo frames;
 - compare HCRTOS SND/AUDSINK settings against the stock duplicate and volume
   behavior whenever libretro audio quality regresses.
 

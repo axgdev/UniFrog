@@ -62,6 +62,7 @@
 #define LIBRETRO_AUDIO_GATE_CLOSE_LEVEL 96u
 #define LIBRETRO_AUDIO_GATE_CLOSE_BATCHES 45u
 #define LIBRETRO_AUDIO_CHANNELS 1u
+#define LIBRETRO_AUDIO_MAX_CHANNELS 2u
 #define LIBRETRO_AUDIO_PERIOD_BYTES 512u
 #define LIBRETRO_AUDIO_PERIODS 8u
 #define LIBRETRO_AUDIO_WRITE_CHUNK_FRAMES 512u
@@ -429,6 +430,7 @@ struct libretro_host {
    int presenter_open;
    int audio_open;
    int audio_enabled;
+   unsigned audio_channels;
    int video_seen;
    unsigned run_frames;
    unsigned video_frames;
@@ -518,7 +520,8 @@ struct libretro_host {
    int core_options_loaded;
    int input_profile;
    int input_profile_dirty;
-   int16_t audio_sample_buffer[LIBRETRO_AUDIO_SAMPLE_BUFFER_FRAMES * 2u];
+   int16_t audio_sample_buffer[LIBRETRO_AUDIO_SAMPLE_BUFFER_FRAMES *
+      LIBRETRO_AUDIO_MAX_CHANNELS];
    unsigned audio_sample_buffer_frames;
 };
 
@@ -547,8 +550,8 @@ static void experimental_sd_log_defer_end(int active, const char *tag, int ret)
    unifrog_log_defer_end();
 }
 
-static int16_t audio_mix_buffer[2048 * 2];
-static int16_t audio_silence_buffer[384 * 2];
+static int16_t audio_mix_buffer[2048 * LIBRETRO_AUDIO_MAX_CHANNELS];
+static int16_t audio_silence_buffer[384 * LIBRETRO_AUDIO_MAX_CHANNELS];
 static volatile unsigned watchdog_active;
 static volatile unsigned watchdog_phase;
 static volatile unsigned watchdog_marker;
@@ -2579,6 +2582,31 @@ static unsigned host_audio_output_rate(unsigned input_rate)
    return DEFAULT_SAMPLE_RATE;
 }
 
+static unsigned host_audio_output_channels(void)
+{
+   return unifrog_audio_prefers_stereo_output() ?
+      LIBRETRO_AUDIO_MAX_CHANNELS : LIBRETRO_AUDIO_CHANNELS;
+}
+
+static const char *host_audio_route_name(void)
+{
+   return host.audio_channels > 1u ? "gb300_audsink_stereo" :
+      LIBRETRO_AUDIO_ROUTE;
+}
+
+static void host_audio_store_mono(int16_t *buffer, unsigned frame,
+   int16_t sample)
+{
+   unsigned channels = host.audio_channels ? host.audio_channels :
+      LIBRETRO_AUDIO_CHANNELS;
+
+   if (channels > LIBRETRO_AUDIO_MAX_CHANNELS)
+      channels = LIBRETRO_AUDIO_MAX_CHANNELS;
+   buffer[frame * channels] = sample;
+   for (unsigned ch = 1; ch < channels; ch++)
+      buffer[frame * channels + ch] = sample;
+}
+
 static int host_audio_scale_mono(int left, int right, unsigned *abs_out)
 {
    int sample = (left + right) >> 1;
@@ -2655,6 +2683,8 @@ static int host_audio_write_frames(const int16_t *frames, unsigned frame_count,
 static int host_audio_flush_sample_buffer(void)
 {
    unsigned peak_out = 0;
+   unsigned channels = host.audio_channels ? host.audio_channels :
+      LIBRETRO_AUDIO_CHANNELS;
 
    if (!host.audio_sample_buffer_frames)
       return 0;
@@ -2663,8 +2693,10 @@ static int host_audio_flush_sample_buffer(void)
       host.audio_sample_buffer_frames = 0;
       return 0;
    }
+   if (channels > LIBRETRO_AUDIO_MAX_CHANNELS)
+      channels = LIBRETRO_AUDIO_MAX_CHANNELS;
    for (unsigned i = 0; i < host.audio_sample_buffer_frames; i++) {
-      int16_t sample = host.audio_sample_buffer[i];
+      int16_t sample = host.audio_sample_buffer[i * channels];
       unsigned abs_out = sample < 0 ? (unsigned)-sample : (unsigned)sample;
 
       if (abs_out > peak_out)
@@ -2692,8 +2724,9 @@ void unifrog_libretro_audio_sample_cb(int16_t left, int16_t right)
       return;
    scaled = host_audio_scale_mono(left, right, &abs_out);
    (void)abs_out;
-   host.audio_sample_buffer[host.audio_sample_buffer_frames++] =
-      (int16_t)scaled;
+   host_audio_store_mono(host.audio_sample_buffer,
+      host.audio_sample_buffer_frames, (int16_t)scaled);
+   host.audio_sample_buffer_frames++;
    if (host.audio_sample_buffer_frames >= LIBRETRO_AUDIO_SAMPLE_BUFFER_FRAMES)
       (void)host_audio_flush_sample_buffer();
 }
@@ -2741,7 +2774,8 @@ size_t unifrog_libretro_audio_batch_cb(const int16_t *data, size_t frames)
          scaled = host_audio_scale_mono(left, right, &abs_out);
          if (abs_out > peak_out)
             peak_out = abs_out;
-         audio_mix_buffer[out_frames] = (int16_t)scaled;
+         host_audio_store_mono(audio_mix_buffer, (unsigned)out_frames,
+            (int16_t)scaled);
          out_frames++;
       }
       if (out_frames == 0)
@@ -7194,13 +7228,15 @@ out_content_prepare:
    (void)unifrog_log_flush();
    host.audio_input_rate = sample_rate;
    host.audio_output_rate = host_audio_output_rate(sample_rate);
+   host.audio_channels = host_audio_output_channels();
    host.audio_gate_open = 0;
    host.audio_quiet_batches = 0;
    if (!host.audio_enabled) {
-      printf("unifrog libretro audio disabled rate=%u/%u\n",
-         host.audio_input_rate, host.audio_output_rate);
+      printf("unifrog libretro audio disabled rate=%u/%u channels=%u route=%s\n",
+         host.audio_input_rate, host.audio_output_rate, host.audio_channels,
+         host_audio_route_name());
    } else if (unifrog_audio_open_backend(&host.audio, host.audio_output_rate,
-       LIBRETRO_AUDIO_CHANNELS, LIBRETRO_AUDIO_PERIOD_BYTES,
+       host.audio_channels, LIBRETRO_AUDIO_PERIOD_BYTES,
        LIBRETRO_AUDIO_PERIODS, LIBRETRO_AUDIO_BACKEND) == 0) {
       int volume_ret;
       int mute_ret;
@@ -7229,13 +7265,14 @@ out_content_prepare:
       printf("unifrog libretro audio_open ok rate=%u/%u channels=%u period=%u periods=%u volume=%u gain=%u route=%s volume_ret=%d mute_ret=%d silence_ret=%d start_ret=%d unmute_ret=%d output_ret=%d\n",
          host.audio_input_rate, host.audio_output_rate,
          host.audio.channels, host.audio.period_bytes, host.audio.periods,
-         LIBRETRO_AUDIO_VOLUME, host.audio_gain, LIBRETRO_AUDIO_ROUTE,
+         LIBRETRO_AUDIO_VOLUME, host.audio_gain, host_audio_route_name(),
          volume_ret, mute_ret, silence_ret, start_ret, unmute_ret,
          output_ret);
       unifrog_diag_memory_snapshot("libretro.after_audio_open");
       (void)unifrog_log_flush();
    } else {
-      printf("unifrog libretro audio open failed\n");
+      printf("unifrog libretro audio open failed rate=%u channels=%u route=%s\n",
+         host.audio_output_rate, host.audio_channels, host_audio_route_name());
    }
 
    CORE_CALL2_VOID(core, core->set_controller_port_device, 0,
