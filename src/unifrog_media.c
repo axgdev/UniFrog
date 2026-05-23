@@ -1750,6 +1750,26 @@ static unsigned media_h264_nal_mask(const uint8_t *data, size_t size,
    return mask;
 }
 
+static int media_video_packet_time_ms(const AVPacket *packet,
+   AVRational time_base, int prefer_dts)
+{
+   int64_t t;
+
+   if (!packet)
+      return -1;
+   t = prefer_dts ? packet->dts : packet->pts;
+   if (t == AV_NOPTS_VALUE)
+      t = prefer_dts ? packet->pts : packet->dts;
+   if (t == AV_NOPTS_VALUE)
+      return -1;
+   t = av_rescale_q(t, time_base, (AVRational){ 1, 1000 });
+   if (t > INT32_MAX)
+      return INT32_MAX;
+   if (t < INT32_MIN)
+      return INT32_MIN;
+   return (int32_t)t;
+}
+
 static int media_video_send_packet(int fd, const AVPacket *packet,
    AVRational time_base, int freerun, int h264)
 {
@@ -1759,15 +1779,24 @@ static int media_video_send_packet(int fd, const AVPacket *packet,
    unsigned nal_count = 0;
    unsigned nal_mask = 0;
    int add_aud;
+   int prefer_dts = h264;
+   int packet_pts;
+   int packet_dur;
 
    if (fd < 0 || !packet || !packet->data || packet->size <= 0)
       return -1;
    packet_index = media_video_debug_packets++;
    add_aud = h264 && media_h264_first_nal_type(packet->data,
       (size_t)packet->size) != 9;
+   packet_pts = media_video_packet_time_ms(packet, time_base, prefer_dts);
+   packet_dur = media_packet_duration_ms(packet, time_base);
+   if (packet_dur < 0)
+      packet_dur = 0;
+   if (packet_pts < 0 && freerun)
+      packet_pts = -1;
    memset(&header, 0, sizeof(header));
-   header.pts = freerun ? -1 : media_packet_pts_ms(packet, time_base);
-   header.dur = freerun ? 0 : media_packet_duration_ms(packet, time_base);
+   header.pts = packet_pts;
+   header.dur = packet_dur;
    header.size = (uint32_t)packet->size + (add_aud ? sizeof(h264_aud) : 0u);
    header.flag = AV_PACKET_ES_DATA;
    if (h264)
@@ -1776,10 +1805,11 @@ static int media_video_send_packet(int fd, const AVPacket *packet,
    if (packet_index < 8u) {
       const uint8_t *d = packet->data;
 
-      printf("unifrog media native video packet idx=%u size=%d send=%lu pts=%ld dur=%ld src_pts=%ld src_dts=%ld src_dur=%ld key=%d aud=%d nal=%d nals=%u mask=0x%x bytes=%02x %02x %02x %02x %02x %02x %02x %02x hdr=%u\n",
+      printf("unifrog media native video packet idx=%u size=%d send=%lu pts=%ld dur=%ld src_pts=%ld src_dts=%ld src_dur=%ld prefer_dts=%d key=%d aud=%d nal=%d nals=%u mask=0x%x bytes=%02x %02x %02x %02x %02x %02x %02x %02x hdr=%u\n",
          packet_index, packet->size, (unsigned long)header.size,
          (long)header.pts, (long)header.dur,
          (long)packet->pts, (long)packet->dts, (long)packet->duration,
+         prefer_dts,
          (packet->flags & AV_PKT_FLAG_KEY) ? 1 : 0, add_aud,
          media_h264_first_nal_type(packet->data, (size_t)packet->size),
          nal_count, nal_mask,
