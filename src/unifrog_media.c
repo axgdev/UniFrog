@@ -78,7 +78,8 @@
 #define VIDEO_EOS_TIMEOUT_MS 1000u
 #define VIDEO_LOG_AUTO_FLUSH_BYTES (64u * 1024u)
 #define MEDIA_AUDIO_WRITE_SPACE_TIMEOUT_MS 5000u
-#define MEDIA_AUDIO_PREFEED_MS 3000u
+/* Decoder rings are live after START; large leads play as startup bursts. */
+#define MEDIA_DECODER_FEED_LEAD_MS 500u
 #define MEDIA_AUDIO_PACE_MAX_SLEEP_MS 100u
 #define MEDIA_AUDIO_VOLUME 75u
 #define MEDIA_WAV_CHUNK_FRAMES 512u
@@ -1923,8 +1924,8 @@ static int media_play_native_audio_compressed(const char *path)
    packet = av_packet_alloc();
    if (!packet)
       goto out;
-   printf("unifrog media auddec play stream=%d timeout=%u prefeed_ms=%u tb=%d/%d path=%s\n",
-      stream, auddec.write_timeout_ms, MEDIA_AUDIO_PREFEED_MS,
+   printf("unifrog media auddec play stream=%d timeout=%u feed_lead_ms=%u tb=%d/%d path=%s\n",
+      stream, auddec.write_timeout_ms, MEDIA_DECODER_FEED_LEAD_MS,
       fmt->streams[stream]->time_base.num, fmt->streams[stream]->time_base.den,
       path);
    while (!media_exit_down()) {
@@ -1949,17 +1950,19 @@ static int media_play_native_audio_compressed(const char *path)
       if ((++loop_polls % 240u) == 0) {
          struct audio_decore_status status;
          int64_t cur_time = -1;
+         uint32_t elapsed_ms = unifrog_perf_time_ms() - start_ms;
 
          memset(&status, 0, sizeof(status));
          (void)ioctl(auddec.fd, AUDDEC_GET_CUR_TIME, &cur_time);
          if (ioctl(auddec.fd, AUDDEC_GET_STATUS, &status) == 0)
-            printf("unifrog media auddec monitor packets=%lu decoded=%lu rate=%lu ch=%u bits=%u ms=%lu atime=%lld feed_ms=%lld\n",
+            printf("unifrog media auddec monitor packets=%lu decoded=%lu rate=%lu ch=%u bits=%u ms=%lu atime=%lld feed_ms=%lld feed_lead=%lld\n",
                (unsigned long)auddec.packets,
                (unsigned long)status.frames_decoded,
                (unsigned long)status.sample_rate,
                status.channels, status.bits_per_sample,
-               (unsigned long)(unifrog_perf_time_ms() - start_ms),
-               (long long)cur_time, (long long)pacer.next_ms);
+               (unsigned long)elapsed_ms,
+               (long long)cur_time, (long long)pacer.next_ms,
+               (long long)(pacer.next_ms - (int64_t)elapsed_ms));
       }
    }
    ret = auddec.packets && !write_failed ? 0 : -1;
@@ -2138,7 +2141,7 @@ static void media_audio_pacer_wait_ms(struct media_audio_pacer *pacer,
       elapsed_ms = (int64_t)(unifrog_perf_time_ms() -
          pacer->wall_start_ms);
       lead_ms = target_ms - elapsed_ms;
-      if (lead_ms <= (int64_t)MEDIA_AUDIO_PREFEED_MS)
+      if (lead_ms <= (int64_t)MEDIA_DECODER_FEED_LEAD_MS)
          break;
       if (media_exit_down())
          break;
@@ -4061,9 +4064,9 @@ static int media_play_native_video(const char *path,
    video_freerun = video_sync_mode == AVSYNC_TYPE_FREERUN;
    if (video_freerun && audio_enabled)
       printf("unifrog media native video forcing freerun due to software audio path\n");
-   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d prefeed_ms=%u\n",
+   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d feed_lead_ms=%u\n",
       video_freerun, disable_audio, auddec.fd >= 0, auddec.freerun,
-      audio_enabled, MEDIA_AUDIO_PREFEED_MS);
+      audio_enabled, MEDIA_DECODER_FEED_LEAD_MS);
    packet = av_packet_alloc();
    frame = av_frame_alloc();
    if (!packet || !frame)
@@ -4149,6 +4152,7 @@ static int media_play_native_video(const char *path,
          struct vdec_decore_status status;
          int64_t video_time = -1;
          int64_t audio_time = -1;
+         uint32_t elapsed_ms = unifrog_perf_time_ms() - start_ms;
          uint32_t sw_audio_ms = media_sw_audio_clock_ms(
             audio_enabled ? &audio : NULL, audio_frames,
             audio_ctx ? audio_ctx->sample_rate : 0, sw_audio_start_ms);
@@ -4159,7 +4163,7 @@ static int media_play_native_video(const char *path,
          if (auddec.fd >= 0)
             (void)ioctl(auddec.fd, AUDDEC_GET_CUR_TIME, &audio_time);
          if (ioctl(video_fd, VIDDEC_GET_STATUS, &status) == 0)
-            printf("unifrog media native monitor packets=%lu audio=%lu decoded=%lu displayed=%lu hdr=%d pic=%d show=%d eos=%u err=%lu underrun=%lu used=%lu/%lu ms=%lu vtime=%lld atime=%lld sw_audio_ms=%lu feed_v=%lld feed_a=%lld\n",
+            printf("unifrog media native monitor packets=%lu audio=%lu decoded=%lu displayed=%lu hdr=%d pic=%d show=%d eos=%u err=%lu underrun=%lu used=%lu/%lu ms=%lu vtime=%lld atime=%lld sw_audio_ms=%lu feed_v=%lld feed_a=%lld lead_v=%lld lead_a=%lld\n",
                (unsigned long)video_packets,
                (unsigned long)(audio_frames + auddec.packets),
                (unsigned long)status.frames_decoded,
@@ -4172,11 +4176,13 @@ static int media_play_native_video(const char *path,
                (unsigned long)status.under_run_cnt,
                (unsigned long)status.buffer_used,
                (unsigned long)status.buffer_size,
-               (unsigned long)(unifrog_perf_time_ms() - start_ms),
+               (unsigned long)elapsed_ms,
                (long long)video_time, (long long)audio_time,
                (unsigned long)sw_audio_ms,
                (long long)hw_video_pacer.next_ms,
-               (long long)hw_audio_pacer.next_ms);
+               (long long)hw_audio_pacer.next_ms,
+               (long long)(hw_video_pacer.next_ms - (int64_t)elapsed_ms),
+               (long long)(hw_audio_pacer.next_ms - (int64_t)elapsed_ms));
       }
    }
    media_video_finish_eos(video_fd, VIDEO_EOS_TIMEOUT_MS);

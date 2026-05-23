@@ -68,12 +68,16 @@ or `src/unifrog_media.c`.
 - Freerun does not mean "drop packet timing." HCLinux/HCRTOS feed examples and
   reverse-engineering of `libffplayer.a` both write packet PTS into `AvPktHd`.
   UniFrog keeps packet PTS/duration for `/dev/auddec` and paces audio-only
-  demuxing with a small prefeed window instead of dumping the whole compressed
-  file into the KSHM ring at SD-card speed.
+  demuxing with a small live feed-lead window instead of dumping the whole
+  compressed file into the KSHM ring at SD-card speed. Large multi-second leads
+  are not passive prebuffering because `/dev/auddec` is already running; they
+  show up as audible startup bursts.
 - The same rule applies when native video uses hardware auddec as the STC
   owner. The file demuxer must be the real-time source; otherwise audio and
   video stay synchronized to each other but both run fast because compressed
   packets advance through the hardware rings as quickly as SD reads complete.
+  SD jitter is handled by the separate file readahead buffer, not by keeping the
+  running decoder rings seconds ahead.
 - MP4/M4A AAC must be passed like HCPlayer does: AudioSpecificConfig in
   `audio_config.extra_data`, then raw demuxed AAC access units as ES packets.
   Wrapping those raw MP4 packets in synthetic ADTS headers initialized the

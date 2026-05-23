@@ -106,11 +106,14 @@ For source-level SDK behavior clues, inspect:
   packets unless target logs prove a specific raw-ADTS stream needs it.
 - `/dev/auddec` packets should carry PTS/duration when FFmpeg provides them,
   including freerun audio-only playback. Audio-only file playback should pace
-  packet feeding with a bounded prefeed window so the KSHM ring is a jitter
-  buffer, not a full-file dump.
+  packet feeding with a small live feed-lead window. The decoder ring is not a
+  startup prebuffer once `/dev/auddec` has started; large leads are heard as
+  initial fast playback.
 - Native video file playback also needs bounded packet-feed pacing. HCRTOS cast
   examples are already paced by network/input arrival; local SD files are not,
   so UniFrog paces video and hardware-audio ES writes against stream timestamps.
+  The larger SD readahead buffer is the intended jitter absorber for local file
+  reads.
 - The SF2000 audio path must stay muted/gated until real PCM exists. Digital
   zeroes alone can still expose board noise.
 
