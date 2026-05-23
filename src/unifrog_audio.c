@@ -89,6 +89,13 @@ int unifrog_audio_prefers_stereo_output(void)
    return current_audio_gate() == AUDIO_GATE_GB300_L15;
 }
 
+static uint32_t current_audio_snd_devs(void)
+{
+   if (current_audio_gate() == AUDIO_GATE_GB300_L15)
+      return AUDSINK_SND_DEVBIT_I2SO | AUDSINK_SND_DEVBIT_SPO;
+   return AUDSINK_SND_DEVBIT_I2SO;
+}
+
 static void set_reg_gate(volatile uint32_t *dir, volatile uint32_t *out,
    uint32_t mask, int enabled)
 {
@@ -298,7 +305,7 @@ static int open_audsink(struct unifrog_audio *audio,
 
    memset(&params, 0, sizeof(params));
    params.buf_size = period_bytes * periods;
-   params.snd_devs = AUDSINK_SND_DEVBIT_I2SO;
+   params.snd_devs = current_audio_snd_devs();
    params.sync_type = AVSYNC_TYPE_FREERUN;
    params.audio_flush_thres = 0;
    params.pcm.access = SND_PCM_ACCESS_RW_INTERLEAVED;
@@ -315,7 +322,8 @@ static int open_audsink(struct unifrog_audio *audio,
    if (ioctl(fd, AUDSINK_IOCTL_INIT, &params) != 0)
       goto fail;
 
-   duplicate = AUDSINK_PCM_DUPLICATE_LEFT;
+   duplicate = unifrog_audio_prefers_stereo_output() && channels > 1 ?
+      AUDSINK_PCM_DUPLICATE_STEREO : AUDSINK_PCM_DUPLICATE_LEFT;
    ioctl(fd, AUDSINK_IOCTL_SETDUPLICATE, duplicate);
 
    audio->fd = fd;
@@ -326,10 +334,11 @@ static int open_audsink(struct unifrog_audio *audio,
    audio->periods = periods;
    audio->frame_bytes = channels * sizeof(int16_t);
    audio->muted = 1;
-   printf("unifrog audio open backend=audsink fd=%d rate=%u ch=%u period=%u periods=%u route=%s pref_ch=%u\n",
+   printf("unifrog audio open backend=audsink fd=%d rate=%u ch=%u period=%u periods=%u route=%s pref_ch=%u snd=0x%lx duplicate=%d\n",
       fd, rate, channels, period_bytes, periods,
       audio_gate_name(current_audio_gate()),
-      unifrog_audio_prefers_stereo_output() ? 2u : 1u);
+      unifrog_audio_prefers_stereo_output() ? 2u : 1u,
+      (unsigned long)params.snd_devs, duplicate);
    return 0;
 
 fail:
@@ -407,6 +416,12 @@ int unifrog_audio_open_backend(struct unifrog_audio *audio,
       return open_audsink(audio, rate, channels, period_bytes, periods);
    if (backend == UNIFROG_AUDIO_BACKEND_SND)
       return open_snd(audio, rate, channels, period_bytes, periods);
+
+   if (unifrog_audio_prefers_stereo_output()) {
+      if (open_audsink(audio, rate, channels, period_bytes, periods) == 0)
+         return 0;
+      return open_snd(audio, rate, channels, period_bytes, periods);
+   }
 
    if (open_snd(audio, rate, channels, period_bytes, periods) == 0)
       return 0;

@@ -158,6 +158,9 @@
 #ifndef UNIFROG_MEDIA_VIDEO_BUFFERING_END_MS
 #define UNIFROG_MEDIA_VIDEO_BUFFERING_END_MS 3000
 #endif
+#ifndef UNIFROG_MEDIA_RESET_VIDDEC_ON_FAIL
+#define UNIFROG_MEDIA_RESET_VIDDEC_ON_FAIL 1
+#endif
 /* Decoder rings are live after START; large leads play as startup bursts. */
 #define MEDIA_VIDEO_FEED_LEAD_MS ((unsigned)UNIFROG_MEDIA_VIDEO_FEED_LEAD_MS)
 #define MEDIA_AUDIO_FEED_LEAD_MS ((unsigned)UNIFROG_MEDIA_AUDIO_FEED_LEAD_MS)
@@ -219,6 +222,8 @@
    ((int)UNIFROG_MEDIA_VIDEO_BUFFERING_START_MS)
 #define MEDIA_VIDEO_BUFFERING_END_MS \
    ((int)UNIFROG_MEDIA_VIDEO_BUFFERING_END_MS)
+#define MEDIA_RESET_VIDDEC_ON_FAIL \
+   ((int)UNIFROG_MEDIA_RESET_VIDDEC_ON_FAIL)
 #define MEDIA_SW_AUDIO_VIDEO_LEAD_MS 60u
 #define MEDIA_SW_AUDIO_MAX_WAIT_MS 160u
 #define MEDIA_SW_AUDIO_WAIT_POLL_US 2000u
@@ -321,6 +326,24 @@ struct media_raw_auddec_variant {
    int audio_flush_thres;
    int kshm_size;
 };
+
+static int media_auddec_variant_allowed(const char *label)
+{
+   if (!label)
+      return 1;
+   if (strncmp(label, "gb300_", 6) == 0)
+      return unifrog_audio_prefers_stereo_output();
+   if (strncmp(label, "sf2000_", 7) == 0)
+      return !unifrog_audio_prefers_stereo_output();
+   return 1;
+}
+
+static uint32_t media_audio_preferred_snd_devs(void)
+{
+   if (unifrog_audio_prefers_stereo_output())
+      return AUDDEV_I2SO | AUDDEV_SPO;
+   return AUDDEV_I2SO;
+}
 
 struct media_readahead_slot {
    size_t size;
@@ -3420,6 +3443,65 @@ static void media_flush_viddec_for_seek(int video_fd, const char *tag,
       path ? path : "");
 }
 
+static void media_video_release_decoder(int fd, int closevp, int fillblack,
+   const char *tag, const char *path)
+{
+   struct vdec_rls_param rls;
+   float rate = 1.0f;
+   int flush_ret;
+   int flush_errno;
+   int rls_ret;
+   int rls_errno;
+
+   if (fd < 0)
+      return;
+
+   errno = 0;
+   flush_ret = ioctl(fd, VIDDEC_FLUSH, &rate);
+   flush_errno = errno;
+   memset(&rls, 0, sizeof(rls));
+   rls.closevp = closevp ? 1 : 0;
+   rls.fillblack = fillblack ? 1 : 0;
+   errno = 0;
+   rls_ret = ioctl(fd, VIDDEC_RLS, (unsigned long)&rls);
+   rls_errno = errno;
+   printf("unifrog media native video release tag=%s fd=%d closevp=%d fillblack=%d flush=%d flush_errno=%d rls=%d rls_errno=%d path=%s\n",
+      tag ? tag : "", fd, rls.closevp, rls.fillblack, flush_ret,
+      flush_errno, rls_ret, rls_errno, path ? path : "");
+}
+
+static void media_video_reset_modules(const char *tag, const char *path)
+{
+   int exit_ret;
+   int exit_errno;
+   int init_ret;
+   int init_errno;
+   int llav_ret;
+   int llav_errno;
+   int vidsink_ret;
+   int vidsink_errno;
+
+   if (!MEDIA_RESET_VIDDEC_ON_FAIL)
+      return;
+
+   errno = 0;
+   exit_ret = module_exit("viddec");
+   exit_errno = errno;
+   msleep(20);
+   errno = 0;
+   init_ret = module_init("viddec");
+   init_errno = errno;
+   errno = 0;
+   llav_ret = module_init("llav_vdec");
+   llav_errno = errno;
+   errno = 0;
+   vidsink_ret = module_init("vidsink");
+   vidsink_errno = errno;
+   printf("unifrog media native video module_reset tag=%s exit=%d exit_errno=%d init=%d init_errno=%d llav=%d llav_errno=%d vidsink=%d vidsink_errno=%d path=%s\n",
+      tag ? tag : "", exit_ret, exit_errno, init_ret, init_errno, llav_ret,
+      llav_errno, vidsink_ret, vidsink_errno, path ? path : "");
+}
+
 static int media_aac_sample_rate_index(unsigned sample_rate)
 {
    static const unsigned rates[] = {
@@ -4209,6 +4291,13 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
        * The linked libauddrv.a treats enable_audsink == 0 as the internal
        * audsink render path. Stock direct-decoder examples leave it zero.
        */
+      { "gb300_raw_i2so_spo_kshm", AUDDEV_I2SO | AUDDEV_SPO, 0, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "gb300_raw_i2so_spo_audsink_kshm", AUDDEV_I2SO | AUDDEV_SPO, 1, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "gb300_raw_spo_kshm", AUDDEV_SPO, 0, 0, MEDIA_AUDIO_KSHM_SIZE },
+      { "gb300_raw_spo_audsink_kshm", AUDDEV_SPO, 1, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
       { "raw_hcrtos_i2so_kshm", AUDDEV_I2SO, 0, 0,
          MEDIA_AUDIO_KSHM_SIZE },
       { "raw_hcrtos_default_kshm", AUDDEV_DEFAULT, 0, 0,
@@ -4221,6 +4310,7 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
    int fd;
    audio_channel_select_t channel = media_audio_channel_select();
    uint8_t volume = MEDIA_AUDIO_VOLUME;
+   int caps_logged = 0;
 
    if (!auddec || !codec_id)
       return -1;
@@ -4246,6 +4336,10 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
          base_cfg.extradata_mode = 1;
       }
    }
+   printf("unifrog media raw auddec route_policy label=%s gb300=%d preferred_snd=0x%lx output_ch=%u variants=%lu\n",
+      label ? label : "?", unifrog_audio_prefers_stereo_output(),
+      (unsigned long)media_audio_preferred_snd_devs(),
+      media_audio_output_channels(), (unsigned long)ARRAY_SIZE(variants));
 
    for (unsigned i = 0; i < ARRAY_SIZE(variants); i++) {
       const struct media_raw_auddec_variant *variant = &variants[i];
@@ -4255,6 +4349,11 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
       int start_ret;
       int start_errno;
 
+      if (!media_auddec_variant_allowed(variant->label)) {
+         printf("unifrog media raw auddec variant skip label=%s gb300=%d\n",
+            variant->label, unifrog_audio_prefers_stereo_output());
+         continue;
+      }
       cfg = base_cfg;
       cfg.snd_devs = variant->snd_devs;
       cfg.enable_audsink = variant->enable_audsink;
@@ -4267,8 +4366,10 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
             (unsigned long)codec_id);
          continue;
       }
-      if (i == 0)
+      if (!caps_logged) {
          media_auddec_log_caps(fd, "raw", label, codec_id, sync_mode);
+         caps_logged = 1;
+      }
       if (cfg.extradata_mode == 1)
          extra_ret = media_send_extra_packet(fd, extradata,
             (int)extradata_size);
@@ -4324,6 +4425,14 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
        * KSHM-backed profiles must come first. On this driver a no-KSHM
        * profile can init/start cleanly but never consume compressed packets.
        */
+      { "gb300_i2so_spo_kshm", 0, AUDDEV_I2SO | AUDDEV_SPO, 0, 1, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "gb300_i2so_spo_audsink_kshm", 0, AUDDEV_I2SO | AUDDEV_SPO, 1, 1, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "gb300_spo_kshm", 0, AUDDEV_SPO, 0, 1, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "gb300_spo_audsink_kshm", 0, AUDDEV_SPO, 1, 1, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
       { "hcrtos_i2so_kshm", 0, AUDDEV_I2SO, 0, 1, 0,
          MEDIA_AUDIO_KSHM_SIZE },
       { "hcrtos_default_kshm", 0, AUDDEV_DEFAULT, 0, 1, 0,
@@ -4344,6 +4453,7 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
    uint8_t volume = MEDIA_AUDIO_VOLUME;
    unsigned bits;
    uint32_t last_stage = 0;
+   int caps_logged = 0;
 
    media_audio_activity_stage(1u,
       (((uint32_t)stream_index & 0xffffu) << 8) |
@@ -4449,6 +4559,10 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       (auddec->aac_adts ? "adts_wrap" :
       (base_cfg.extradata_size ? "raw_asc" : "raw_es")) : "na",
       auddec->aac_profile, auddec->aac_sample_rate_index);
+   printf("unifrog media auddec route_policy stream=%d gb300=%d preferred_snd=0x%lx output_ch=%u variants=%lu\n",
+      stream_index, unifrog_audio_prefers_stereo_output(),
+      (unsigned long)media_audio_preferred_snd_devs(),
+      media_audio_output_channels(), (unsigned long)ARRAY_SIZE(variants));
 
    for (unsigned i = 0; i < ARRAY_SIZE(variants); i++) {
       const struct media_auddec_variant *variant = &variants[i];
@@ -4459,6 +4573,11 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       int start_ret;
       int start_errno;
 
+      if (!media_auddec_variant_allowed(variant->label)) {
+         printf("unifrog media auddec variant skip label=%s idx=%u gb300=%d\n",
+            variant->label, i, unifrog_audio_prefers_stereo_output());
+         continue;
+      }
       cfg = base_cfg;
       cfg.snd_devs = variant->snd_devs;
       cfg.enable_audsink = variant->enable_audsink;
@@ -4501,9 +4620,11 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       media_audio_activity_stage(4u,
          (((uint32_t)i & 0xffu) << 16) | ((uint32_t)fd & 0xffffu),
          0u);
-      if (i == 0)
+      if (!caps_logged) {
          media_auddec_log_caps(fd, "compressed", variant->label,
             cfg.codec_id, cfg.sync_mode);
+         caps_logged = 1;
+      }
       if (cfg.extradata_mode == 1) {
          last_stage = 5u;
          media_audio_activity_stage(5u,
@@ -4708,7 +4829,7 @@ static int media_h264_extradata_annexb(const uint8_t *src, int src_size,
 }
 
 static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
-   int sync_mode)
+   int sync_mode, const char *path)
 {
    AVStream *stream;
    AVCodecParameters *par;
@@ -5005,7 +5126,10 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
       cfg.sync_mode, cfg.buffering_start, cfg.buffering_end);
    if (init_ret != 0 || pre_extra_ret != 0 || post_extra_ret != 0 ||
        start_ret != 0) {
+      media_video_release_decoder(fd, 1, 0, "open_failed", path);
       close(fd);
+      if (init_ret != 0 && init_errno == EPERM)
+         media_video_reset_modules("open_failed", path);
       return -1;
    }
    {
@@ -5245,6 +5369,9 @@ static int media_play_native_video(const char *path,
    int seek_video_catchup_hidden = 0;
    int sd_read_active = 0;
    int auddec_write_failed = 0;
+   int native_video_failed = 0;
+   uint32_t seek_video_dropped_packets = 0;
+   uint32_t seek_video_drop_last_log_ms = 0;
    unsigned video_feed_lead_ms = MEDIA_VIDEO_FEED_LEAD_MS;
    unsigned audio_feed_lead_ms = MEDIA_AUDIO_FEED_LEAD_MS;
    unsigned audio_output_channels = media_audio_output_channels();
@@ -5338,7 +5465,7 @@ static int media_play_native_video(const char *path,
    printf("unifrog media native video_open begin stream=%d audio_fd=%d sync=%d\n",
       video_stream, auddec.fd, video_sync_mode);
    (void)unifrog_log_flush();
-   video_fd = media_video_open_decoder(fmt, video_stream, video_sync_mode);
+   video_fd = media_video_open_decoder(fmt, video_stream, video_sync_mode, path);
    printf("unifrog media native video_open done fd=%d\n", video_fd);
    (void)unifrog_log_flush();
    if (video_fd < 0)
@@ -5465,6 +5592,8 @@ static int media_play_native_video(const char *path,
             audio_frames = 0;
             seek_video_catchup_until_ms = target_ms;
             seek_video_catchup_hidden = 0;
+            seek_video_dropped_packets = 0;
+            seek_video_drop_last_log_ms = 0;
             if (!MEDIA_SEEK_ACCELERATE_FRAMES) {
                (void)set_video_layer_visible(0, 0, 0, 0, 0);
                video_layer_revealed = 0;
@@ -5501,6 +5630,23 @@ static int media_play_native_video(const char *path,
          }
          media_video_activity_stage(20u, video_packets & 0x00ffffffu,
             auddec.fd >= 0 ? auddec.packets : audio_frames);
+         if (seek_catchup_packet && !MEDIA_SEEK_ACCELERATE_FRAMES) {
+            uint32_t now_ms = unifrog_perf_time_ms();
+
+            seek_video_dropped_packets++;
+            if (seek_video_dropped_packets <= 4u ||
+                now_ms - seek_video_drop_last_log_ms >= 500u) {
+               printf("unifrog media seek video drop mode=skip packet_ms=%ld dur=%ld until=%lld dropped=%lu key=%d size=%d path=%s\n",
+                  (long)video_packet_ms, (long)video_packet_dur_ms,
+                  (long long)seek_video_catchup_until_ms,
+                  (unsigned long)seek_video_dropped_packets,
+                  (packet->flags & AV_PKT_FLAG_KEY) ? 1 : 0, packet->size,
+                  path ? path : "");
+               seek_video_drop_last_log_ms = now_ms;
+            }
+            av_packet_unref(packet);
+            continue;
+         }
          if (audio_enabled && auddec.fd < 0) {
             if (!seek_catchup_packet)
                media_video_wait_for_sw_audio(&audio, packet,
@@ -5534,6 +5680,8 @@ static int media_play_native_video(const char *path,
                   media_audio_pacer_seek_reset(&hw_video_pacer, audio_time);
                   seek_video_catchup_until_ms = audio_time;
                   seek_video_catchup_hidden = 0;
+                  seek_video_dropped_packets = 0;
+                  seek_video_drop_last_log_ms = 0;
                   if (!MEDIA_SEEK_ACCELERATE_FRAMES) {
                      (void)set_video_layer_visible(0, 0, 0, 0, 0);
                      video_layer_revealed = 0;
@@ -5549,6 +5697,7 @@ static int media_play_native_video(const char *path,
             &video_packets);
 
          if (write_ret < 0) {
+            native_video_failed = 1;
             printf("unifrog media native video write failed ret=%d packets=%lu path=%s\n",
                write_ret, (unsigned long)video_packets, path);
             av_packet_unref(packet);
@@ -5556,12 +5705,15 @@ static int media_play_native_video(const char *path,
          }
          if (seek_video_catchup_until_ms != MEDIA_TIME_UNSET &&
              !seek_catchup_packet) {
-            printf("unifrog media seek video catchup_done mode=%s packet_ms=%ld until=%lld hidden=%d path=%s\n",
+            printf("unifrog media seek video catchup_done mode=%s packet_ms=%ld until=%lld hidden=%d dropped=%lu path=%s\n",
                MEDIA_SEEK_ACCELERATE_FRAMES ? "accelerate" : "skip",
                (long)video_packet_ms, (long long)seek_video_catchup_until_ms,
-               seek_video_catchup_hidden, path ? path : "");
+               seek_video_catchup_hidden,
+               (unsigned long)seek_video_dropped_packets, path ? path : "");
             seek_video_catchup_until_ms = MEDIA_TIME_UNSET;
             seek_video_catchup_hidden = 0;
+            seek_video_dropped_packets = 0;
+            seek_video_drop_last_log_ms = 0;
          }
          if (!seek_catchup_packet || MEDIA_SEEK_ACCELERATE_FRAMES)
             (void)media_native_video_reveal_if_ready(video_fd,
@@ -5659,7 +5811,12 @@ static int media_play_native_video(const char *path,
             audio_time >= 0 ? audio_time : video_time, duration_ms, 0, path);
       }
    }
-   media_video_finish_eos(video_fd, VIDEO_EOS_TIMEOUT_MS);
+   if (!native_video_failed) {
+      media_video_finish_eos(video_fd, VIDEO_EOS_TIMEOUT_MS);
+   } else {
+      printf("unifrog media native video skip_eos reason=write_failed packets=%lu path=%s\n",
+         (unsigned long)video_packets, path ? path : "");
+   }
    if (video_fd >= 0) {
       struct vdec_decore_status status;
       int64_t video_time = -1;
@@ -5693,7 +5850,8 @@ static int media_play_native_video(const char *path,
    }
    if (auddec.fd >= 0)
       media_auddec_finish(&auddec, 1000);
-   ret = video_packets && (frames_decoded || frames_displayed) ? 0 : -1;
+   ret = !native_video_failed && video_packets &&
+      (frames_decoded || frames_displayed) ? 0 : -1;
 
 out:
    printf("unifrog media native end ret=%d video_packets=%lu audio_frames=%lu ms=%lu path=%s\n",
@@ -5706,13 +5864,14 @@ out:
       unifrog_audio_close(&audio);
    media_auddec_close(&auddec);
    if (video_fd >= 0) {
-      struct vdec_rls_param rls;
+      int decoder_failed = native_video_failed ||
+         (ret < 0 && video_packets > 0);
 
-      memset(&rls, 0, sizeof(rls));
-      rls.closevp = 0;
-      rls.fillblack = 0;
-      (void)ioctl(video_fd, VIDDEC_RLS, (unsigned long)&rls);
+      media_video_release_decoder(video_fd, decoder_failed ? 1 : 0, 0,
+         decoder_failed ? "native_video_error" : "native_video_close", path);
       close(video_fd);
+      if (decoder_failed)
+         media_video_reset_modules("native_video_error", path);
    }
    close_display();
    swr_free(&audio_converter.swr);

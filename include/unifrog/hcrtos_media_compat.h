@@ -14,6 +14,15 @@
 #ifndef AUDDEV_I2SO
 #define AUDDEV_I2SO (1u << 0)
 #endif
+#ifndef AUDDEV_PCMO
+#define AUDDEV_PCMO (1u << 1)
+#endif
+#ifndef AUDDEV_SPO
+#define AUDDEV_SPO (1u << 2)
+#endif
+#ifndef AUDDEV_DDP_SPO
+#define AUDDEV_DDP_SPO (1u << 3)
+#endif
 
 typedef enum AvPacketType {
    AV_PACKET_ES_DATA,

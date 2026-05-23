@@ -50,11 +50,16 @@ or `src/unifrog_media.c`.
   gate can inspect PCM buffers before transfer. The audsink backend remains a
   fallback for those short sounds.
 - Libretro core playback uses the HCRTOS AUDSINK path explicitly. SF2000 keeps
-  the lower-cost mono-left route. GB300 or a stock-bit GB300 input bus requests
-  stereo frames, matching the old stock multicore path; GB300 diagnostics should
-  show `pref_ch=2` and `route=gb300_audsink_stereo`. The libretro host still
-  controls the outer SND mute and amp gate so silence does not hold the analog
-  path open.
+  the lower-cost mono-left route. GB300 or a stock-bit GB300 input bus routes
+  AUDSINK to `AUDSINK_SND_DEVBIT_I2SO | AUDSINK_SND_DEVBIT_SPO`, requests
+  stereo frames, and uses stereo duplicate mode, matching the old stock
+  multicore direction and HCRTOS projector/cast examples. GB300 diagnostics
+  should show `pref_ch=2`, `route=gb300_l15`, and `snd=0x5`. The libretro host
+  still controls the outer SND mute and amp gate so silence does not hold the
+  analog path open.
+- On GB300, UniFrog's AUTO PCM opener tries AUDSINK before direct
+  `/dev/sndC0i2so`. Direct SND remains first on SF2000 because it gives the
+  silence gate full PCM visibility and has been the stable route there.
 - Audio-only and native video-container audio playback prefer compressed
   packets through `/dev/auddec` when the linked HCRTOS plugin supports the
   codec. Unsupported or failed software-only routes still fall back to
@@ -78,6 +83,11 @@ or `src/unifrog_media.c`.
   This matches the stock HCRTOS direct-decoder examples, which memset
   `struct audio_config` and do not set the field. UniFrog keeps compatibility
   variants with value `1`, but the stock-style zero value is attempted first.
+- GB300 compressed `/dev/auddec` routes try `AUDDEV_I2SO | AUDDEV_SPO` before
+  the SF2000-only `AUDDEV_I2SO` profiles. HCRTOS projector/cast sources set this
+  same combined output mask before launching local media, and GB300 logs should
+  therefore show `route_policy ... gb300=1 preferred_snd=0x5` followed by an
+  opened `gb300_*` auddec profile.
 - Audio-only compressed playback should open `/dev/auddec` in freerun mode
   first. STC update/sync modes are reserved for audio plus video, where the
   video decoder can synchronize to the audio-owned clock.

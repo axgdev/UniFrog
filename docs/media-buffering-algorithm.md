@@ -151,9 +151,16 @@ Set these in `config.mk` or on the `make` command line:
   `1.0` flush rate before feeding more packets.
 - `MEDIA_SEEK_ACCELERATE_FRAMES`: set to `1` to show the older visible
   fast-forward catch-up after seeks. The default `0` keeps the video plane
-  hidden until the decoder reaches the requested timestamp. Compressed reference
-  packets are still fed, because dropping H.264 reference packets can corrupt
-  later frames.
+  hidden and drops pre-target video packets until demux reaches the requested
+  timestamp. This is intentionally more aggressive than the old hidden-feed path:
+  repeated seek stress in 0125 showed that feeding hidden pre-target packets can
+  wedge `/dev/viddec` writes with `errno=1`, after which later `VIDDEC_INIT`
+  calls fail until the decoder module is reset. Set this to `1` only when the
+  visible fast-forward effect is preferred over fast post-seek recovery.
+- `MEDIA_RESET_VIDDEC_ON_FAIL`: defaults to `1`. If native video hits a hard
+  write failure or `VIDDEC_INIT` returns `EPERM`, UniFrog releases `/dev/viddec`
+  with `closevp=1` and reinitializes the `viddec` module after closing the
+  descriptor. Normal exits still use the lighter release path.
 - `MEDIA_VIDEO_BUFFERING_START_MS` and `MEDIA_VIDEO_BUFFERING_END_MS`: decoder
   buffering thresholds passed to `/dev/viddec`.
 - `MEDIA_AUDIO_BUFFERING_START_MS` and `MEDIA_AUDIO_BUFFERING_END_MS`: decoder
