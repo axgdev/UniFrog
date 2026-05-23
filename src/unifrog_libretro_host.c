@@ -2562,15 +2562,22 @@ static int host_audio_scale_sample(int sample)
 
 static unsigned host_audio_write_attempts(void)
 {
+   unsigned attempts = LIBRETRO_AUDIO_WRITE_ATTEMPTS;
+
    if (host.core_id && strcmp(host.core_id, "qpsx") == 0)
-      return 1;
-   return LIBRETRO_AUDIO_WRITE_ATTEMPTS;
+      attempts = 1;
+   if (unifrog_audio_prefers_stereo_output() && attempts < 8u)
+      attempts = 8u;
+   return attempts;
 }
 
 static unsigned host_audio_write_poll_ms(void)
 {
    if (host.core_id && strcmp(host.core_id, "qpsx") == 0)
       return 0;
+   if (unifrog_audio_prefers_stereo_output() &&
+       LIBRETRO_AUDIO_WRITE_POLL_MS < 2u)
+      return 2u;
    return LIBRETRO_AUDIO_WRITE_POLL_MS;
 }
 
@@ -2590,8 +2597,15 @@ static unsigned host_audio_output_channels(void)
 
 static const char *host_audio_route_name(void)
 {
-   return host.audio_channels > 1u ? "gb300_audsink_stereo" :
+   return host.audio_channels > 1u ? "gb300_auto_snd_stereo" :
       LIBRETRO_AUDIO_ROUTE;
+}
+
+static int host_audio_backend(void)
+{
+   if (unifrog_audio_prefers_stereo_output())
+      return UNIFROG_AUDIO_BACKEND_AUTO;
+   return LIBRETRO_AUDIO_BACKEND;
 }
 
 static void host_audio_store_mono(int16_t *buffer, unsigned frame,
@@ -7237,7 +7251,7 @@ out_content_prepare:
          host_audio_route_name());
    } else if (unifrog_audio_open_backend(&host.audio, host.audio_output_rate,
        host.audio_channels, LIBRETRO_AUDIO_PERIOD_BYTES,
-       LIBRETRO_AUDIO_PERIODS, LIBRETRO_AUDIO_BACKEND) == 0) {
+       LIBRETRO_AUDIO_PERIODS, host_audio_backend()) == 0) {
       int volume_ret;
       int mute_ret;
       int silence_ret = 0;

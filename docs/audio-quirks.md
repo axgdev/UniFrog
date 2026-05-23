@@ -49,16 +49,15 @@ or `src/unifrog_media.c`.
 - UniFrog-owned UI/theme playback prefers the SND backend because the silence
   gate can inspect PCM buffers before transfer. The audsink backend remains a
   fallback for those short sounds.
-- Libretro core playback uses the HCRTOS AUDSINK path explicitly. SF2000 keeps
-  the lower-cost mono-left route. GB300 or a stock-bit GB300 input bus routes
-  AUDSINK to `AUDSINK_SND_DEVBIT_I2SO | AUDSINK_SND_DEVBIT_SPO`, requests
-  stereo frames, and uses stereo duplicate mode, matching the old stock
-  multicore direction and HCRTOS projector/cast examples. GB300 diagnostics
-  should show `pref_ch=2`, `route=gb300_l15`, and `snd=0x5`. The libretro host
-  still controls the outer SND mute and amp gate so silence does not hold the
-  analog path open.
-- On GB300, UniFrog's AUTO PCM opener tries AUDSINK before direct
-  `/dev/sndC0i2so`. Direct SND remains first on SF2000 because it gives the
+- Libretro core playback uses the HCRTOS AUDSINK path explicitly on SF2000 to
+  keep the lower-cost mono-left route. GB300 or a stock-bit GB300 input bus
+  requests stereo frames but lets UniFrog's AUTO PCM opener choose the backend;
+  current GB300 logs show AUDSINK accepts init but fails PCM transfer, while
+  direct `/dev/sndC0i2so` accepts DMA writes.
+- On GB300, UniFrog's AUTO PCM opener tries direct `/dev/sndC0i2so` before
+  AUDSINK. The direct SND open uses the vendor-style HCRTOS parameters from the
+  cast/sound-test examples: `O_RDWR`, AUDPAD source, `start_threshold=2`, and a
+  larger DMA ring. Direct SND remains first on SF2000 because it gives the
   silence gate full PCM visibility and has been the stable route there.
 - On GB300, the first PCM or hardware-auddec audio open runs a one-shot route
   probe before normal playback. It emits short tagged PCM beeps through every
@@ -88,14 +87,12 @@ or `src/unifrog_media.c`.
   This matches the stock HCRTOS direct-decoder examples, which memset
   `struct audio_config` and do not set the field. UniFrog keeps compatibility
   variants with value `1`, but the stock-style zero value is attempted first.
-- GB300 compressed `/dev/auddec` routes include `AUDDEV_I2SO | AUDDEV_SPO`,
-  `AUDDEV_SPO`, `AUDDEV_PCMO`, and `AUDDEV_I2SO | AUDDEV_PCMO` before the
-  SF2000-only `AUDDEV_I2SO` profiles. HCRTOS projector/cast sources set the
-  combined I2SO+SPO mask before launching local media, but current GB300
-  diagnostics rotate the first GB300 route attempted on each media open because
-  a route can return successful `AUDDEC_INIT`/`AUDDEC_START` while still being
-  physically silent. Logs show `route_policy ... gb_routes=6 gb_offset=N`,
-  then the opened `gb300_*` auddec profile.
+- GB300 compressed `/dev/auddec` routes start with an I2SO-only KSHM profile
+  and do not rotate the first route. The 0127 diagnostics showed only
+  `/dev/sndC0i2so` exists as a direct SND node; SPO/PCMO masks can return
+  successful `AUDDEC_INIT`/`AUDDEC_START` while leaving the decoder clock stuck
+  and the speaker silent. The combined I2SO+SPO, SPO, and PCMO profiles remain
+  as fallback diagnostics if I2SO-only init fails.
 - Audio-only compressed playback should open `/dev/auddec` in freerun mode
   first. STC update/sync modes are reserved for audio plus video, where the
   video decoder can synchronize to the audio-owned clock.
@@ -222,6 +219,9 @@ audible/logged order is:
 - `6 snd_spo_i2sodma`: direct `/dev/sndC0spo`, `SND_SPO_SOURCE_I2SODMA`.
 - `7 snd_spo_spodma`: direct `/dev/sndC0spo`, `SND_SPO_SOURCE_SPODMA`.
 - `8 snd_pcmo_audpad`: direct `/dev/sndC0pcmo`, `SND_PCM_SOURCE_AUDPAD`.
+- `9 gb300_gate_probe`: direct `/dev/sndC0i2so` with a louder tone while
+  trying the L15/R07 output levels `both_low`, `l15_low_r07_high`,
+  `l15_high_r07_low`, and `both_high`.
 
 If none of the probe routes is audible but the logs show successful init/start,
 focus on the GB300 amp gate, pinmux, or board detection. If a probe route is

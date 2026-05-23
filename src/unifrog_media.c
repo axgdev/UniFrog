@@ -81,8 +81,8 @@
 #define VIDEO_LOG_AUTO_FLUSH_BYTES (64u * 1024u)
 #define MEDIA_AUDIO_WRITE_SPACE_TIMEOUT_MS 5000u
 #define MEDIA_AUDIO_PROGRESS_POLL_MS 100u
-#define MEDIA_GB300_AUDDEC_ROUTE_VARIANTS 6u
-#define MEDIA_GB300_RAW_AUDDEC_ROUTE_VARIANTS 6u
+#define MEDIA_GB300_AUDDEC_ROUTE_VARIANTS 1u
+#define MEDIA_GB300_RAW_AUDDEC_ROUTE_VARIANTS 1u
 #ifndef UNIFROG_MEDIA_VIDEO_FEED_LEAD_MS
 #define UNIFROG_MEDIA_VIDEO_FEED_LEAD_MS 500
 #endif
@@ -346,7 +346,7 @@ static int media_auddec_variant_allowed(const char *label)
 static uint32_t media_audio_preferred_snd_devs(void)
 {
    if (unifrog_audio_prefers_stereo_output())
-      return AUDDEV_I2SO | AUDDEV_SPO;
+      return AUDDEV_I2SO;
    return AUDDEV_I2SO;
 }
 
@@ -4309,7 +4309,15 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
       /*
        * The linked libauddrv.a treats enable_audsink == 0 as the internal
        * audsink render path. Stock direct-decoder examples leave it zero.
+       *
+       * GB300 runtime diagnostics only expose /dev/sndC0i2so. Keep I2SO-only
+       * first and non-rotated; SPO/PCMO routes can init successfully while
+       * still producing no audible output on that board.
        */
+      { "gb300_raw_i2so_kshm", AUDDEV_I2SO, 0, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "gb300_raw_i2so_audsink_kshm", AUDDEV_I2SO, 1, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
       { "gb300_raw_i2so_spo_kshm", AUDDEV_I2SO | AUDDEV_SPO, 0, 0,
          MEDIA_AUDIO_KSHM_SIZE },
       { "gb300_raw_i2so_spo_audsink_kshm", AUDDEV_I2SO | AUDDEV_SPO, 1, 0,
@@ -4454,7 +4462,15 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       /*
        * KSHM-backed profiles must come first. On this driver a no-KSHM
        * profile can init/start cleanly but never consume compressed packets.
+       *
+       * GB300 only has a working I2SO SND node in current diagnostics. Do not
+       * rotate into SPO/PCMO as the first route: those masks can initialize
+       * while leaving the decoder clock stuck and the speaker silent.
        */
+      { "gb300_i2so_kshm", 0, AUDDEV_I2SO, 0, 1, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "gb300_i2so_audsink_kshm", 0, AUDDEV_I2SO, 1, 1, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
       { "gb300_i2so_spo_kshm", 0, AUDDEV_I2SO | AUDDEV_SPO, 0, 1, 0,
          MEDIA_AUDIO_KSHM_SIZE },
       { "gb300_i2so_spo_audsink_kshm", 0, AUDDEV_I2SO | AUDDEV_SPO, 1, 1, 0,

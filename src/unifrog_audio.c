@@ -36,11 +36,20 @@
 #ifndef UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE
 #define UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE 1
 #endif
+#ifndef UNIFROG_AUDIO_GB300_PREFER_SND
+#define UNIFROG_AUDIO_GB300_PREFER_SND 1
+#endif
 #define GB300_ROUTE_PROBE_RATE 44100u
 #define GB300_ROUTE_PROBE_CHANNELS 2u
 #define GB300_ROUTE_PROBE_PERIOD_BYTES 4096u
 #define GB300_ROUTE_PROBE_PERIODS 8u
 #define GB300_ROUTE_PROBE_FRAMES 8192u
+#define GB300_SND_PERIOD_BYTES 3072u
+#define GB300_SND_PERIODS 40u
+#define GB300_SND_START_THRESHOLD 2u
+#define GB300_SND_MIN_WRITE_ATTEMPTS 16u
+#define GB300_GATE_PROBE_VOLUME 100u
+#define GB300_GATE_PROBE_STAGE_XFERS 2u
 #define PWMCTRL_BASE ((volatile uint32_t *)0xb8818410u)
 #define SND0_BASE ((volatile uint32_t *)0xb880a000u)
 #define SND0_DAC_BASE ((volatile uint32_t *)0xb880b000u)
@@ -93,6 +102,20 @@ static const char *audio_gate_name(enum audio_gate gate)
    return gate == AUDIO_GATE_GB300_L15 ? "gb300_l15" : "sf2000_r07";
 }
 
+static const char *audio_backend_name(int backend)
+{
+   switch (backend) {
+   case UNIFROG_AUDIO_BACKEND_SND:
+      return "snd";
+   case UNIFROG_AUDIO_BACKEND_AUDSINK:
+      return "audsink";
+   case UNIFROG_AUDIO_BACKEND_AUTO:
+      return "auto";
+   default:
+      return "unknown";
+   }
+}
+
 int unifrog_audio_prefers_stereo_output(void)
 {
    return current_audio_gate() == AUDIO_GATE_GB300_L15;
@@ -101,8 +124,13 @@ int unifrog_audio_prefers_stereo_output(void)
 static uint32_t current_audio_snd_devs(void)
 {
    if (current_audio_gate() == AUDIO_GATE_GB300_L15)
-      return AUDSINK_SND_DEVBIT_I2SO | AUDSINK_SND_DEVBIT_SPO;
+      return AUDSINK_SND_DEVBIT_I2SO;
    return AUDSINK_SND_DEVBIT_I2SO;
+}
+
+static unsigned system_audio_volume(void)
+{
+   return unifrog_audio_prefers_stereo_output() ? 90u : SYSTEM_AUDIO_VOLUME;
 }
 
 static void set_reg_gate(volatile uint32_t *dir, volatile uint32_t *out,
@@ -116,6 +144,20 @@ static void set_reg_gate(volatile uint32_t *dir, volatile uint32_t *out,
       value &= ~mask;
    else
       value |= mask;
+   *out = value;
+}
+
+static void set_reg_level(volatile uint32_t *dir, volatile uint32_t *out,
+   uint32_t mask, int high)
+{
+   uint32_t value;
+
+   *dir = *dir | mask;
+   value = *out;
+   if (high)
+      value |= mask;
+   else
+      value &= ~mask;
    *out = value;
 }
 
@@ -222,7 +264,7 @@ static int ensure_audio_drivers(void)
 
 static int open_system_snd(void)
 {
-   return open("/dev/sndC0i2so", O_WRONLY);
+   return open("/dev/sndC0i2so", O_RDWR);
 }
 
 static void configure_neutral_audio_controls_fd(int fd, const char *tag)
@@ -361,9 +403,24 @@ static int open_snd(struct unifrog_audio *audio,
 {
    struct snd_pcm_params params;
    snd_pcm_uframes_t avail_min;
+   struct snd_hw_info hw;
+   unsigned requested_period = period_bytes;
+   unsigned requested_periods = periods;
+   unsigned start_threshold = 0;
+   int hw_ret;
+   int hw_errno = 0;
+   int avail_ret = -1;
    int fd;
 
-   fd = open("/dev/sndC0i2so", O_WRONLY);
+   if (unifrog_audio_prefers_stereo_output()) {
+      if (period_bytes < GB300_SND_PERIOD_BYTES)
+         period_bytes = GB300_SND_PERIOD_BYTES;
+      if (periods < GB300_SND_PERIODS)
+         periods = GB300_SND_PERIODS;
+      start_threshold = GB300_SND_START_THRESHOLD;
+   }
+
+   fd = open("/dev/sndC0i2so", O_RDWR);
    if (fd < 0)
       return -1;
 
@@ -377,12 +434,16 @@ static int open_snd(struct unifrog_audio *audio,
    params.period_size = period_bytes;
    params.periods = periods;
    params.bitdepth = 16;
-   params.start_threshold = 0;
+   params.start_threshold = start_threshold;
+   params.pcm_source = SND_PCM_SOURCE_AUDPAD;
    params.pcm_dest = SND_PCM_DEST_DMA;
-   if (ioctl(fd, SND_IOCTL_HW_PARAMS, &params) != 0)
+   errno = 0;
+   hw_ret = ioctl(fd, SND_IOCTL_HW_PARAMS, &params);
+   hw_errno = errno;
+   if (hw_ret != 0)
       goto fail;
    avail_min = period_bytes;
-   ioctl(fd, SND_IOCTL_AVAIL_MIN, &avail_min);
+   avail_ret = ioctl(fd, SND_IOCTL_AVAIL_MIN, &avail_min);
    configure_neutral_audio_controls_fd(fd, "open_snd");
 
    audio->fd = fd;
@@ -393,13 +454,24 @@ static int open_snd(struct unifrog_audio *audio,
    audio->periods = periods;
    audio->frame_bytes = channels * sizeof(int16_t);
    audio->muted = 1;
-   printf("unifrog audio open backend=snd fd=%d rate=%u ch=%u period=%u periods=%u route=%s pref_ch=%u\n",
-      fd, rate, channels, period_bytes, periods,
+   memset(&hw, 0, sizeof(hw));
+   (void)ioctl(fd, SND_IOCTL_GET_HW_INFO, &hw);
+   printf("unifrog audio open backend=snd fd=%d rate=%u ch=%u req_period=%u req_periods=%u period=%u periods=%u start_threshold=%u avail_min=%lu avail_ret=%d route=%s pref_ch=%u dma=0x%08lx/%lu hw_period=%lu hw_periods=%lu\n",
+      fd, rate, channels, requested_period, requested_periods,
+      period_bytes, periods, start_threshold, (unsigned long)avail_min,
+      avail_ret,
       audio_gate_name(current_audio_gate()),
-      unifrog_audio_prefers_stereo_output() ? 2u : 1u);
+      unifrog_audio_prefers_stereo_output() ? 2u : 1u,
+      (unsigned long)hw.dma_addr, (unsigned long)hw.dma_size,
+      (unsigned long)hw.pcm_params.period_size,
+      (unsigned long)hw.pcm_params.periods);
    return 0;
 
 fail:
+   printf("unifrog audio open backend=snd failed fd=%d rate=%u ch=%u req_period=%u req_periods=%u period=%u periods=%u start_threshold=%u hw_ret=%d hw_errno=%d route=%s\n",
+      fd, rate, channels, requested_period, requested_periods,
+      period_bytes, periods, start_threshold, hw_ret, hw_errno,
+      audio_gate_name(current_audio_gate()));
    close(fd);
    return -1;
 }
@@ -429,9 +501,15 @@ int unifrog_audio_open_backend(struct unifrog_audio *audio,
       return open_snd(audio, rate, channels, period_bytes, periods);
 
    if (unifrog_audio_prefers_stereo_output()) {
+#if UNIFROG_AUDIO_GB300_PREFER_SND
+      if (open_snd(audio, rate, channels, period_bytes, periods) == 0)
+         return 0;
+      return open_audsink(audio, rate, channels, period_bytes, periods);
+#else
       if (open_audsink(audio, rate, channels, period_bytes, periods) == 0)
          return 0;
       return open_snd(audio, rate, channels, period_bytes, periods);
+#endif
    }
 
    if (open_snd(audio, rate, channels, period_bytes, periods) == 0)
@@ -500,11 +578,18 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
    struct pollfd pollfd;
    int ret = -1;
    unsigned tries = 0;
+   int last_errno = 0;
+   static unsigned failure_log_count;
+   static unsigned success_log_count;
 
    if (!audio || audio->fd < 0 || !samples || frames == 0)
       return -1;
    if (attempts == 0)
       attempts = 1;
+   if (unifrog_audio_prefers_stereo_output() &&
+       audio->backend == UNIFROG_AUDIO_BACKEND_SND &&
+       attempts < GB300_SND_MIN_WRITE_ATTEMPTS)
+      attempts = GB300_SND_MIN_WRITE_ATTEMPTS;
    if (audio->backend == UNIFROG_AUDIO_BACKEND_SND) {
       int has_signal = 0;
       unsigned channels = audio->channels ? audio->channels : 1u;
@@ -536,22 +621,52 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
          memset(&xfer, 0, sizeof(xfer));
          xfer.data = (void *)samples;
          xfer.frames = frames;
+         errno = 0;
          ret = ioctl(audio->fd, AUDSINK_IOCTL_XFER, &xfer);
+         last_errno = errno;
       } else {
          struct snd_xfer xfer;
 
          memset(&xfer, 0, sizeof(xfer));
          xfer.data = (void *)samples;
          xfer.frames = frames;
+         errno = 0;
          ret = ioctl(audio->fd, SND_IOCTL_XFER, &xfer);
+         last_errno = errno;
       }
-      if (ret >= 0)
+      if (ret >= 0) {
+         if (unifrog_audio_prefers_stereo_output() &&
+             audio->backend == UNIFROG_AUDIO_BACKEND_SND &&
+             success_log_count < 8) {
+            snd_pcm_uframes_t delay = 0;
+            int delay_ret = ioctl(audio->fd, SND_IOCTL_DELAY, &delay);
+
+            success_log_count++;
+            printf("unifrog audio write ok backend=snd fd=%d frames=%u tries=%u attempts=%u delay_ret=%d delay=%lu muted=%d\n",
+               audio->fd, frames, tries + 1, attempts, delay_ret,
+               (unsigned long)delay, audio->muted);
+         }
          return 0;
+      }
       if (tries + 1 >= attempts)
          break;
       poll(&pollfd, 1, (int)poll_timeout_ms);
    } while (++tries < attempts);
 
+   if (failure_log_count < 20) {
+      snd_pcm_uframes_t delay = 0;
+      int delay_ret = -1;
+
+      failure_log_count++;
+      if (audio->backend == UNIFROG_AUDIO_BACKEND_AUDSINK)
+         delay_ret = ioctl(audio->fd, AUDSINK_IOCTL_DELAY, &delay);
+      else
+         delay_ret = ioctl(audio->fd, SND_IOCTL_DELAY, &delay);
+      printf("unifrog audio write fail backend=%s fd=%d ret=%d errno=%d frames=%u tries=%u attempts=%u poll_ms=%u rate=%u ch=%u muted=%d delay_ret=%d delay=%lu\n",
+         audio_backend_name(audio->backend), audio->fd, ret, last_errno,
+         frames, tries + 1, attempts, poll_timeout_ms, audio->rate,
+         audio->channels, audio->muted, delay_ret, (unsigned long)delay);
+   }
    return ret;
 }
 
@@ -613,7 +728,7 @@ int unifrog_audio_set_output_enabled(struct unifrog_audio *audio, int enabled)
       return -1;
    if (enabled) {
       apply_stock_audio_silence_policy("enable");
-      (void)unifrog_audio_set_volume(audio, SYSTEM_AUDIO_VOLUME);
+      (void)unifrog_audio_set_volume(audio, system_audio_volume());
       set_stock_audio_output_gate(1);
       if (audio->backend == UNIFROG_AUDIO_BACKEND_SND)
          (void)unifrog_audio_set_mute(audio, 1);
@@ -631,7 +746,7 @@ void unifrog_audio_set_system_output_enabled(int enabled)
    if (enabled) {
       (void)ensure_audio_drivers();
       apply_stock_audio_silence_policy("system_enable");
-      (void)unifrog_audio_set_system_volume(SYSTEM_AUDIO_VOLUME);
+      (void)unifrog_audio_set_system_volume(system_audio_volume());
       (void)unifrog_audio_set_system_mute(0);
       set_stock_audio_output_gate(1);
    } else {
@@ -657,6 +772,32 @@ static void fill_gb300_route_probe_pcm(unsigned route)
    }
 }
 
+static void gb300_gate_probe_set_level(const char *stage, int l15_high,
+   int r07_high)
+{
+   uint32_t l_dir;
+   uint32_t l_out;
+   uint32_t r_dir;
+   uint32_t r_out;
+
+   pinmux_configure(PINPAD_L15, PINMUX_L15_GPIO);
+   gpio_configure(PINPAD_L15, GPIO_DIR_OUTPUT);
+   gpio_set_output(PINPAD_L15, l15_high ? true : false);
+   set_reg_level(GPIO_L_DIR, GPIO_L_OUTPUT, GPIO_L15_MASK, l15_high);
+
+   pinmux_configure(PINPAD_R07, PINMUX_R07_GPIO);
+   gpio_configure(PINPAD_R07, GPIO_DIR_OUTPUT);
+   gpio_set_output(PINPAD_R07, r07_high ? true : false);
+   set_reg_level(GPIO_R_DIR, GPIO_R_OUTPUT, GPIO_R07_MASK, r07_high);
+
+   unifrog_audio_debug_gate(&l_dir, &l_out, &r_dir, &r_out);
+   printf("unifrog audio gb300_gate_probe gate stage=%s l15_high=%d r07_high=%d l=0x%08lx/0x%08lx r=0x%08lx/0x%08lx mux_l15=%u mux_r07=%u\n",
+      stage ? stage : "?", l15_high, r07_high,
+      (unsigned long)l_dir, (unsigned long)l_out,
+      (unsigned long)r_dir, (unsigned long)r_out,
+      read_pinmux(PINPAD_L15), read_pinmux(PINPAD_R07));
+}
+
 static void init_gb300_route_probe_pcm_params(struct snd_pcm_params *params,
    snd_pcm_source_t source)
 {
@@ -670,7 +811,7 @@ static void init_gb300_route_probe_pcm_params(struct snd_pcm_params *params,
    params->period_size = GB300_ROUTE_PROBE_PERIOD_BYTES;
    params->periods = GB300_ROUTE_PROBE_PERIODS;
    params->bitdepth = 16;
-   params->start_threshold = 0;
+   params->start_threshold = GB300_SND_START_THRESHOLD;
    params->pcm_source = source;
    params->pcm_dest = SND_PCM_DEST_DMA;
 }
@@ -681,16 +822,21 @@ static int gb300_route_probe_audsink(unsigned route, const char *name,
    struct audsink_init_params params;
    struct audsink_xfer xfer;
    snd_pcm_uframes_t delay = 0;
-   uint8_t volume = SYSTEM_AUDIO_VOLUME;
+   uint8_t volume = (uint8_t)system_audio_volume();
    int fd;
    int init_ret = -1;
    int init_errno = 0;
    int dup_ret = -1;
    int volume_ret = -1;
+   int volume_errno = 0;
    int start_ret = -1;
+   int start_errno = 0;
    int xfer_ret = -1;
+   int xfer_errno = 0;
    int delay_ret = -1;
+   int delay_errno = 0;
    int drain_ret = -1;
+   int drain_errno = 0;
 
    fd = open("/dev/audsink", O_WRONLY);
    if (fd < 0) {
@@ -710,22 +856,33 @@ static int gb300_route_probe_audsink(unsigned route, const char *name,
    init_errno = errno;
    if (init_ret == 0) {
       dup_ret = ioctl(fd, AUDSINK_IOCTL_SETDUPLICATE, duplicate);
+      errno = 0;
       volume_ret = ioctl(fd, AUDSINK_IOCTL_SET_VOLUME, &volume);
+      volume_errno = errno;
+      errno = 0;
       start_ret = ioctl(fd, AUDSINK_IOCTL_START, 0);
+      start_errno = errno;
       if (start_ret == 0) {
          memset(&xfer, 0, sizeof(xfer));
          xfer.data = gb300_route_probe_pcm;
          xfer.frames = GB300_ROUTE_PROBE_FRAMES;
+         errno = 0;
          xfer_ret = ioctl(fd, AUDSINK_IOCTL_XFER, &xfer);
+         xfer_errno = errno;
+         errno = 0;
          delay_ret = ioctl(fd, AUDSINK_IOCTL_DELAY, &delay);
+         delay_errno = errno;
          usleep(220000);
+         errno = 0;
          drain_ret = ioctl(fd, AUDSINK_IOCTL_DRAIN, 0);
+         drain_errno = errno;
       }
    }
-   printf("unifrog audio gb300_probe route=%u kind=audsink name=%s fd=%d snd=0x%lx dup=%d init=%d init_errno=%d duplicate=%d volume=%d start=%d xfer=%d delay_ret=%d delay=%lu drain=%d\n",
+   printf("unifrog audio gb300_probe route=%u kind=audsink name=%s fd=%d snd=0x%lx dup=%d init=%d init_errno=%d duplicate=%d volume=%d volume_errno=%d start=%d start_errno=%d xfer=%d xfer_errno=%d delay_ret=%d delay_errno=%d delay=%lu drain=%d drain_errno=%d\n",
       route, name, fd, (unsigned long)snd_devs, duplicate, init_ret,
-      init_errno, dup_ret, volume_ret, start_ret, xfer_ret, delay_ret,
-      (unsigned long)delay, drain_ret);
+      init_errno, dup_ret, volume_ret, volume_errno, start_ret, start_errno,
+      xfer_ret, xfer_errno, delay_ret, delay_errno, (unsigned long)delay,
+      drain_ret, drain_errno);
    (void)ioctl(fd, AUDSINK_IOCTL_DROP, 0);
    (void)ioctl(fd, AUDSINK_IOCTL_FLUSH, 0);
    close(fd);
@@ -740,18 +897,25 @@ static int gb300_route_probe_snd(unsigned route, const char *name,
    struct snd_hw_info hw;
    snd_pcm_uframes_t avail_min = GB300_ROUTE_PROBE_PERIOD_BYTES;
    snd_pcm_uframes_t delay = 0;
-   uint8_t volume = SYSTEM_AUDIO_VOLUME;
+   uint8_t volume = (uint8_t)system_audio_volume();
    int fd;
    int hw_ret = -1;
    int hw_errno = 0;
    int avail_ret = -1;
+   int avail_errno = 0;
    int neutral_ret = 0;
    int volume_ret = -1;
+   int volume_errno = 0;
    int mute_ret = -1;
+   int mute_errno = 0;
    int start_ret = -1;
+   int start_errno = 0;
    int xfer_ret = -1;
+   int xfer_errno = 0;
    int delay_ret = -1;
+   int delay_errno = 0;
    int drain_ret = -1;
+   int drain_errno = 0;
    int info_ret = -1;
 
    fd = open(dev, O_RDWR);
@@ -766,27 +930,43 @@ static int gb300_route_probe_snd(unsigned route, const char *name,
    hw_ret = ioctl(fd, SND_IOCTL_HW_PARAMS, &params);
    hw_errno = errno;
    if (hw_ret == 0) {
+      errno = 0;
       avail_ret = ioctl(fd, SND_IOCTL_AVAIL_MIN, &avail_min);
+      avail_errno = errno;
       configure_neutral_audio_controls_fd(fd, name);
+      errno = 0;
       volume_ret = ioctl(fd, SND_IOCTL_SET_VOLUME, &volume);
+      volume_errno = errno;
+      errno = 0;
       mute_ret = ioctl(fd, SND_IOCTL_SET_MUTE, 0);
+      mute_errno = errno;
+      errno = 0;
       start_ret = ioctl(fd, SND_IOCTL_START, 0);
+      start_errno = errno;
       if (start_ret == 0) {
          memset(&xfer, 0, sizeof(xfer));
          xfer.data = gb300_route_probe_pcm;
          xfer.frames = GB300_ROUTE_PROBE_FRAMES;
+         errno = 0;
          xfer_ret = ioctl(fd, SND_IOCTL_XFER, &xfer);
+         xfer_errno = errno;
+         errno = 0;
          delay_ret = ioctl(fd, SND_IOCTL_DELAY, &delay);
+         delay_errno = errno;
          usleep(220000);
+         errno = 0;
          drain_ret = ioctl(fd, SND_IOCTL_DRAIN, 0);
+         drain_errno = errno;
       }
    }
    memset(&hw, 0, sizeof(hw));
    info_ret = ioctl(fd, SND_IOCTL_GET_HW_INFO, &hw);
-   printf("unifrog audio gb300_probe route=%u kind=snd name=%s dev=%s fd=%d source=%lu hw=%d hw_errno=%d avail=%d neutral=%d volume=%d mute=%d start=%d xfer=%d delay_ret=%d delay=%lu drain=%d info=%d dma=0x%08lx/%lu rate=%u ch=%u period=%lu periods=%lu\n",
+   printf("unifrog audio gb300_probe route=%u kind=snd name=%s dev=%s fd=%d source=%lu hw=%d hw_errno=%d avail=%d avail_errno=%d neutral=%d volume=%d volume_errno=%d mute=%d mute_errno=%d start=%d start_errno=%d xfer=%d xfer_errno=%d delay_ret=%d delay_errno=%d delay=%lu drain=%d drain_errno=%d info=%d dma=0x%08lx/%lu rate=%u ch=%u period=%lu periods=%lu\n",
       route, name, dev, fd, (unsigned long)source, hw_ret, hw_errno,
-      avail_ret, neutral_ret, volume_ret, mute_ret, start_ret, xfer_ret,
-      delay_ret, (unsigned long)delay, drain_ret, info_ret,
+      avail_ret, avail_errno, neutral_ret, volume_ret, volume_errno,
+      mute_ret, mute_errno, start_ret, start_errno, xfer_ret, xfer_errno,
+      delay_ret, delay_errno, (unsigned long)delay, drain_ret, drain_errno,
+      info_ret,
       (unsigned long)hw.dma_addr, (unsigned long)hw.dma_size,
       hw.pcm_params.rate, hw.pcm_params.channels,
       (unsigned long)hw.pcm_params.period_size,
@@ -796,6 +976,98 @@ static int gb300_route_probe_snd(unsigned route, const char *name,
    (void)ioctl(fd, SND_IOCTL_HW_FREE, 0);
    close(fd);
    return hw_ret == 0 && start_ret == 0 && xfer_ret >= 0 ? 0 : -1;
+}
+
+static void gb300_route_probe_gate_matrix(unsigned route)
+{
+   struct snd_pcm_params params;
+   struct snd_hw_info hw;
+   snd_pcm_uframes_t avail_min = GB300_ROUTE_PROBE_PERIOD_BYTES;
+   uint8_t volume = GB300_GATE_PROBE_VOLUME;
+   int fd;
+   int hw_ret = -1;
+   int avail_ret = -1;
+   int volume_ret = -1;
+   int mute_ret = -1;
+   int start_ret = -1;
+   static const struct {
+      const char *name;
+      int l15_high;
+      int r07_high;
+   } stages[] = {
+      { "both_low", 0, 0 },
+      { "l15_low_r07_high", 0, 1 },
+      { "l15_high_r07_low", 1, 0 },
+      { "both_high", 1, 1 },
+   };
+
+   fd = open("/dev/sndC0i2so", O_RDWR);
+   if (fd < 0) {
+      printf("unifrog audio gb300_gate_probe open=-1 errno=%d route=%u\n",
+         errno, route);
+      return;
+   }
+
+   init_gb300_route_probe_pcm_params(&params, SND_PCM_SOURCE_AUDPAD);
+   params.period_size = GB300_SND_PERIOD_BYTES;
+   params.periods = GB300_SND_PERIODS;
+   params.start_threshold = GB300_SND_START_THRESHOLD;
+   errno = 0;
+   hw_ret = ioctl(fd, SND_IOCTL_HW_PARAMS, &params);
+   if (hw_ret == 0) {
+      avail_ret = ioctl(fd, SND_IOCTL_AVAIL_MIN, &avail_min);
+      configure_neutral_audio_controls_fd(fd, "gb300_gate_probe");
+      volume_ret = ioctl(fd, SND_IOCTL_SET_VOLUME, &volume);
+      mute_ret = ioctl(fd, SND_IOCTL_SET_MUTE, 0);
+      start_ret = ioctl(fd, SND_IOCTL_START, 0);
+   }
+   memset(&hw, 0, sizeof(hw));
+   (void)ioctl(fd, SND_IOCTL_GET_HW_INFO, &hw);
+   printf("unifrog audio gb300_gate_probe begin route=%u fd=%d hw=%d avail=%d volume=%d mute=%d start=%d dma=0x%08lx/%lu rate=%u ch=%u period=%lu periods=%lu\n",
+      route, fd, hw_ret, avail_ret, volume_ret, mute_ret, start_ret,
+      (unsigned long)hw.dma_addr, (unsigned long)hw.dma_size,
+      hw.pcm_params.rate, hw.pcm_params.channels,
+      (unsigned long)hw.pcm_params.period_size,
+      (unsigned long)hw.pcm_params.periods);
+   if (hw_ret == 0 && start_ret == 0) {
+      for (unsigned i = 0; i < UNIFROG_AUDIO_ARRAY_SIZE(stages); i++) {
+         int last_ret = -1;
+         int last_errno = 0;
+         snd_pcm_uframes_t delay = 0;
+         int delay_ret = -1;
+
+         fill_gb300_route_probe_pcm(route + i);
+         gb300_gate_probe_set_level(stages[i].name, stages[i].l15_high,
+            stages[i].r07_high);
+         for (unsigned j = 0; j < GB300_GATE_PROBE_STAGE_XFERS; j++) {
+            struct snd_xfer xfer;
+
+            memset(&xfer, 0, sizeof(xfer));
+            xfer.data = gb300_route_probe_pcm;
+            xfer.frames = GB300_ROUTE_PROBE_FRAMES;
+            errno = 0;
+            last_ret = ioctl(fd, SND_IOCTL_XFER, &xfer);
+            last_errno = errno;
+            if (last_ret < 0)
+               usleep(2000);
+         }
+         delay_ret = ioctl(fd, SND_IOCTL_DELAY, &delay);
+         printf("unifrog audio gb300_gate_probe stage=%u name=%s l15_high=%d r07_high=%d xfers=%u last=%d last_errno=%d delay_ret=%d delay=%lu\n",
+            i, stages[i].name, stages[i].l15_high, stages[i].r07_high,
+            GB300_GATE_PROBE_STAGE_XFERS, last_ret, last_errno, delay_ret,
+            (unsigned long)delay);
+         usleep(320000);
+         (void)ioctl(fd, SND_IOCTL_DRAIN, 0);
+         gb300_gate_probe_set_level("between", 1, 1);
+         usleep(80000);
+      }
+   }
+   (void)ioctl(fd, SND_IOCTL_SET_MUTE, 1);
+   (void)ioctl(fd, SND_IOCTL_DROP, 0);
+   (void)ioctl(fd, SND_IOCTL_HW_FREE, 0);
+   close(fd);
+   set_stock_audio_output_gate(0);
+   printf("unifrog audio gb300_gate_probe end route=%u\n", route);
 }
 
 void unifrog_audio_run_gb300_route_probe_once(const char *tag)
@@ -861,6 +1133,9 @@ void unifrog_audio_run_gb300_route_probe_once(const char *tag)
       usleep(80000);
       route++;
    }
+
+   gb300_route_probe_gate_matrix(route);
+   route++;
 
    unifrog_audio_debug_dump(NULL, "gb300_probe_end");
    printf("unifrog audio gb300_probe end tag=%s routes=%u\n",
