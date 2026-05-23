@@ -120,10 +120,12 @@ For source-level SDK behavior clues, inspect:
   reads.
 - The current local-file tuning knobs are `MEDIA_AUDIO_FEED_LEAD_MS`,
   `MEDIA_VIDEO_FEED_LEAD_MS`, `MEDIA_FILE_BUFFER_SIZE`, and
-  `MEDIA_FILE_READAHEAD_SIZE`. Video has its own
-  `MEDIA_VIDEO_READAHEAD_SIZE` because seek-heavy MP4 demuxing can turn a large
-  global readahead into repeated overreads on SD. Set these in `config.mk` for
-  device experiments instead of editing `src/unifrog_media.c` directly.
+  `MEDIA_FILE_READAHEAD_SIZE`. Video has its own multi-window cache controlled
+  by `MEDIA_VIDEO_READAHEAD_SIZE` and `MEDIA_VIDEO_READAHEAD_SLOTS` because
+  seek-heavy MP4 demuxing alternates between active audio/video file regions.
+  Set these in `config.mk` for device experiments instead of editing
+  `src/unifrog_media.c` directly. The algorithm and log counters are documented
+  in `docs/media-buffering-algorithm.md`.
 - `MEDIA_AUDIO_MAX_HW_AHEAD_MS` and `MEDIA_VIDEO_MAX_HW_AHEAD_MS` cap how far
   packet feeding can run ahead of the hardware decoder clocks after a stall.
   These are separate from the wall-clock feed-lead settings.

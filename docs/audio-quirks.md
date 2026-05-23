@@ -85,9 +85,10 @@ or `src/unifrog_media.c`.
 - The hardware feed lead and SD read buffers are build tunables. Use
   `MEDIA_AUDIO_FEED_LEAD_MS`, `MEDIA_VIDEO_FEED_LEAD_MS`,
   `MEDIA_FILE_BUFFER_SIZE`, `MEDIA_FILE_READAHEAD_SIZE`, and
-  `MEDIA_VIDEO_READAHEAD_SIZE` in `config.mk` or on the `make` command line
-  when device logs show either `ahead_ms`/`ahead_a` too close to zero or
-  excessive SD reads.
+  `MEDIA_VIDEO_READAHEAD_SIZE`/`MEDIA_VIDEO_READAHEAD_SLOTS` in `config.mk` or
+  on the `make` command line when device logs show either
+  `ahead_ms`/`ahead_a` too close to zero or excessive SD reads. Video readahead
+  is a small multi-window cache; see `docs/media-buffering-algorithm.md`.
 - Video and audio hardware queues are also capped against the actual decoder
   clocks with `MEDIA_VIDEO_MAX_HW_AHEAD_MS` and
   `MEDIA_AUDIO_MAX_HW_AHEAD_MS`. This prevents a long SD/demux stall from being
