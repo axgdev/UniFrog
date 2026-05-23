@@ -109,6 +109,10 @@ For source-level SDK behavior clues, inspect:
   packet feeding with a small live feed-lead window. The decoder ring is not a
   startup prebuffer once `/dev/auddec` has started; large leads are heard as
   initial fast playback.
+- Local file playback should leave `audio_flush_thres` at `0`. That HCRTOS
+  field intentionally drops audio frames when the I2SO DMA queue exceeds the
+  threshold, so using the live-capture examples' `100-200ms` values can sound
+  like periodic distortion even while A/V sync remains correct.
 - Native video file playback also needs bounded packet-feed pacing. HCRTOS cast
   examples are already paced by network/input arrival; local SD files are not,
   so UniFrog paces video and hardware-audio ES writes against stream timestamps.

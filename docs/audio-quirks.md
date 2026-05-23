@@ -72,6 +72,10 @@ or `src/unifrog_media.c`.
   compressed file into the KSHM ring at SD-card speed. Large multi-second leads
   are not passive prebuffering because `/dev/auddec` is already running; they
   show up as audible startup bursts.
+- Do not set `audio_flush_thres` for local file playback. HCRTOS documents that
+  field as an audio-master frame-drop threshold when the I2SO DMA queue is
+  deeper than the configured milliseconds; it is useful for low-latency live
+  capture, but for SD-card file playback it can create audible periodic drops.
 - The same rule applies when native video uses hardware auddec as the STC
   owner. The file demuxer must be the real-time source; otherwise audio and
   video stay synchronized to each other but both run fast because compressed
