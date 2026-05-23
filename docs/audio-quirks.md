@@ -82,6 +82,11 @@ or `src/unifrog_media.c`.
   packets advance through the hardware rings as quickly as SD reads complete.
   SD jitter is handled by the separate file readahead buffer, not by keeping the
   running decoder rings seconds ahead.
+- The hardware feed lead and SD read buffers are build tunables. Use
+  `MEDIA_AUDIO_FEED_LEAD_MS`, `MEDIA_VIDEO_FEED_LEAD_MS`,
+  `MEDIA_FILE_BUFFER_SIZE`, and `MEDIA_FILE_READAHEAD_SIZE` in `config.mk` or
+  on the `make` command line when device logs show either `ahead_ms`/`ahead_a`
+  too close to zero or excessive SD reads.
 - MP4/M4A AAC must be passed like HCPlayer does: AudioSpecificConfig in
   `audio_config.extra_data`, then raw demuxed AAC access units as ES packets.
   Wrapping those raw MP4 packets in synthetic ADTS headers initialized the

@@ -118,6 +118,10 @@ For source-level SDK behavior clues, inspect:
   so UniFrog paces video and hardware-audio ES writes against stream timestamps.
   The larger SD readahead buffer is the intended jitter absorber for local file
   reads.
+- The current local-file tuning knobs are `MEDIA_AUDIO_FEED_LEAD_MS`,
+  `MEDIA_VIDEO_FEED_LEAD_MS`, `MEDIA_FILE_BUFFER_SIZE`, and
+  `MEDIA_FILE_READAHEAD_SIZE`. Set them in `config.mk` for device experiments
+  instead of editing `src/unifrog_media.c` directly.
 - The SF2000 audio path must stay muted/gated until real PCM exists. Digital
   zeroes alone can still expose board noise.
 
