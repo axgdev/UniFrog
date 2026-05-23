@@ -44,3 +44,18 @@
 - The native path now logs `h264_config`, packet `mode=avcc|annexb`,
   `nal_len`, `mask`, and `trunc` so target logs identify the exact access-unit
   format and where SPS/PPS/IDR appear.
+
+### v050 0102 Follow-Up
+- Logs from `../latest_log/v050/0102` show 240p, 360p, 480p, and 720p H.264
+  now decode and display frames.
+- The zoom/crop problem came from programming the native `VIDDEC_SET_DISPLAY_RECT`
+  and `DIS_SET_ZOOM` source rectangles to the decoded stream size. On this
+  display pipeline the source rectangle must describe the full `1920x1080` HD
+  video-plane canvas; smaller source rectangles crop the canvas before the LCD
+  scaling step.
+- The native viddec path now keeps `pic_width`/`pic_height` as the codec
+  dimensions, but uses a `1920x1080` source rectangle and `1920x1080`
+  destination rectangle for the hardware display rect and visible layer.
+- Native viddec quick mode is disabled to match the lower-ghosting hcplayer
+  presets that previously behaved best. The packet feed still logs enough
+  status to decide later whether actual buffering is needed.

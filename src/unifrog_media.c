@@ -55,7 +55,8 @@
 /*
  * The SF2000 LCD is 320x240, but HCRTOS routes decoded video through the HD
  * video plane. The confirmed full-screen mode is a 1920x1080 display rect;
- * using 320x240 leaves decoded video in a small top-left rectangle.
+ * using 320x240 leaves decoded video in a small top-left rectangle, and using
+ * the decoded stream size as the source crops lower-resolution video.
  */
 #define VIDEO_SOURCE_W 1920
 #define VIDEO_SOURCE_H 1080
@@ -2000,13 +2001,25 @@ static int media_video_send_packet(int fd, const AVPacket *packet,
    header.size = (uint32_t)packet->size;
    header.flag = AV_PACKET_ES_DATA;
    if (h264) {
-      if (media_h264_has_annexb_start(packet->data, (size_t)packet->size)) {
+      if (media_h264_packet_mode == MEDIA_H264_MODE_AVCC) {
+         if (nal_length_size <= 0)
+            nal_length_size = media_h264_guess_avcc_length_size(packet->data,
+               (size_t)packet->size);
+         if (nal_length_size > 0) {
+            packet_mode = MEDIA_H264_MODE_AVCC;
+            nal_mask = media_h264_avcc_nal_mask(packet->data,
+               (size_t)packet->size, nal_length_size, &nal_count,
+               &first_nal, &truncated);
+         }
+      }
+      if (packet_mode == MEDIA_H264_MODE_UNKNOWN &&
+          media_h264_has_annexb_start(packet->data, (size_t)packet->size)) {
          packet_mode = MEDIA_H264_MODE_ANNEXB;
          first_nal = media_h264_first_nal_type(packet->data,
             (size_t)packet->size);
          nal_mask = media_h264_nal_mask(packet->data, (size_t)packet->size,
             &nal_count);
-      } else {
+      } else if (packet_mode == MEDIA_H264_MODE_UNKNOWN) {
          if (nal_length_size <= 0)
             nal_length_size = media_h264_guess_avcc_length_size(packet->data,
                (size_t)packet->size);
@@ -2799,13 +2812,19 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
       (int64_t)cfg.pic_height * 3) / 2);
    cfg.src_area.x = 0;
    cfg.src_area.y = 0;
-   cfg.src_area.w = (uint16_t)(cfg.pic_width > 0 ? cfg.pic_width : VIDEO_SOURCE_W);
-   cfg.src_area.h = (uint16_t)(cfg.pic_height > 0 ? cfg.pic_height : VIDEO_SOURCE_H);
+   /*
+    * The decoded frame is placed on the HD video plane. Smaller source rects
+    * crop that plane before scaling, which makes 240p/360p/480p/720p look
+    * zoomed. Keep pic_width/pic_height as codec dimensions, but display the
+    * full hardware canvas just like hcplayer's working path.
+    */
+   cfg.src_area.w = VIDEO_SOURCE_W;
+   cfg.src_area.h = VIDEO_SOURCE_H;
    cfg.dst_area.x = 0;
    cfg.dst_area.y = 0;
    cfg.dst_area.w = VIDEO_OUTPUT_W;
    cfg.dst_area.h = VIDEO_OUTPUT_H;
-   cfg.quick_mode = 3;
+   cfg.quick_mode = 0;
    cfg.img_dis_mode = IMG_DIS_FULLSCREEN;
    cfg.mirror_type = MIRROR_TYPE_NONE;
    cfg.rotate_type = ROTATE_TYPE_0;
@@ -3041,8 +3060,8 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
             (unsigned long)status.buffer_size);
    }
    media_set_aspect_mode(DIS_TV_16_9, DIS_PILLBOX);
-   (void)set_video_layer_visible(1, cfg.pic_width, cfg.pic_height,
-      VIDEO_OUTPUT_W, VIDEO_OUTPUT_H);
+   (void)set_video_layer_visible(1, cfg.src_area.w, cfg.src_area.h,
+      cfg.dst_area.w, cfg.dst_area.h);
    return fd;
 }
 

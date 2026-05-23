@@ -56,9 +56,11 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
   mode to show the full frame instead of a cropped/tiny region.
 - Native HCRTOS video must use the HD video-plane geometry even on the 320x240
   SF2000 LCD. The confirmed full-screen setup is `DIS_TYPE_HD` /
-  `DIS_LAYER_MAIN` with `DIS_SET_ZOOM` using a `1920x1080` destination
-  rectangle. Programming a `320x240` destination shows only a small top-left
-  rectangle on the LCD.
+  `DIS_LAYER_MAIN` with `VIDDEC_SET_DISPLAY_RECT` and `DIS_SET_ZOOM` using a
+  `1920x1080` source canvas and `1920x1080` destination rectangle. Programming
+  a `320x240` destination shows only a small top-left rectangle on the LCD, and
+  programming lower decoded dimensions as the source crops/zooms the video
+  plane before scaling.
 - Hardware video decode works through the HCRTOS `/dev/viddec` path when the
   board DTS reserves MMZ media memory and `viddec.kshm_size`:
   - `/dev/viddec` opens.
