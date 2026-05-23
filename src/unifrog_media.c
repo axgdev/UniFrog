@@ -242,6 +242,9 @@ static unsigned media_disk_suspend_depth;
 static uint32_t media_disk_suspend_start_ms;
 static uint32_t media_video_activity_marker;
 static uint32_t media_audio_activity_marker;
+static int media_h264_packet_mode;
+static int media_h264_nal_length_size;
+static int media_h264_extra_delivery;
 
 extern unsigned long _padec_start;
 extern unsigned long _padec_end;
@@ -1745,6 +1748,64 @@ static const char *media_avcodec_name(enum AVCodecID codec_id)
    return desc && desc->name ? desc->name : "?";
 }
 
+enum {
+   MEDIA_H264_MODE_UNKNOWN = 0,
+   MEDIA_H264_MODE_ANNEXB,
+   MEDIA_H264_MODE_AVCC,
+};
+
+enum {
+   MEDIA_H264_EXTRA_NONE = 0,
+   MEDIA_H264_EXTRA_CFG_AVCC,
+   MEDIA_H264_EXTRA_CFG_RAW,
+   MEDIA_H264_EXTRA_PRE_EXTRA,
+   MEDIA_H264_EXTRA_POST_ES,
+};
+
+static const char *media_h264_mode_name(int mode)
+{
+   switch (mode) {
+   case MEDIA_H264_MODE_ANNEXB:
+      return "annexb";
+   case MEDIA_H264_MODE_AVCC:
+      return "avcc";
+   default:
+      return "unknown";
+   }
+}
+
+static const char *media_h264_extra_delivery_name(int delivery)
+{
+   switch (delivery) {
+   case MEDIA_H264_EXTRA_CFG_AVCC:
+      return "cfg_avcc";
+   case MEDIA_H264_EXTRA_CFG_RAW:
+      return "cfg_raw";
+   case MEDIA_H264_EXTRA_PRE_EXTRA:
+      return "pre_extra";
+   case MEDIA_H264_EXTRA_POST_ES:
+      return "post_es";
+   default:
+      return "none";
+   }
+}
+
+static int media_h264_has_annexb_start(const uint8_t *data, size_t size)
+{
+   return data && size >= 4u && data[0] == 0 && data[1] == 0 &&
+      (data[2] == 1 || (data[2] == 0 && data[3] == 1));
+}
+
+static int media_h264_avcc_length_size(const uint8_t *data, size_t size)
+{
+   int length_size;
+
+   if (!data || size < 7u || data[0] != 1)
+      return 0;
+   length_size = (data[4] & 0x03) + 1;
+   return length_size >= 1 && length_size <= 4 ? length_size : 0;
+}
+
 static int media_h264_first_nal_type(const uint8_t *data, size_t size)
 {
    size_t i = 0;
@@ -1758,6 +1819,24 @@ static int media_h264_first_nal_type(const uint8_t *data, size_t size)
    if (i + 1 >= size)
       return -1;
    return data[i + 1] & 0x1f;
+}
+
+static void media_h264_add_nal_mask(unsigned *mask, uint8_t nal_type)
+{
+   if (!mask)
+      return;
+   if (nal_type == 1)
+      *mask |= 1u << 0;
+   else if (nal_type == 5)
+      *mask |= 1u << 1;
+   else if (nal_type == 6)
+      *mask |= 1u << 2;
+   else if (nal_type == 7)
+      *mask |= 1u << 3;
+   else if (nal_type == 8)
+      *mask |= 1u << 4;
+   else if (nal_type == 9)
+      *mask |= 1u << 5;
 }
 
 static unsigned media_h264_nal_mask(const uint8_t *data, size_t size,
@@ -1791,23 +1870,77 @@ static unsigned media_h264_nal_mask(const uint8_t *data, size_t size,
          break;
       nal_type = data[nal_pos] & 0x1f;
       count++;
-      if (nal_type == 1)
-         mask |= 1u << 0;
-      else if (nal_type == 5)
-         mask |= 1u << 1;
-      else if (nal_type == 6)
-         mask |= 1u << 2;
-      else if (nal_type == 7)
-         mask |= 1u << 3;
-      else if (nal_type == 8)
-         mask |= 1u << 4;
-      else if (nal_type == 9)
-         mask |= 1u << 5;
+      media_h264_add_nal_mask(&mask, nal_type);
       i = nal_pos + 1;
    }
    if (nal_count_out)
       *nal_count_out = count;
    return mask;
+}
+
+static unsigned media_h264_avcc_nal_mask(const uint8_t *data, size_t size,
+   int length_size, unsigned *nal_count_out, int *first_nal_out,
+   int *truncated_out)
+{
+   size_t i = 0;
+   unsigned mask = 0;
+   unsigned count = 0;
+   int first_nal = -1;
+   int truncated = 0;
+
+   if (nal_count_out)
+      *nal_count_out = 0;
+   if (first_nal_out)
+      *first_nal_out = -1;
+   if (truncated_out)
+      *truncated_out = 0;
+   if (!data || size == 0 || length_size <= 0 || length_size > 4)
+      return 0;
+   while (i + (size_t)length_size <= size) {
+      uint32_t nal_size = 0;
+      uint8_t nal_type;
+
+      for (int j = 0; j < length_size; j++)
+         nal_size = (nal_size << 8) | data[i + (size_t)j];
+      i += (size_t)length_size;
+      if (nal_size == 0)
+         continue;
+      if (i + nal_size > size) {
+         truncated = 1;
+         break;
+      }
+      nal_type = data[i] & 0x1f;
+      if (first_nal < 0)
+         first_nal = nal_type;
+      count++;
+      media_h264_add_nal_mask(&mask, nal_type);
+      i += nal_size;
+   }
+   if (i != size)
+      truncated = 1;
+   if (nal_count_out)
+      *nal_count_out = count;
+   if (first_nal_out)
+      *first_nal_out = first_nal;
+   if (truncated_out)
+      *truncated_out = truncated;
+   return mask;
+}
+
+static int media_h264_guess_avcc_length_size(const uint8_t *data, size_t size)
+{
+   static const int candidates[] = { 4, 2, 1, 3 };
+
+   for (unsigned i = 0; i < ARRAY_SIZE(candidates); i++) {
+      unsigned count = 0;
+      int truncated = 0;
+
+      (void)media_h264_avcc_nal_mask(data, size, candidates[i], &count,
+         NULL, &truncated);
+      if (count > 0 && !truncated)
+         return candidates[i];
+   }
+   return 0;
 }
 
 static int media_video_packet_time_ms(const AVPacket *packet,
@@ -1833,12 +1966,15 @@ static int media_video_packet_time_ms(const AVPacket *packet,
 static int media_video_send_packet(int fd, const AVPacket *packet,
    AVRational time_base, int freerun, int h264)
 {
-   static const uint8_t h264_aud[] = { 0x00, 0x00, 0x00, 0x01, 0x09, 0xf0 };
    AvPktHd header;
    unsigned packet_index;
    unsigned nal_count = 0;
    unsigned nal_mask = 0;
-   int add_aud;
+   int packet_mode = MEDIA_H264_MODE_UNKNOWN;
+   int first_nal = -1;
+   int nal_length_size = media_h264_nal_length_size;
+   int truncated = 0;
+   int log_packet;
    int prefer_dts = h264;
    int packet_pts;
    int packet_dur;
@@ -1846,8 +1982,6 @@ static int media_video_send_packet(int fd, const AVPacket *packet,
    if (fd < 0 || !packet || !packet->data || packet->size <= 0)
       return -1;
    packet_index = media_video_debug_packets++;
-   add_aud = h264 && media_h264_first_nal_type(packet->data,
-      (size_t)packet->size) != 9;
    packet_pts = media_video_packet_time_ms(packet, time_base, prefer_dts);
    packet_dur = media_packet_duration_ms(packet, time_base);
    if (packet_dur < 0)
@@ -1863,39 +1997,60 @@ static int media_video_send_packet(int fd, const AVPacket *packet,
    memset(&header, 0, sizeof(header));
    header.pts = packet_pts;
    header.dur = packet_dur;
-   header.size = (uint32_t)packet->size + (add_aud ? sizeof(h264_aud) : 0u);
+   header.size = (uint32_t)packet->size;
    header.flag = AV_PACKET_ES_DATA;
-   if (h264)
-      nal_mask = media_h264_nal_mask(packet->data, (size_t)packet->size,
-         &nal_count);
-   if (packet_index < 8u) {
+   if (h264) {
+      if (media_h264_has_annexb_start(packet->data, (size_t)packet->size)) {
+         packet_mode = MEDIA_H264_MODE_ANNEXB;
+         first_nal = media_h264_first_nal_type(packet->data,
+            (size_t)packet->size);
+         nal_mask = media_h264_nal_mask(packet->data, (size_t)packet->size,
+            &nal_count);
+      } else {
+         if (nal_length_size <= 0)
+            nal_length_size = media_h264_guess_avcc_length_size(packet->data,
+               (size_t)packet->size);
+         if (nal_length_size > 0) {
+            packet_mode = MEDIA_H264_MODE_AVCC;
+            nal_mask = media_h264_avcc_nal_mask(packet->data,
+               (size_t)packet->size, nal_length_size, &nal_count,
+               &first_nal, &truncated);
+         }
+      }
+   }
+   log_packet = packet_index < 16u || (packet_index % 120u) == 0 ||
+      (packet->flags & AV_PKT_FLAG_KEY) || (nal_mask & 0x1eu);
+   if (log_packet) {
       const uint8_t *d = packet->data;
 
-      printf("unifrog media native video packet idx=%u size=%d send=%lu pts=%ld dur=%ld src_pts=%ld src_dts=%ld src_dur=%ld prefer_dts=%d key=%d aud=%d nal=%d nals=%u mask=0x%x bytes=%02x %02x %02x %02x %02x %02x %02x %02x hdr=%u\n",
+      printf("unifrog media native video packet idx=%u size=%d send=%lu pts=%ld dur=%ld src_pts=%ld src_dts=%ld src_dur=%ld prefer_dts=%d key=%d aud=0 mode=%s cfg_mode=%s nal_len=%d nal=%d nals=%u mask=0x%x trunc=%d bytes=%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x hdr=%u extra=%s\n",
          packet_index, packet->size, (unsigned long)header.size,
          (long)header.pts, (long)header.dur,
          (long)packet->pts, (long)packet->dts, (long)packet->duration,
          prefer_dts,
-         (packet->flags & AV_PKT_FLAG_KEY) ? 1 : 0, add_aud,
-         media_h264_first_nal_type(packet->data, (size_t)packet->size),
-         nal_count, nal_mask,
+         (packet->flags & AV_PKT_FLAG_KEY) ? 1 : 0,
+         media_h264_mode_name(packet_mode),
+         media_h264_mode_name(media_h264_packet_mode),
+         nal_length_size, first_nal, nal_count, nal_mask, truncated,
          packet->size > 0 ? d[0] : 0, packet->size > 1 ? d[1] : 0,
          packet->size > 2 ? d[2] : 0, packet->size > 3 ? d[3] : 0,
          packet->size > 4 ? d[4] : 0, packet->size > 5 ? d[5] : 0,
          packet->size > 6 ? d[6] : 0, packet->size > 7 ? d[7] : 0,
-         (unsigned)sizeof(header));
+         packet->size > 8 ? d[8] : 0, packet->size > 9 ? d[9] : 0,
+         packet->size > 10 ? d[10] : 0, packet->size > 11 ? d[11] : 0,
+         (unsigned)sizeof(header),
+         media_h264_extra_delivery_name(media_h264_extra_delivery));
    }
    if (media_video_wait_write_space(fd,
        (uint32_t)sizeof(header) + header.size, packet_index) != 0)
       return -1;
    if (media_write_all(fd, &header, sizeof(header)) != 0 ||
-       (add_aud && media_write_all(fd, h264_aud, sizeof(h264_aud)) != 0) ||
        media_write_all(fd, packet->data, (size_t)packet->size) != 0) {
       printf("unifrog media native video packet_write_failed idx=%u errno=%d size=%d\n",
          packet_index, errno, packet->size);
       return -1;
    }
-   if (packet_index < 8u) {
+   if (log_packet) {
       struct vdec_decore_status status;
 
       memset(&status, 0, sizeof(status));
@@ -2623,7 +2778,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    memset(&cfg, 0, sizeof(cfg));
    cfg.codec_id = (uint32_t)hc_codec;
    cfg.codec_tag = par->codec_tag;
-   cfg.independent_url = par->codec_id == AV_CODEC_ID_H264 ? 1 : 0;
+   cfg.independent_url = 0;
    cfg.combine_enable = 0;
    cfg.sync_mode = disable_audio ? AVSYNC_TYPE_FREERUN :
       AVSYNC_TYPE_UPDATESTC;
@@ -2660,22 +2815,35 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    cfg.buffering_start = 200;
    cfg.buffering_end = 1000;
    cfg.scan_type = YUV420_YH1V2;
+   media_h264_packet_mode = MEDIA_H264_MODE_UNKNOWN;
+   media_h264_nal_length_size = 0;
+   media_h264_extra_delivery = MEDIA_H264_EXTRA_NONE;
    if (par->codec_id == AV_CODEC_ID_H264) {
-      cfg.codec_tag = 0;
-      cfg.extradata = NULL;
-      cfg.extradata_size = 0;
-      cfg.extradata_mode = 0;
+      media_h264_nal_length_size = media_h264_avcc_length_size(
+         par->extradata, (size_t)(par->extradata_size > 0 ?
+         par->extradata_size : 0));
+      if (media_h264_nal_length_size > 0)
+         media_h264_packet_mode = MEDIA_H264_MODE_AVCC;
+      else if (media_h264_has_annexb_start(par->extradata,
+          (size_t)(par->extradata_size > 0 ? par->extradata_size : 0)))
+         media_h264_packet_mode = MEDIA_H264_MODE_ANNEXB;
+
       if (par->extradata && par->extradata_size > 0 &&
+          media_h264_packet_mode == MEDIA_H264_MODE_ANNEXB &&
           media_h264_extradata_annexb(par->extradata, par->extradata_size,
              post_extra, sizeof(post_extra), &post_extra_used) == 0 &&
           post_extra_used > 0) {
          post_extra_size = (int)post_extra_used;
+         media_h264_extra_delivery = MEDIA_H264_EXTRA_POST_ES;
       } else if (par->extradata && par->extradata_size > 0) {
          if (par->extradata_size <= (int)sizeof(cfg.extra_data)) {
             cfg.extradata_size = par->extradata_size;
             cfg.extradata_mode = 0;
             memcpy(cfg.extra_data, par->extradata, (size_t)par->extradata_size);
             cfg.extradata = cfg.extra_data;
+            media_h264_extra_delivery =
+               media_h264_packet_mode == MEDIA_H264_MODE_AVCC ?
+               MEDIA_H264_EXTRA_CFG_AVCC : MEDIA_H264_EXTRA_CFG_RAW;
          } else {
             cfg.extradata_size = par->extradata_size;
             cfg.extradata_mode = 1;
@@ -2683,6 +2851,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
             pre_extra_data = par->extradata;
             pre_extra_size = par->extradata_size;
             write_extra_before_init = 1;
+            media_h264_extra_delivery = MEDIA_H264_EXTRA_PRE_EXTRA;
          }
       }
    } else if (par->extradata && par->extradata_size > 0) {
@@ -2700,9 +2869,27 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
       }
    }
 
-   printf("unifrog media native video open_viddec begin codec=%u av=%d tag=0x%lx cfg_tag=0x%lx %dx%d fps_milli=%u frame=%d kshm=%lu extra=%d extra_mode=%d write_pre=%d pre_extra=%d post_extra=%d decode=%d quick=%d sync=%d\n",
+   if (par->codec_id == AV_CODEC_ID_H264) {
+      const uint8_t *extra = par->extradata;
+      int extra_size = par->extradata_size;
+
+      printf("unifrog media native video h264_config mode=%s nal_len=%d extra=%d delivery=%s codec_tag=0x%lx first=%02x %02x %02x %02x %02x %02x %02x %02x\n",
+         media_h264_mode_name(media_h264_packet_mode),
+         media_h264_nal_length_size, extra_size,
+         media_h264_extra_delivery_name(media_h264_extra_delivery),
+         (unsigned long)cfg.codec_tag,
+         extra && extra_size > 0 ? extra[0] : 0,
+         extra && extra_size > 1 ? extra[1] : 0,
+         extra && extra_size > 2 ? extra[2] : 0,
+         extra && extra_size > 3 ? extra[3] : 0,
+         extra && extra_size > 4 ? extra[4] : 0,
+         extra && extra_size > 5 ? extra[5] : 0,
+         extra && extra_size > 6 ? extra[6] : 0,
+         extra && extra_size > 7 ? extra[7] : 0);
+   }
+   printf("unifrog media native video open_viddec begin codec=%u av=%d tag=0x%lx cfg_tag=0x%lx ind=%d %dx%d fps_milli=%u frame=%d kshm=%lu extra=%d extra_mode=%d write_pre=%d pre_extra=%d post_extra=%d decode=%d quick=%d sync=%d\n",
       cfg.codec_id, par->codec_id, (unsigned long)par->codec_tag,
-      (unsigned long)cfg.codec_tag,
+      (unsigned long)cfg.codec_tag, cfg.independent_url,
       cfg.pic_width, cfg.pic_height, cfg.frame_rate, cfg.codec_frame_size,
       (unsigned long)cfg.kshm_size, cfg.extradata_size, cfg.extradata_mode,
       write_extra_before_init, pre_extra_size, post_extra_size,
@@ -2822,11 +3009,11 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
 
       (void)ioctl(fd, VIDDEC_SET_SHOW_MASAIC_ON_ERR, mosaic);
    }
-   printf("unifrog media native video open fd=%d init=%d init_errno=%d pre_ret=%d post_ret=%d rect=%d win=%d win_errno=%d mirror=%d start=%d start_errno=%d codec=%u av=%d tag=0x%lx cfg_tag=0x%lx %dx%d fps_milli=%u frame=%d kshm=%lu extra=%d extra_mode=%d write_pre=%d pre_extra=%d post_extra=%d decode=%d quick=%d sync=%d\n",
+   printf("unifrog media native video open fd=%d init=%d init_errno=%d pre_ret=%d post_ret=%d rect=%d win=%d win_errno=%d mirror=%d start=%d start_errno=%d codec=%u av=%d tag=0x%lx cfg_tag=0x%lx ind=%d %dx%d fps_milli=%u frame=%d kshm=%lu extra=%d extra_mode=%d write_pre=%d pre_extra=%d post_extra=%d decode=%d quick=%d sync=%d\n",
       fd, init_ret, init_errno, pre_extra_ret, post_extra_ret, rect_ret, win_ret,
       win_errno, mirror_ret, start_ret, start_errno,
       cfg.codec_id, par->codec_id, (unsigned long)par->codec_tag,
-      (unsigned long)cfg.codec_tag,
+      (unsigned long)cfg.codec_tag, cfg.independent_url,
       cfg.pic_width, cfg.pic_height, cfg.frame_rate, cfg.codec_frame_size,
       (unsigned long)cfg.kshm_size, cfg.extradata_size, cfg.extradata_mode,
       write_extra_before_init, pre_extra_size, post_extra_size, cfg.decode_mode,
@@ -2869,8 +3056,13 @@ static int media_video_bsf_init(AVStream *stream, AVBSFContext **bsf_out)
    if (!stream || !bsf_out)
       return -1;
    *bsf_out = NULL;
-   if (stream->codecpar->codec_id == AV_CODEC_ID_H264)
-      name = "h264_mp4toannexb";
+   if (stream->codecpar->codec_id == AV_CODEC_ID_H264) {
+      printf("unifrog media native bsf disabled name=h264_mp4toannexb reason=direct_viddec_h264 mode=%s nal_len=%d extra=%s\n",
+         media_h264_mode_name(media_h264_packet_mode),
+         media_h264_nal_length_size,
+         media_h264_extra_delivery_name(media_h264_extra_delivery));
+      return 0;
+   }
    if (!name)
       return 0;
    filter = av_bsf_get_by_name(name);

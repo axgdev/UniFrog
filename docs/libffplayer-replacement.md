@@ -70,8 +70,12 @@ For source-level SDK behavior clues, inspect:
 
 ## Important Findings
 
-- MP4 H.264 `avcC` extradata is not passed in `video_config.extra_data`. It is
-  written after `VIDDEC_INIT` as an ES packet, then `/dev/vidsink` is opened.
+- MP4 H.264 `avcC` extradata is passed in `video_config.extra_data` with
+  `extradata_mode=0`, and compressed packets are written in the FFmpeg demuxer
+  packet format. Do not force `h264_mp4toannexb` for this path unless target
+  logs prove the decoder needs it for a specific stream.
+- H.264 extradata is written after `VIDDEC_INIT` as an ES packet only when the
+  extradata already starts with Annex-B `00 00 00 01`.
 - Normal compressed packets use `AvPktHd` followed by elementary stream data.
 - `render_vframe` in vendor `libffplayer.a` allocates a `0x5c` `vframe_info`
   payload and submits it with ioctl `0x805c1a00` (`VIDSINK_DISPLAY_FRAME`) on

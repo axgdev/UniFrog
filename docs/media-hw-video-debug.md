@@ -29,3 +29,18 @@
   - H264 packetization and AUD/SPS/PPS ordering
   - `video_config` fields vs ffplayer (`sync_mode`, `decode_mode`, `codec_tag`, `kshm_size`)
   - first-frame path around `DIS_SET_LAYER_ORDER` / `DIS_SET_ZOOM` and layer visibility transitions.
+
+### v050 Follow-Up
+- Latest logs around `../latest_log/v050/0101` show freerun is already active
+  when hardware audio falls back to software audio.
+- The remaining failure is H.264 feed format: 240p never reaches
+  `frames_decoded`, while 480p reaches only one displayed frame.
+- Reverse-engineering `libffplayer.a` shows MP4/AVCC H.264 is not converted to
+  Annex-B before feeding `/dev/viddec`. The player keeps raw `avcC`
+  extradata in `video_config.extra_data`, preserves `codec_tag`, and writes
+  FFmpeg packet bytes directly.
+- `libffplayer.a` only writes H.264 extradata as a post-init ES packet when the
+  extradata already starts with Annex-B `00 00 00 01`.
+- The native path now logs `h264_config`, packet `mode=avcc|annexb`,
+  `nal_len`, `mask`, and `trunc` so target logs identify the exact access-unit
+  format and where SPS/PPS/IDR appear.
