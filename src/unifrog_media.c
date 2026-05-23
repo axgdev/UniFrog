@@ -305,6 +305,9 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
 static const char *media_avcodec_name(enum AVCodecID codec_id);
 static int media_auddec_send_packet(struct media_auddec *auddec,
    const AVPacket *packet);
+static void media_auddec_log_packet_status(struct media_auddec *auddec,
+   const char *scope, uint32_t packet_index, const uint8_t *data, size_t size,
+   int32_t pts, int32_t dur);
 static void media_auddec_finish(struct media_auddec *auddec,
    unsigned timeout_ms);
 static void media_auddec_close(struct media_auddec *auddec);
@@ -2669,11 +2672,13 @@ static int media_auddec_send_packet(struct media_auddec *auddec,
    AvPktHd header;
    uint8_t adts[7];
    uint32_t payload_size;
+   uint32_t packet_index;
 
    if (!auddec || auddec->fd < 0 || !packet || !packet->data ||
        packet->size <= 0)
       return -1;
    payload_size = (uint32_t)packet->size;
+   packet_index = auddec->packets;
    if (auddec->aac_adts)
       payload_size += (uint32_t)sizeof(adts);
    memset(&header, 0, sizeof(header));
@@ -2695,6 +2700,9 @@ static int media_auddec_send_packet(struct media_auddec *auddec,
    if (media_write_all(auddec->fd, packet->data, (size_t)packet->size) != 0)
       return -1;
    auddec->packets++;
+   media_auddec_log_packet_status(auddec,
+      auddec->aac_adts ? "compressed_adts" : "compressed", packet_index,
+      packet->data, (size_t)packet->size, header.pts, header.dur);
    return 0;
 }
 
@@ -2744,6 +2752,55 @@ static void media_auddec_finish(struct media_auddec *auddec,
       (unsigned long)(unifrog_perf_time_ms() - start_ms), timeout_ms);
 }
 
+static void media_auddec_log_caps(int fd, const char *scope,
+   const char *label, uint32_t codec_id, int sync_mode)
+{
+   unsigned int caps = 0;
+   int caps_ret;
+   int caps_errno;
+
+   if (fd < 0)
+      return;
+   errno = 0;
+   caps_ret = ioctl(fd, AUDDEC_GET_CAPABILITIES, &caps);
+   caps_errno = errno;
+   printf("unifrog media auddec caps scope=%s label=%s fd=%d ret=%d errno=%d caps=0x%lx codec=%lu sync=%d\n",
+      scope ? scope : "?", label ? label : "?", fd, caps_ret, caps_errno,
+      (unsigned long)caps, (unsigned long)codec_id, sync_mode);
+}
+
+static void media_auddec_log_packet_status(struct media_auddec *auddec,
+   const char *scope, uint32_t packet_index, const uint8_t *data, size_t size,
+   int32_t pts, int32_t dur)
+{
+   struct audio_decore_status status;
+   int status_ret;
+   int status_errno;
+   int64_t cur_time = -1;
+   int time_ret;
+   int time_errno;
+
+   if (!auddec || auddec->fd < 0 || packet_index >= 4u)
+      return;
+   memset(&status, 0, sizeof(status));
+   errno = 0;
+   status_ret = ioctl(auddec->fd, AUDDEC_GET_STATUS, &status);
+   status_errno = errno;
+   errno = 0;
+   time_ret = ioctl(auddec->fd, AUDDEC_GET_CUR_TIME, &cur_time);
+   time_errno = errno;
+   printf("unifrog media auddec packet_status scope=%s idx=%lu size=%lu pts=%ld dur=%ld first=%02x %02x %02x %02x status=%d status_errno=%d decoded=%lu rate=%lu ch=%u bits=%u hdr=%u/%u time=%lld time_ret=%d time_errno=%d freerun=%d\n",
+      scope ? scope : "?", (unsigned long)packet_index,
+      (unsigned long)size, (long)pts, (long)dur,
+      size > 0 && data ? data[0] : 0, size > 1 && data ? data[1] : 0,
+      size > 2 && data ? data[2] : 0, size > 3 && data ? data[3] : 0,
+      status_ret, status_errno, (unsigned long)status.frames_decoded,
+      (unsigned long)status.sample_rate, status.channels,
+      status.bits_per_sample, status.first_header_got,
+      status.first_header_parsed, (long long)cur_time, time_ret,
+      time_errno, auddec->freerun);
+}
+
 static int media_auddec_send_raw(struct media_auddec *auddec,
    const uint8_t *data, size_t size, int32_t pts, int32_t dur)
 {
@@ -2763,21 +2820,8 @@ static int media_auddec_send_raw(struct media_auddec *auddec,
        media_write_all(auddec->fd, data, size) != 0)
       return -1;
    auddec->packets++;
-   if (packet_index < 4u) {
-      struct audio_decore_status status;
-
-      memset(&status, 0, sizeof(status));
-      if (ioctl(auddec->fd, AUDDEC_GET_STATUS, &status) == 0)
-         printf("unifrog media raw auddec packet idx=%lu size=%lu pts=%ld dur=%ld bytes=%02x %02x %02x %02x decoded=%lu rate=%lu ch=%u bits=%u first=%u/%u\n",
-            (unsigned long)packet_index, (unsigned long)size,
-            (long)header.pts, (long)header.dur,
-            size > 0 ? data[0] : 0, size > 1 ? data[1] : 0,
-            size > 2 ? data[2] : 0, size > 3 ? data[3] : 0,
-            (unsigned long)status.frames_decoded,
-            (unsigned long)status.sample_rate, status.channels,
-            status.bits_per_sample, status.first_header_got,
-            status.first_header_parsed);
-   }
+   media_auddec_log_packet_status(auddec, "raw", packet_index, data, size,
+      header.pts, header.dur);
    return 0;
 }
 
@@ -2842,6 +2886,8 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
             (unsigned long)codec_id);
          continue;
       }
+      if (i == 0)
+         media_auddec_log_caps(fd, "raw", label, codec_id, sync_mode);
       if (cfg.extradata_mode == 1)
          extra_ret = media_send_extra_packet(fd, extradata,
             (int)extradata_size);
@@ -3037,6 +3083,9 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       media_audio_activity_stage(4u,
          (((uint32_t)i & 0xffu) << 16) | ((uint32_t)fd & 0xffffu),
          0u);
+      if (i == 0)
+         media_auddec_log_caps(fd, "compressed", variant->label,
+            cfg.codec_id, cfg.sync_mode);
       if (cfg.extradata_mode == 1) {
          last_stage = 5u;
          media_audio_activity_stage(5u,
@@ -3198,7 +3247,7 @@ static int media_h264_extradata_annexb(const uint8_t *src, int src_size,
 }
 
 static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
-   int disable_audio)
+   int sync_mode)
 {
    AVStream *stream;
    AVCodecParameters *par;
@@ -3246,8 +3295,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    cfg.codec_tag = par->codec_tag;
    cfg.independent_url = 0;
    cfg.combine_enable = 0;
-   cfg.sync_mode = disable_audio ? AVSYNC_TYPE_FREERUN :
-      AVSYNC_TYPE_UPDATESTC;
+   cfg.sync_mode = (uint8_t)sync_mode;
    cfg.decode_mode = VDEC_WORK_MODE_KSHM;
    cfg.decoder_flag = 0;
    cfg.rotate_by_cfg = 1;
@@ -3713,6 +3761,7 @@ static int media_play_native_video(const char *path,
    unsigned long frames_displayed = 0;
    int disable_audio = options && options->disable_audio;
    int video_freerun = 0;
+   int video_sync_mode = AVSYNC_TYPE_FREERUN;
    int sd_read_active = 0;
 
    memset(&audio, 0, sizeof(audio));
@@ -3789,11 +3838,12 @@ static int media_play_native_video(const char *path,
       (void)unifrog_log_flush();
    }
    media_video_debug_packets = 0;
-   printf("unifrog media native video_open begin stream=%d audio_fd=%d\n",
-      video_stream, auddec.fd);
+   if (!disable_audio && auddec.fd >= 0 && !auddec.freerun)
+      video_sync_mode = AVSYNC_TYPE_SYNCSTC;
+   printf("unifrog media native video_open begin stream=%d audio_fd=%d sync=%d\n",
+      video_stream, auddec.fd, video_sync_mode);
    (void)unifrog_log_flush();
-   video_fd = media_video_open_decoder(fmt, video_stream, disable_audio ||
-      auddec.fd < 0 || auddec.freerun);
+   video_fd = media_video_open_decoder(fmt, video_stream, video_sync_mode);
    printf("unifrog media native video_open done fd=%d\n", video_fd);
    (void)unifrog_log_flush();
    if (video_fd < 0)
@@ -3838,7 +3888,7 @@ static int media_play_native_video(const char *path,
          }
       }
    }
-   video_freerun = disable_audio || (auddec.fd < 0) || auddec.freerun;
+   video_freerun = video_sync_mode == AVSYNC_TYPE_FREERUN;
    if (video_freerun && audio_enabled)
       printf("unifrog media native video forcing freerun due to software audio path\n");
    printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d\n",
@@ -5295,7 +5345,7 @@ static void media_init_drivers_once(void)
       (unsigned long)((uintptr_t)&_pvdec_end - (uintptr_t)&_pvdec_start),
       (unsigned long)((uintptr_t)&_deca_audio_stream_struct_end -
          (uintptr_t)&_deca_audio_stream_struct_start));
-   printf("unifrog media abi audio_cfg=%lu audio_status=%lu video_cfg=%lu pkt=%lu cmd_auddec_init=0x%lx cmd_viddec_init=0x%lx off_audio_extradata=%lu off_audio_extrasz=%lu off_audio_extramode=%lu off_audio_bypass=%lu off_audio_kshm=%lu off_audio_chlayout=%lu off_audio_buf_start=%lu off_audio_buf_end=%lu off_audio_audsink=%lu\n",
+   printf("unifrog media abi audio_cfg=%lu audio_status=%lu video_cfg=%lu pkt=%lu cmd_auddec_init=0x%lx cmd_viddec_init=0x%lx off_audio_extradata=%lu off_audio_frame=%lu off_audio_extrasz=%lu off_audio_extramode=%lu off_audio_bypass=%lu off_audio_kshm=%lu off_audio_chlayout=%lu off_audio_buf_start=%lu off_audio_buf_end=%lu off_audio_audsink=%lu off_audio_dma=%lu off_audio_mixpri=%lu off_audio_mixmax=%lu off_audio_slave=%lu\n",
       (unsigned long)sizeof(struct audio_config),
       (unsigned long)sizeof(struct audio_decore_status),
       (unsigned long)sizeof(struct video_config),
@@ -5303,6 +5353,7 @@ static void media_init_drivers_once(void)
       (unsigned long)AUDDEC_INIT,
       (unsigned long)VIDDEC_INIT,
       (unsigned long)offsetof(struct audio_config, extradata),
+      (unsigned long)offsetof(struct audio_config, codec_frame_size),
       (unsigned long)offsetof(struct audio_config, extradata_size),
       (unsigned long)offsetof(struct audio_config, extradata_mode),
       (unsigned long)offsetof(struct audio_config, bypass),
@@ -5310,7 +5361,11 @@ static void media_init_drivers_once(void)
       (unsigned long)offsetof(struct audio_config, channel_layout),
       (unsigned long)offsetof(struct audio_config, buffering_start),
       (unsigned long)offsetof(struct audio_config, buffering_end),
-      (unsigned long)offsetof(struct audio_config, enable_audsink));
+      (unsigned long)offsetof(struct audio_config, enable_audsink),
+      (unsigned long)offsetof(struct audio_config, dma_buffer_time),
+      (unsigned long)offsetof(struct audio_config, mix_priority),
+      (unsigned long)offsetof(struct audio_config, mix_maximum_weight),
+      (unsigned long)offsetof(struct audio_config, slave_mode));
    (void)unifrog_log_flush();
    initialized = 1;
 }

@@ -91,6 +91,7 @@ struct audio_config {
    int audio_flush_thres;
    unsigned char extra_data[512];
    void *extradata;
+   uint32_t codec_frame_size;
    uint32_t extradata_size;
    unsigned char extradata_mode;
    unsigned char bypass;
@@ -99,6 +100,10 @@ struct audio_config {
    int buffering_start;
    int buffering_end;
    int enable_audsink;
+   int dma_buffer_time;
+   int mix_priority;
+   int mix_maximum_weight;
+   int slave_mode;
 } __attribute__((aligned(8)));
 
 struct audio_decore_status {
