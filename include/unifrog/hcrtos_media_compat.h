@@ -1,9 +1,12 @@
 #ifndef UNIFROG_HCRTOS_MEDIA_COMPAT_H
 #define UNIFROG_HCRTOS_MEDIA_COMPAT_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include <hcuapi/iocbase.h>
+#include <hcuapi/pixfmt.h>
+#include <hcuapi/vidmp.h>
 
 #ifndef AUDDEV_DEFAULT
 #define AUDDEV_DEFAULT 0u
@@ -106,5 +109,37 @@ struct audio_decore_status {
    uint8_t first_header_parsed;
    uint32_t frames_decoded;
 };
+
+struct vframe_info {
+   enum FFPixelFormat pixfmt;
+   int16_t width;
+   int16_t height;
+   int16_t src_width;
+   int16_t src_height;
+   uint8_t *pixels[4];
+   int pitch[4];
+   enum IMG_DIS_MODE mode;
+   enum ROTATE_TYPE angle;
+   enum MIRROR_TYPE mirror;
+   image_effect_t img_effect;
+   struct av_area src_area;
+   struct av_area dst_area;
+   bool preview_enable;
+   bool bg_disable;
+   struct video_transcode_config transcode_config;
+};
+
+#ifndef VIDSINK_DISPLAY_FRAME
+#define VIDSINK_DISPLAY_FRAME _IOW(VIDSINK_IOCBASE, 0, struct vframe_info)
+#endif
+#ifndef VIDSINK_ENABLE_IMG_EFFECT
+#define VIDSINK_ENABLE_IMG_EFFECT _IO(VIDSINK_IOCBASE, 1)
+#endif
+#ifndef VIDSINK_DISABLE_IMG_EFFECT
+#define VIDSINK_DISABLE_IMG_EFFECT _IO(VIDSINK_IOCBASE, 2)
+#endif
+#ifndef VIDSINK_CHECK_EOS
+#define VIDSINK_CHECK_EOS _IOR(VIDSINK_IOCBASE, 3, int)
+#endif
 
 #endif

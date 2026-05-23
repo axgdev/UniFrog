@@ -139,7 +139,6 @@ struct media_sw_video {
    size_t buffer_size;
    int width;
    int height;
-   int viddec_fd;
    uint32_t frames;
 };
 
@@ -668,10 +667,6 @@ static void media_swvideo_close(struct media_sw_video *video)
 {
    if (!video)
       return;
-   if (video->viddec_fd >= 0) {
-      close(video->viddec_fd);
-      video->viddec_fd = -1;
-   }
    if (video->buffer && mmz_free)
       mmz_free(MEDIA_SWVIDEO_MMZ_ID, video->buffer);
    video->buffer = NULL;
@@ -689,15 +684,9 @@ static int media_swvideo_open_sink(struct media_sw_video *video, int src_w,
 
    if (!video)
       return -1;
-   if (video->viddec_fd < 0) {
-      errno = 0;
-      video->viddec_fd = open("/dev/viddec", O_RDWR);
-      printf("unifrog media swvideo viddec open %s fd=%d errno=%d\n",
-         video->viddec_fd >= 0 ? "ok" : "failed", video->viddec_fd,
-         errno);
-   }
    open_display();
-   if (dis_fd < 0)
+   open_video_sink();
+   if (dis_fd < 0 || vidsink_fd < 0)
       return -1;
    memset(&win, 0, sizeof(win));
    win.distype = DIS_TYPE_HD;
@@ -705,11 +694,11 @@ static int media_swvideo_open_sink(struct media_sw_video *video, int src_w,
    win.on = true;
    errno = 0;
    win_ret = ioctl(dis_fd, DIS_SET_WIN_ONOFF, &win);
-   printf("unifrog media swvideo sink win_ret=%d win_errno=%d src=%dx%d\n",
-      win_ret, errno, src_w, src_h);
+   printf("unifrog media swvideo sink win_ret=%d win_errno=%d vidsink=%d src=%dx%d\n",
+      win_ret, errno, vidsink_fd, src_w, src_h);
    (void)set_video_layer_visible(1, src_w, src_h, VIDEO_OUTPUT_W,
       VIDEO_OUTPUT_H);
-   return 0;
+   return win_ret == 0 ? 0 : -1;
 }
 
 static int media_swvideo_prepare(struct media_sw_video *video, int width,
@@ -791,9 +780,14 @@ static int media_swvideo_copy_yuv420(struct media_sw_video *video,
 static int media_swvideo_present(struct media_sw_video *video,
    const AVFrame *frame)
 {
-   dis_display_info_t info;
+   struct vframe_info vframe;
    size_t y_size;
    size_t uv_size;
+   size_t cw;
+   size_t ch;
+   uint8_t *y_plane;
+   uint8_t *u_plane;
+   uint8_t *v_plane;
    int ret;
 
    if (!video || !frame || frame->width <= 0 || frame->height <= 0)
@@ -802,42 +796,59 @@ static int media_swvideo_present(struct media_sw_video *video,
       return -1;
    if (media_swvideo_copy_yuv420(video, frame) != 0)
       return -1;
-   if ((video->frames == 0 || video->viddec_fd < 0) &&
+   if (video->frames == 0 &&
        media_swvideo_open_sink(video, frame->width, frame->height) != 0)
       return -1;
-   if (dis_fd < 0)
+   if (vidsink_fd < 0)
       return -1;
    y_size = (size_t)frame->width * (size_t)frame->height;
-   uv_size = ((size_t)frame->width + 1u) / 2u *
-      (((size_t)frame->height + 1u) / 2u);
-   memset(&info, 0, sizeof(info));
-   info.distype = DIS_TYPE_HD;
-   info.info.layer = DIS_PIC_LAYER_CURRENT;
-   info.info.y_buf = (uint32_t)(uintptr_t)video->buffer;
-   info.info.y_buf_size = (uint32_t)y_size;
-   info.info.c_buf = (uint32_t)(uintptr_t)((uint8_t *)video->buffer + y_size);
-   info.info.c_buf_size = (uint32_t)(uv_size * 2u);
-   info.info.pic_width = (uint32_t)frame->width;
-   info.info.pic_height = (uint32_t)frame->height;
-   info.info.de_map_mode = 0;
-   info.info.status = DIS_DISPLAY_INFO_STATUS_SUCCESS;
-   info.info.sample_format = 0;
-   info.info.rotate_mode = 0;
-   info.info.pic_dis_area.x = 0;
-   info.info.pic_dis_area.y = 0;
-   info.info.pic_dis_area.w = (uint16_t)frame->width;
-   info.info.pic_dis_area.h = (uint16_t)frame->height;
-   ret = ioctl(dis_fd, DIS_SET_DISPLAY_INFO, &info);
+   cw = ((size_t)frame->width + 1u) / 2u;
+   ch = ((size_t)frame->height + 1u) / 2u;
+   uv_size = cw * ch;
+   y_plane = (uint8_t *)video->buffer;
+   u_plane = y_plane + y_size;
+   v_plane = u_plane + uv_size;
+   memset(&vframe, 0, sizeof(vframe));
+   vframe.pixfmt = FF_PIX_FMT_YUV420P;
+   vframe.width = (int16_t)frame->width;
+   vframe.height = (int16_t)frame->height;
+   vframe.src_width = (int16_t)frame->width;
+   vframe.src_height = (int16_t)frame->height;
+   vframe.pixels[0] = y_plane;
+   vframe.pixels[1] = u_plane;
+   vframe.pixels[2] = v_plane;
+   vframe.pitch[0] = frame->width;
+   vframe.pitch[1] = (int)cw;
+   vframe.pitch[2] = (int)cw;
+   vframe.mode = IMG_DIS_FULLSCREEN;
+   vframe.angle = ROTATE_TYPE_0;
+   vframe.mirror = MIRROR_TYPE_NONE;
+   vframe.img_effect.mode = IMG_SHOW_NULL;
+   vframe.src_area.x = 0;
+   vframe.src_area.y = 0;
+   vframe.src_area.w = (uint16_t)frame->width;
+   vframe.src_area.h = (uint16_t)frame->height;
+   vframe.dst_area.x = 0;
+   vframe.dst_area.y = 0;
+   vframe.dst_area.w = VIDEO_OUTPUT_W;
+   vframe.dst_area.h = VIDEO_OUTPUT_H;
+   vframe.preview_enable = true;
+   vframe.bg_disable = false;
+   ret = ioctl(vidsink_fd, VIDSINK_DISPLAY_FRAME, &vframe);
    if (ret == 0) {
       video->frames++;
       if (video->frames <= 3u || (video->frames % 120u) == 0)
-         printf("unifrog media swvideo presented frame=%lu %dx%d ptr=%p phys=0x%08lx\n",
+         printf("unifrog media swvideo presented frame=%lu %dx%d fmt=%d pitch=%d/%d/%d plane=%p/%p/%p ptr=%p phys=0x%08lx\n",
             (unsigned long)video->frames, frame->width, frame->height,
+            vframe.pixfmt, vframe.pitch[0], vframe.pitch[1], vframe.pitch[2],
+            vframe.pixels[0], vframe.pixels[1], vframe.pixels[2],
             video->buffer, (unsigned long)unifrog_perf_phys_addr(video->buffer));
    } else {
-      printf("unifrog media swvideo display failed ret=%d errno=%d frame=%lu %dx%d\n",
+      printf("unifrog media swvideo display failed ret=%d errno=%d frame=%lu %dx%d fmt=%d pitch=%d/%d/%d plane=%p/%p/%p\n",
          ret, errno, (unsigned long)video->frames, frame->width,
-         frame->height);
+         frame->height, vframe.pixfmt, vframe.pitch[0], vframe.pitch[1],
+         vframe.pitch[2], vframe.pixels[0], vframe.pixels[1],
+         vframe.pixels[2]);
    }
    return ret;
 }
@@ -3220,7 +3231,6 @@ static int media_play_ffmpeg_video(const char *path,
    audio.fd = -1;
    memset(&audio_converter, 0, sizeof(audio_converter));
    memset(&sw_video, 0, sizeof(sw_video));
-   sw_video.viddec_fd = -1;
    media_ffmpeg_register_once();
    unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_MEDIA_VIDEO,
       unifrog_exception_activity_hash(path ? path : "ffmpeg_video"), 0, 1);
