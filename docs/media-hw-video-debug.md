@@ -128,9 +128,10 @@
   first decoded/displayed frame path logs `native video reveal`.
 - Native audio and native video now support LEFT/RIGHT seek through the FFmpeg
   demuxer with `/dev/auddec` and `/dev/viddec` flush/start diagnostics. The
-  framebuffer progress overlay is enabled by default and can be disabled with
-  `MEDIA_PROGRESS_OVERLAY=0` if a display-layer experiment needs no overlay
-  writes during playback.
+  framebuffer progress overlay is always enabled during native media playback;
+  press `A` to hide or show it. Routine overlay refreshes no longer pan the
+  framebuffer or log every update, which keeps display-layer writes quieter
+  while preserving an on-screen progress indicator.
 
 Expected log markers:
 

@@ -104,7 +104,8 @@ or `src/unifrog_media.c`.
   clocks with `MEDIA_VIDEO_MAX_HW_AHEAD_MS` and
   `MEDIA_AUDIO_MAX_HW_AHEAD_MS`. This prevents a long SD/demux stall from being
   followed by a large catch-up burst that queues many seconds into `/dev/viddec`
-  or `/dev/auddec`.
+  or `/dev/auddec`. The caps should remain above the active feed lead; equal
+  values make normal decoder-clock jitter look like constant over-ahead waits.
 - MP4/M4A AAC must be passed like HCPlayer does: AudioSpecificConfig in
   `audio_config.extra_data`, then raw demuxed AAC access units as ES packets.
   Wrapping those raw MP4 packets in synthetic ADTS headers initialized the

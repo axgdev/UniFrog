@@ -128,16 +128,19 @@ For source-level SDK behavior clues, inspect:
   full-file preload for small videos is controlled by
   `MEDIA_VIDEO_PRELOAD_MAX_BYTES`. Low-resolution video can also tune
   `MEDIA_VIDEO_LOWRES_KSHM_SIZE` to trade viddec compressed-ring depth for more
-  normal heap available to the SD cache. `MEDIA_PROGRESS_OVERLAY=0` disables
-  the framebuffer progress/seek overlay if display-plane testing needs a quiet
-  graphics layer. Set these in `config.mk` for device experiments instead of
-  editing `src/unifrog_media.c` directly. Native video creates these caches
-  after the hardware decoder KSHM allocations, so cache size changes should not
-  prevent `/dev/viddec` from opening. The algorithm and log counters are
-  documented in `docs/media-buffering-algorithm.md`.
+  normal heap available to the SD cache. The framebuffer progress/seek overlay
+  is always present during native media playback and can be hidden or shown with
+  `A`; routine overlay refreshes avoid framebuffer panning and per-refresh logs
+  so the graphics layer is quieter during playback. Set these in `config.mk`
+  for device experiments instead of editing `src/unifrog_media.c` directly.
+  Native video creates these caches after the hardware decoder KSHM allocations,
+  so cache size changes should not prevent `/dev/viddec` from opening. The
+  algorithm and log counters are documented in
+  `docs/media-buffering-algorithm.md`.
 - `MEDIA_AUDIO_MAX_HW_AHEAD_MS` and `MEDIA_VIDEO_MAX_HW_AHEAD_MS` cap how far
   packet feeding can run ahead of the hardware decoder clocks after a stall.
-  These are separate from the wall-clock feed-lead settings.
+  These are separate from the wall-clock feed-lead settings and should remain
+  above the active feed lead to avoid threshold chatter.
 - The SF2000 audio path must stay muted/gated until real PCM exists. Digital
   zeroes alone can still expose board noise.
 

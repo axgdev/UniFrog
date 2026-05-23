@@ -134,13 +134,16 @@ Set these in `config.mk` or on the `make` command line:
 - `MEDIA_VIDEO_MAX_HW_AHEAD_MS`: maximum video packets queued ahead of the
   hardware video clock.
 - `MEDIA_AUDIO_MAX_HW_AHEAD_MS`: maximum audio packets queued ahead of the
-  hardware audio clock.
+  hardware audio clock. Keep this above `MEDIA_AUDIO_FEED_LEAD_MS`; if both
+  values are equal, tiny decoder-clock jitter can become constant wait/log
+  churn.
 - `MEDIA_VIDEO_BUFFERING_START_MS` and `MEDIA_VIDEO_BUFFERING_END_MS`: decoder
   buffering thresholds passed to `/dev/viddec`.
 - `MEDIA_AUDIO_BUFFERING_START_MS` and `MEDIA_AUDIO_BUFFERING_END_MS`: decoder
   buffering thresholds passed to `/dev/auddec`.
-- `MEDIA_PROGRESS_OVERLAY`: set to `0` to disable the framebuffer progress
-  meter and seek overlay while keeping hardware playback enabled.
+- The media progress overlay is always enabled during native audio/video
+  playback. Press `A` to hide or show it at runtime; normal progress refreshes
+  avoid log spam and framebuffer panning to keep the real-time path quiet.
 - `MEDIA_FILE_SLOW_READ_LOG_MS`: threshold for logging slow physical reads.
 
 Practical tuning rules:
@@ -152,8 +155,10 @@ Practical tuning rules:
 - If startup stutter remains but mid-play is smooth, increase
   `MEDIA_VIDEO_PREFILL_MAX_BYTES` first.
 - If low-resolution video has clean `slow=0` cache close stats but monitor
-  lines show `ahead_a` approaching zero, increase `MEDIA_AUDIO_FEED_LEAD_MS`
-  before increasing SD cache sizes.
+  lines show `ahead_a` approaching zero, inspect feed pacing before increasing
+  SD cache sizes. When hardware auddec owns sync, native video raises video
+  packet feed lead to the audio lead so MP4 demuxing can read far enough ahead
+  to keep interleaved audio queued.
 - If a card is fast and users prefer stutter-free small videos over fast start,
   set `MEDIA_VIDEO_PRELOAD_MAX_BYTES` to a safe cap such as `16777216`.
 - If `VIDDEC_INIT` returns `errno=12`, do not increase the startup cache before
@@ -182,7 +187,7 @@ while using the same audio feed lead as every other resolution:
 
 ```text
 unifrog media native video open_viddec begin ... 426x240 ... kshm=8388608 kshm_policy=lowres ...
-unifrog media native video clock ... audio_feed_lead_ms=3000 ... overlay=1 ...
+unifrog media native video clock ... video_feed_lead_ms=3000 audio_feed_lead_ms=3000 ... overlay=1 overlay_hide=A ...
 ```
 
 The close line now includes cache-efficiency counters:
@@ -218,10 +223,13 @@ unifrog media hw_ahead done kind=... clock=... feed=... ahead=...
 Occasional `hw_ahead` waits are normal. Constant waits plus audio/video stutter
 mean the feeder is oscillating between SD stalls and decoder-ring catch-up.
 
-Framebuffer progress and seek controls are logged at phase boundaries:
+Framebuffer progress and seek controls are logged at phase boundaries and when
+the user toggles the overlay:
 
 ```text
 unifrog media overlay tag=video ... pos=... dur=...
+unifrog media overlay hidden tag=video_toggle ...
+unifrog media overlay shown tag=video_toggle ...
 unifrog media seek video request cur=... target=...
 unifrog media seek viddec_flush tag=video ...
 unifrog media seek auddec_flush tag=video ...
