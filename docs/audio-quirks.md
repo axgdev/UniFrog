@@ -49,6 +49,21 @@ or `src/unifrog_media.c`.
   `dma_buffer_time`, but not the newer `mix_*` or `slave_mode` fields from the
   Linux-driver header. A 584-byte or 608-byte ioctl is rejected before
   `/dev/auddec` can initialize.
+- Compressed audio packets must be fed through a KSHM-backed `/dev/auddec`
+  configuration. The direct HCRTOS examples use `kshm_size` around `0x80000` to
+  `0xa0000`; UniFrog uses `0xa0000`. Device logs from 0108 showed that a
+  no-KSHM "minimal" configuration can return successful `AUDDEC_INIT` and
+  `AUDDEC_START` while never parsing headers (`frames_decoded=0`,
+  `first_header_got=0`, `AUDDEC_GET_CUR_TIME=0`) and eventually blocking
+  writes. Treat init success as necessary but not sufficient.
+- For direct `/dev/auddec`, the legacy `enable_audsink` field is inverted in the
+  linked `libauddrv.a`: a zero value enables the internal audsink render path.
+  This matches the stock HCRTOS direct-decoder examples, which memset
+  `struct audio_config` and do not set the field. UniFrog keeps compatibility
+  variants with value `1`, but the stock-style zero value is attempted first.
+- Audio-only compressed playback should open `/dev/auddec` in freerun mode
+  first. STC update/sync modes are reserved for audio plus video, where the
+  video decoder can synchronize to the audio-owned clock.
 
 ## Stock Firmware Notes
 

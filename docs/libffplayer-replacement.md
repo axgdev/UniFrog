@@ -85,6 +85,9 @@ For source-level SDK behavior clues, inspect:
   before filling the KSHM ring, then send EOS and wait briefly with
   `VIDDEC_CHECK_EOS`.
 - Audio decoder configs need real `snd_devs`, buffering range, and `kshm_size`.
+  The KSHM-backed profile must be tried before any no-KSHM diagnostic/minimal
+  profile because this `libauddrv.a` can report successful init/start without
+  actually consuming compressed input.
 - The SDK FFmpeg build can demux more formats than it can software-decode, so
   prefer compressed packets to HCRTOS decoder plugins when possible.
 - The SDK headers define many image/video codec IDs, including PNG/BMP/GIF and

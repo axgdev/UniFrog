@@ -1893,8 +1893,8 @@ static int media_play_native_audio_compressed(const char *path)
          finish_timeout_ms = (unsigned)duration_ms + 5000u;
    }
    media_init_drivers_once();
-   if (media_auddec_open(fmt, stream, AVSYNC_TYPE_UPDATESTC, &auddec) != 0 &&
-       media_auddec_open(fmt, stream, AVSYNC_TYPE_FREERUN, &auddec) != 0)
+   if (media_auddec_open(fmt, stream, AVSYNC_TYPE_FREERUN, &auddec) != 0 &&
+       media_auddec_open(fmt, stream, AVSYNC_TYPE_UPDATESTC, &auddec) != 0)
       goto out;
    packet = av_packet_alloc();
    if (!packet)
@@ -2764,7 +2764,7 @@ static void media_auddec_log_caps(int fd, const char *scope,
    errno = 0;
    caps_ret = ioctl(fd, AUDDEC_GET_CAPABILITIES, &caps);
    caps_errno = errno;
-   printf("unifrog media auddec caps scope=%s label=%s fd=%d ret=%d errno=%d caps=0x%lx codec=%lu sync=%d\n",
+   printf("unifrog media auddec caps_optional scope=%s label=%s fd=%d ret=%d errno=%d caps=0x%lx codec=%lu sync=%d\n",
       scope ? scope : "?", label ? label : "?", fd, caps_ret, caps_errno,
       (unsigned long)caps, (unsigned long)codec_id, sync_mode);
 }
@@ -2833,10 +2833,18 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
    struct audio_config cfg;
    struct audio_config base_cfg;
    static const struct media_raw_auddec_variant variants[] = {
-      { "raw_minimal", AUDDEV_DEFAULT, 0, 0, 0 },
+      /*
+       * The linked libauddrv.a treats enable_audsink == 0 as the internal
+       * audsink render path. Stock direct-decoder examples leave it zero.
+       */
+      { "raw_hcrtos_i2so_kshm", AUDDEV_I2SO, 0, 200,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "raw_hcrtos_default_kshm", AUDDEV_DEFAULT, 0, 200,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "raw_compat_audsink_i2so_kshm", AUDDEV_I2SO, 1, 200,
+         MEDIA_AUDIO_KSHM_SIZE },
       { "raw_minimal_i2so", AUDDEV_I2SO, 0, 0, 0 },
-      { "raw_sink_i2so", AUDDEV_I2SO, 1, 200, 0x200000 },
-      { "raw_sink_default", AUDDEV_DEFAULT, 1, 200, 0x200000 },
+      { "raw_minimal", AUDDEV_DEFAULT, 0, 0, 0 },
    };
    int fd;
    audio_channel_select_t channel = AUDIO_MONO_LEFT;
@@ -2908,6 +2916,10 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
          (void)ioctl(fd, AUDIO_SET_VOLUME, &volume);
          unifrog_audio_set_system_output_enabled(1);
          auddec->fd = fd;
+         printf("unifrog media raw auddec open ok label=%s try=%s fd=%d sync=%d snd=0x%lx audsink=%d flush=%d kshm=%d\n",
+            label ? label : "?", variant->label, fd, sync_mode,
+            (unsigned long)cfg.snd_devs, cfg.enable_audsink,
+            cfg.audio_flush_thres, cfg.kshm_size);
          return 0;
       }
       close(fd);
@@ -2923,17 +2935,24 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
    struct audio_config base_cfg;
    struct audio_config cfg;
    static const struct media_auddec_variant variants[] = {
-      { "ffp_minimal", 0, AUDDEV_DEFAULT, 0, 0, 0, 0 },
+      /*
+       * KSHM-backed profiles must come first. On this driver a no-KSHM
+       * profile can init/start cleanly but never consume compressed packets.
+       */
+      { "hcrtos_i2so_kshm", 0, AUDDEV_I2SO, 0, 1, 200,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "hcrtos_default_kshm", 0, AUDDEV_DEFAULT, 0, 1, 200,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "hcrtos_i2so_min_kshm", 0, AUDDEV_I2SO, 0, 0, 200,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "compat_audsink_i2so_kshm", 0, AUDDEV_I2SO, 1, 1, 200,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "compat_audsink_default_kshm", 0, AUDDEV_DEFAULT, 1, 1, 200,
+         MEDIA_AUDIO_KSHM_SIZE },
       { "ffp_minimal_i2so", 0, AUDDEV_I2SO, 0, 0, 0, 0 },
-      { "hcplayer_default", 0, AUDDEV_DEFAULT, 1, 1, 0, 0 },
-      { "hcplayer_i2so", 0, AUDDEV_I2SO, 1, 1, 0, 0 },
-      { "minimal_48k", 48000, AUDDEV_DEFAULT, 0, 0, 0, 0 },
-      { "stream_full_kshm", 0, AUDDEV_DEFAULT, 1, 1, 200,
-         MEDIA_AUDIO_KSHM_SIZE },
-      { "minimal_kshm", 0, AUDDEV_DEFAULT, 0, 0, 0,
-         MEDIA_AUDIO_KSHM_SIZE },
-      { "sink_i2so_kshm", 0, AUDDEV_I2SO, 1, 0, 200,
-         MEDIA_AUDIO_KSHM_SIZE },
+      { "ffp_minimal", 0, AUDDEV_DEFAULT, 0, 0, 0, 0 },
+      { "hcplayer_i2so_nokshm", 0, AUDDEV_I2SO, 1, 1, 0, 0 },
+      { "minimal_48k_nokshm", 48000, AUDDEV_DEFAULT, 0, 0, 0, 0 },
    };
    int hc_codec;
    audio_channel_select_t channel = AUDIO_MONO_LEFT;
@@ -3141,8 +3160,10 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
          auddec->stream = stream_index;
          auddec->time_base = stream->time_base;
          auddec->freerun = cfg.sync_mode == 0;
-         printf("unifrog media auddec open ok label=%s fd=%d stream=%d freerun=%d\n",
-            variant->label, fd, stream_index, auddec->freerun);
+         printf("unifrog media auddec open ok label=%s fd=%d stream=%d freerun=%d sync=%u snd=0x%lx audsink=%d flush=%d kshm=%d\n",
+            variant->label, fd, stream_index, auddec->freerun,
+            cfg.sync_mode, (unsigned long)cfg.snd_devs,
+            cfg.enable_audsink, cfg.audio_flush_thres, cfg.kshm_size);
          media_audio_activity_stage(12u,
             (((uint32_t)i & 0xffu) << 16) | ((uint32_t)fd & 0xffffu),
             ((uint32_t)auddec->freerun & 0xffffu));
