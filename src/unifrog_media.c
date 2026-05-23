@@ -1776,9 +1776,10 @@ static int media_video_send_packet(int fd, const AVPacket *packet,
    if (packet_index < 8u) {
       const uint8_t *d = packet->data;
 
-      printf("unifrog media native video packet idx=%u size=%d send=%lu pts=%ld dur=%ld key=%d aud=%d nal=%d nals=%u mask=0x%x bytes=%02x %02x %02x %02x %02x %02x %02x %02x hdr=%u\n",
+      printf("unifrog media native video packet idx=%u size=%d send=%lu pts=%ld dur=%ld src_pts=%ld src_dts=%ld src_dur=%ld key=%d aud=%d nal=%d nals=%u mask=0x%x bytes=%02x %02x %02x %02x %02x %02x %02x %02x hdr=%u\n",
          packet_index, packet->size, (unsigned long)header.size,
          (long)header.pts, (long)header.dur,
+         (long)packet->pts, (long)packet->dts, (long)packet->duration,
          (packet->flags & AV_PKT_FLAG_KEY) ? 1 : 0, add_aud,
          media_h264_first_nal_type(packet->data, (size_t)packet->size),
          nal_count, nal_mask,
@@ -2739,6 +2740,7 @@ static int media_play_native_video(const char *path,
    unsigned long frames_decoded = 0;
    unsigned long frames_displayed = 0;
    int disable_audio = options && options->disable_audio;
+   int video_freerun = 0;
    int sd_read_active = 0;
 
    memset(&audio, 0, sizeof(audio));
@@ -2840,6 +2842,9 @@ static int media_play_native_video(const char *path,
          }
       }
    }
+   video_freerun = disable_audio || (auddec.fd < 0 && !audio_enabled);
+   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d audio_enabled=%d\n",
+      video_freerun, disable_audio, auddec.fd >= 0, audio_enabled);
    packet = av_packet_alloc();
    frame = av_frame_alloc();
    if (!packet || !frame)
@@ -2857,7 +2862,7 @@ static int media_play_native_video(const char *path,
       if (packet->stream_index == video_stream) {
          int write_ret = media_video_send_filtered(video_fd, video_bsf,
             packet, fmt->streams[video_stream]->time_base,
-            disable_audio || auddec.fd < 0,
+            video_freerun,
             fmt->streams[video_stream]->codecpar->codec_id == AV_CODEC_ID_H264,
             &video_packets);
 
