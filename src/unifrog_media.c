@@ -80,6 +80,9 @@
 #define VIDEO_EOS_TIMEOUT_MS 1000u
 #define VIDEO_LOG_AUTO_FLUSH_BYTES (64u * 1024u)
 #define MEDIA_AUDIO_WRITE_SPACE_TIMEOUT_MS 5000u
+#define MEDIA_AUDIO_PROGRESS_POLL_MS 100u
+#define MEDIA_GB300_AUDDEC_ROUTE_VARIANTS 6u
+#define MEDIA_GB300_RAW_AUDDEC_ROUTE_VARIANTS 6u
 #ifndef UNIFROG_MEDIA_VIDEO_FEED_LEAD_MS
 #define UNIFROG_MEDIA_VIDEO_FEED_LEAD_MS 500
 #endif
@@ -308,6 +311,8 @@ static void media_flush_auddec_for_seek(struct media_auddec *auddec,
 static void media_flush_viddec_for_seek(int video_fd, const char *tag,
    const char *path);
 static uint32_t media_audio_frames_to_ms(uint32_t frames, int rate);
+static unsigned media_auddec_rotated_variant_index(unsigned order,
+   unsigned gb300_count, unsigned offset);
 
 struct media_auddec_variant {
    const char *label;
@@ -343,6 +348,17 @@ static uint32_t media_audio_preferred_snd_devs(void)
    if (unifrog_audio_prefers_stereo_output())
       return AUDDEV_I2SO | AUDDEV_SPO;
    return AUDDEV_I2SO;
+}
+
+static unsigned media_gb300_raw_auddec_route_counter;
+static unsigned media_gb300_auddec_route_counter;
+
+static unsigned media_auddec_rotated_variant_index(unsigned order,
+   unsigned gb300_count, unsigned offset)
+{
+   if (offset && order < gb300_count)
+      return (order + offset) % gb300_count;
+   return order;
 }
 
 struct media_readahead_slot {
@@ -2865,6 +2881,7 @@ static int media_play_native_audio_compressed(const char *path)
    int ret = -1;
    unsigned finish_timeout_ms = 600000u;
    uint32_t loop_polls = 0;
+   uint32_t last_progress_poll_ms = 0;
    uint32_t start_ms = unifrog_perf_time_ms();
    int64_t duration_ms = -1;
    int sd_read_active = 0;
@@ -2987,9 +3004,11 @@ static int media_play_native_audio_compressed(const char *path)
       }
       av_packet_unref(packet);
       loop_polls++;
-      if ((loop_polls % 32u) == 0) {
+      if (unifrog_perf_time_ms() - last_progress_poll_ms >=
+          MEDIA_AUDIO_PROGRESS_POLL_MS) {
          int64_t cur_time = -1;
 
+         last_progress_poll_ms = unifrog_perf_time_ms();
          (void)ioctl(auddec.fd, AUDDEC_GET_CUR_TIME, &cur_time);
          media_draw_progress_overlay(&overlay, "audio",
             cur_time >= 0 ? cur_time : pacer.next_ms, duration_ms, 0, path);
@@ -4298,6 +4317,9 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
       { "gb300_raw_spo_kshm", AUDDEV_SPO, 0, 0, MEDIA_AUDIO_KSHM_SIZE },
       { "gb300_raw_spo_audsink_kshm", AUDDEV_SPO, 1, 0,
          MEDIA_AUDIO_KSHM_SIZE },
+      { "gb300_raw_pcmo_kshm", AUDDEV_PCMO, 0, 0, MEDIA_AUDIO_KSHM_SIZE },
+      { "gb300_raw_i2so_pcmo_kshm", AUDDEV_I2SO | AUDDEV_PCMO, 0, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
       { "raw_hcrtos_i2so_kshm", AUDDEV_I2SO, 0, 0,
          MEDIA_AUDIO_KSHM_SIZE },
       { "raw_hcrtos_default_kshm", AUDDEV_DEFAULT, 0, 0,
@@ -4311,10 +4333,12 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
    audio_channel_select_t channel = media_audio_channel_select();
    uint8_t volume = MEDIA_AUDIO_VOLUME;
    int caps_logged = 0;
+   unsigned gb300_route_offset = 0;
 
    if (!auddec || !codec_id)
       return -1;
    media_init_drivers_once();
+   unifrog_audio_run_gb300_route_probe_once("raw_auddec_open");
    memset(auddec, 0, sizeof(*auddec));
    auddec->fd = -1;
    auddec->stream = 0;
@@ -4336,12 +4360,18 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
          base_cfg.extradata_mode = 1;
       }
    }
-   printf("unifrog media raw auddec route_policy label=%s gb300=%d preferred_snd=0x%lx output_ch=%u variants=%lu\n",
+   if (unifrog_audio_prefers_stereo_output())
+      gb300_route_offset = media_gb300_raw_auddec_route_counter++ %
+         MEDIA_GB300_RAW_AUDDEC_ROUTE_VARIANTS;
+   printf("unifrog media raw auddec route_policy label=%s gb300=%d preferred_snd=0x%lx output_ch=%u variants=%lu gb_routes=%u gb_offset=%u\n",
       label ? label : "?", unifrog_audio_prefers_stereo_output(),
       (unsigned long)media_audio_preferred_snd_devs(),
-      media_audio_output_channels(), (unsigned long)ARRAY_SIZE(variants));
+      media_audio_output_channels(), (unsigned long)ARRAY_SIZE(variants),
+      MEDIA_GB300_RAW_AUDDEC_ROUTE_VARIANTS, gb300_route_offset);
 
-   for (unsigned i = 0; i < ARRAY_SIZE(variants); i++) {
+   for (unsigned order = 0; order < ARRAY_SIZE(variants); order++) {
+      unsigned i = media_auddec_rotated_variant_index(order,
+         MEDIA_GB300_RAW_AUDDEC_ROUTE_VARIANTS, gb300_route_offset);
       const struct media_raw_auddec_variant *variant = &variants[i];
       int extra_ret = 0;
       int init_ret;
@@ -4350,8 +4380,8 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
       int start_errno;
 
       if (!media_auddec_variant_allowed(variant->label)) {
-         printf("unifrog media raw auddec variant skip label=%s gb300=%d\n",
-            variant->label, unifrog_audio_prefers_stereo_output());
+         printf("unifrog media raw auddec variant skip label=%s idx=%u order=%u gb300=%d\n",
+            variant->label, i, order, unifrog_audio_prefers_stereo_output());
          continue;
       }
       cfg = base_cfg;
@@ -4379,9 +4409,9 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
       errno = 0;
       start_ret = init_ret == 0 ? ioctl(fd, AUDDEC_START, 0) : -1;
       start_errno = errno;
-      printf("unifrog media raw auddec init label=%s try=%s fd=%d extra=%d init=%d init_errno=%d start=%d start_errno=%d codec=%lu rate=%u ch=%u bits=%u x=%u mode=%u sync=%d snd=0x%lx audsink=%d kshm=%d\n",
-         label ? label : "?", variant->label, fd, extra_ret, init_ret,
-         init_errno, start_ret, start_errno, (unsigned long)codec_id,
+      printf("unifrog media raw auddec init label=%s try=%s idx=%u order=%u fd=%d extra=%d init=%d init_errno=%d start=%d start_errno=%d codec=%lu rate=%u ch=%u bits=%u x=%u mode=%u sync=%d snd=0x%lx audsink=%d kshm=%d\n",
+         label ? label : "?", variant->label, i, order, fd, extra_ret,
+         init_ret, init_errno, start_ret, start_errno, (unsigned long)codec_id,
          cfg.sample_rate, cfg.channels, cfg.bits_per_coded_sample,
          cfg.extradata_size, cfg.extradata_mode, sync_mode,
          (unsigned long)cfg.snd_devs, cfg.enable_audsink, cfg.kshm_size);
@@ -4433,6 +4463,10 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
          MEDIA_AUDIO_KSHM_SIZE },
       { "gb300_spo_audsink_kshm", 0, AUDDEV_SPO, 1, 1, 0,
          MEDIA_AUDIO_KSHM_SIZE },
+      { "gb300_pcmo_kshm", 0, AUDDEV_PCMO, 0, 1, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "gb300_i2so_pcmo_kshm", 0, AUDDEV_I2SO | AUDDEV_PCMO, 0, 1, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
       { "hcrtos_i2so_kshm", 0, AUDDEV_I2SO, 0, 1, 0,
          MEDIA_AUDIO_KSHM_SIZE },
       { "hcrtos_default_kshm", 0, AUDDEV_DEFAULT, 0, 1, 0,
@@ -4454,6 +4488,7 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
    unsigned bits;
    uint32_t last_stage = 0;
    int caps_logged = 0;
+   unsigned gb300_route_offset = 0;
 
    media_audio_activity_stage(1u,
       (((uint32_t)stream_index & 0xffffu) << 8) |
@@ -4512,6 +4547,7 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       media_audio_activity_stage(255u, 3u, (uint32_t)par->codec_id);
       return -1;
    }
+   unifrog_audio_run_gb300_route_probe_once("auddec_open");
 
    bits = par->bits_per_coded_sample > 0 ?
       (unsigned)par->bits_per_coded_sample : 16u;
@@ -4559,12 +4595,18 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       (auddec->aac_adts ? "adts_wrap" :
       (base_cfg.extradata_size ? "raw_asc" : "raw_es")) : "na",
       auddec->aac_profile, auddec->aac_sample_rate_index);
-   printf("unifrog media auddec route_policy stream=%d gb300=%d preferred_snd=0x%lx output_ch=%u variants=%lu\n",
+   if (unifrog_audio_prefers_stereo_output())
+      gb300_route_offset = media_gb300_auddec_route_counter++ %
+         MEDIA_GB300_AUDDEC_ROUTE_VARIANTS;
+   printf("unifrog media auddec route_policy stream=%d gb300=%d preferred_snd=0x%lx output_ch=%u variants=%lu gb_routes=%u gb_offset=%u\n",
       stream_index, unifrog_audio_prefers_stereo_output(),
       (unsigned long)media_audio_preferred_snd_devs(),
-      media_audio_output_channels(), (unsigned long)ARRAY_SIZE(variants));
+      media_audio_output_channels(), (unsigned long)ARRAY_SIZE(variants),
+      MEDIA_GB300_AUDDEC_ROUTE_VARIANTS, gb300_route_offset);
 
-   for (unsigned i = 0; i < ARRAY_SIZE(variants); i++) {
+   for (unsigned order = 0; order < ARRAY_SIZE(variants); order++) {
+      unsigned i = media_auddec_rotated_variant_index(order,
+         MEDIA_GB300_AUDDEC_ROUTE_VARIANTS, gb300_route_offset);
       const struct media_auddec_variant *variant = &variants[i];
       int fd;
       int extra_ret = 0;
@@ -4574,8 +4616,8 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       int start_errno;
 
       if (!media_auddec_variant_allowed(variant->label)) {
-         printf("unifrog media auddec variant skip label=%s idx=%u gb300=%d\n",
-            variant->label, i, unifrog_audio_prefers_stereo_output());
+         printf("unifrog media auddec variant skip label=%s idx=%u order=%u gb300=%d\n",
+            variant->label, i, order, unifrog_audio_prefers_stereo_output());
          continue;
       }
       cfg = base_cfg;
@@ -4600,8 +4642,8 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
          (((uint32_t)cfg.sync_mode & 0xffu) << 8) |
          ((uint32_t)cfg.extradata_mode & 0xffu),
          (uint32_t)(cfg.extradata_size & 0xffffu));
-      printf("unifrog media auddec variant begin label=%s idx=%u stream=%d codec=%u av=%d name=%s rate=%u ch=%u bits=%u block=%u extra=%u mode=%u sync=%u snd=0x%lx audsink=%d flush=%d kshm=%d\n",
-         variant->label, i, stream_index, cfg.codec_id, par->codec_id,
+      printf("unifrog media auddec variant begin label=%s idx=%u order=%u stream=%d codec=%u av=%d name=%s rate=%u ch=%u bits=%u block=%u extra=%u mode=%u sync=%u snd=0x%lx audsink=%d flush=%d kshm=%d\n",
+         variant->label, i, order, stream_index, cfg.codec_id, par->codec_id,
          media_avcodec_name(par->codec_id), cfg.sample_rate, cfg.channels,
          cfg.bits_per_coded_sample, cfg.block_align, cfg.extradata_size,
          cfg.extradata_mode, cfg.sync_mode, (unsigned long)cfg.snd_devs,

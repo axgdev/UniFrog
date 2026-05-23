@@ -60,6 +60,11 @@ or `src/unifrog_media.c`.
 - On GB300, UniFrog's AUTO PCM opener tries AUDSINK before direct
   `/dev/sndC0i2so`. Direct SND remains first on SF2000 because it gives the
   silence gate full PCM visibility and has been the stable route there.
+- On GB300, the first PCM or hardware-auddec audio open runs a one-shot route
+  probe before normal playback. It emits short tagged PCM beeps through every
+  plausible HCRTOS output path and logs `unifrog audio gb300_probe` for each
+  result. This is temporary diagnostic coverage for devices that initialize the
+  decoder successfully but remain silent.
 - Audio-only and native video-container audio playback prefer compressed
   packets through `/dev/auddec` when the linked HCRTOS plugin supports the
   codec. Unsupported or failed software-only routes still fall back to
@@ -83,11 +88,14 @@ or `src/unifrog_media.c`.
   This matches the stock HCRTOS direct-decoder examples, which memset
   `struct audio_config` and do not set the field. UniFrog keeps compatibility
   variants with value `1`, but the stock-style zero value is attempted first.
-- GB300 compressed `/dev/auddec` routes try `AUDDEV_I2SO | AUDDEV_SPO` before
-  the SF2000-only `AUDDEV_I2SO` profiles. HCRTOS projector/cast sources set this
-  same combined output mask before launching local media, and GB300 logs should
-  therefore show `route_policy ... gb300=1 preferred_snd=0x5` followed by an
-  opened `gb300_*` auddec profile.
+- GB300 compressed `/dev/auddec` routes include `AUDDEV_I2SO | AUDDEV_SPO`,
+  `AUDDEV_SPO`, `AUDDEV_PCMO`, and `AUDDEV_I2SO | AUDDEV_PCMO` before the
+  SF2000-only `AUDDEV_I2SO` profiles. HCRTOS projector/cast sources set the
+  combined I2SO+SPO mask before launching local media, but current GB300
+  diagnostics rotate the first GB300 route attempted on each media open because
+  a route can return successful `AUDDEC_INIT`/`AUDDEC_START` while still being
+  physically silent. Logs show `route_policy ... gb_routes=6 gb_offset=N`,
+  then the opened `gb300_*` auddec profile.
 - Audio-only compressed playback should open `/dev/auddec` in freerun mode
   first. STC update/sync modes are reserved for audio plus video, where the
   video decoder can synchronize to the audio-owned clock.
@@ -201,6 +209,24 @@ Use Developer or Storage -> Audio Probe. The important stages are:
 
 When the loud buzz is fixed, only the faint hardware noise floor should remain
 during silence stages.
+
+GB300 route diagnostics run once per boot on the first GB300 audio open. The
+audible/logged order is:
+
+- `0 audsink_i2so_spo`: `/dev/audsink`, `AUDSINK_SND_DEVBIT_I2SO | AUDSINK_SND_DEVBIT_SPO`.
+- `1 audsink_spo`: `/dev/audsink`, `AUDSINK_SND_DEVBIT_SPO`.
+- `2 audsink_i2so`: `/dev/audsink`, `AUDSINK_SND_DEVBIT_I2SO`.
+- `3 audsink_pcmo`: `/dev/audsink`, `AUDSINK_SND_DEVBIT_PCMO`.
+- `4 audsink_i2so_pcmo`: `/dev/audsink`, `AUDSINK_SND_DEVBIT_I2SO | AUDSINK_SND_DEVBIT_PCMO`.
+- `5 snd_i2so_audpad`: direct `/dev/sndC0i2so`, `SND_PCM_SOURCE_AUDPAD`.
+- `6 snd_spo_i2sodma`: direct `/dev/sndC0spo`, `SND_SPO_SOURCE_I2SODMA`.
+- `7 snd_spo_spodma`: direct `/dev/sndC0spo`, `SND_SPO_SOURCE_SPODMA`.
+- `8 snd_pcmo_audpad`: direct `/dev/sndC0pcmo`, `SND_PCM_SOURCE_AUDPAD`.
+
+If none of the probe routes is audible but the logs show successful init/start,
+focus on the GB300 amp gate, pinmux, or board detection. If a probe route is
+audible but `/dev/auddec` media remains silent, focus on the matching
+`gb300_*` auddec route label and its `snd`/`audsink` settings.
 
 ## Open Work
 
