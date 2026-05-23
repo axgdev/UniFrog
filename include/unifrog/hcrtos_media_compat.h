@@ -88,7 +88,6 @@ struct audio_config {
    int audio_flush_thres;
    unsigned char extra_data[512];
    void *extradata;
-   uint32_t codec_frame_size;
    uint32_t extradata_size;
    unsigned char extradata_mode;
    unsigned char bypass;

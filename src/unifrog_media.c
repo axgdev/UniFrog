@@ -119,6 +119,7 @@ struct media_auddec_variant {
    int enable_audsink;
    int full_stream_fields;
    int audio_flush_thres;
+   int kshm_size;
 };
 
 struct media_raw_auddec_variant {
@@ -241,6 +242,7 @@ static unsigned media_sd_read_depth;
 static unsigned media_disk_suspend_depth;
 static uint32_t media_disk_suspend_start_ms;
 static uint32_t media_video_activity_marker;
+static uint32_t media_audio_activity_marker;
 
 extern unsigned long _padec_start;
 extern unsigned long _padec_end;
@@ -276,6 +278,23 @@ static void media_video_activity_stage(uint32_t stage, uint32_t detail0,
 
    unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_MEDIA_VIDEO,
       media_video_activity_mark_value(), packed, detail1);
+}
+
+static uint32_t media_audio_activity_mark_value(void)
+{
+   if (media_audio_activity_marker == 0)
+      media_audio_activity_marker =
+         unifrog_exception_activity_hash("native_audio");
+   return media_audio_activity_marker;
+}
+
+static void media_audio_activity_stage(uint32_t stage, uint32_t detail0,
+   uint32_t detail1)
+{
+   uint32_t packed = ((stage & 0xffu) << 24) | (detail0 & 0x00ffffffu);
+
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_MEDIA_AUDIO,
+      media_audio_activity_mark_value(), packed, detail1);
 }
 
 static void media_disk_suspend_begin(const char *tag, const char *path)
@@ -2226,19 +2245,28 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
    struct audio_config base_cfg;
    struct audio_config cfg;
    static const struct media_auddec_variant variants[] = {
-      { "hcplayer_i2so", 0, AUDDEV_I2SO, 1, 1, 0 },
-      { "hcplayer_default", 0, AUDDEV_DEFAULT, 1, 1, 0 },
-      { "minimal", 0, AUDDEV_DEFAULT, 0, 0, 0 },
-      { "minimal_i2so", 0, AUDDEV_I2SO, 0, 0, 0 },
-      { "minimal_48k", 48000, AUDDEV_DEFAULT, 0, 0, 0 },
-      { "sink_i2so", 0, AUDDEV_I2SO, 1, 0, 200 },
-      { "stream_full", 0, AUDDEV_DEFAULT, 1, 1, 200 },
+      { "ffp_minimal", 0, AUDDEV_DEFAULT, 0, 0, 0, 0 },
+      { "ffp_minimal_i2so", 0, AUDDEV_I2SO, 0, 0, 0, 0 },
+      { "hcplayer_default", 0, AUDDEV_DEFAULT, 1, 1, 0, 0 },
+      { "hcplayer_i2so", 0, AUDDEV_I2SO, 1, 1, 0, 0 },
+      { "minimal_48k", 48000, AUDDEV_DEFAULT, 0, 0, 0, 0 },
+      { "stream_full_kshm", 0, AUDDEV_DEFAULT, 1, 1, 200,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "minimal_kshm", 0, AUDDEV_DEFAULT, 0, 0, 0,
+         MEDIA_AUDIO_KSHM_SIZE },
+      { "sink_i2so_kshm", 0, AUDDEV_I2SO, 1, 0, 200,
+         MEDIA_AUDIO_KSHM_SIZE },
    };
    int hc_codec;
    audio_channel_select_t channel = AUDIO_MONO_LEFT;
    uint8_t volume = MEDIA_AUDIO_VOLUME;
    unsigned bits;
+   uint32_t last_stage = 0;
 
+   media_audio_activity_stage(1u,
+      (((uint32_t)stream_index & 0xffffu) << 8) |
+      ((uint32_t)sync_mode & 0xffu),
+      fmt ? fmt->nb_streams : 0u);
    if (!auddec)
       return -1;
    auddec->fd = -1;
@@ -2250,14 +2278,45 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
    auddec->aac_profile = 1;
    auddec->aac_sample_rate_index = 4;
    auddec->aac_channels = 2;
-   if (!fmt || stream_index < 0 || stream_index >= (int)fmt->nb_streams)
+   if (!fmt || stream_index < 0 || stream_index >= (int)fmt->nb_streams) {
+      printf("unifrog media auddec invalid_args fmt=0x%08lx stream=%d nb_streams=%u sync=%d\n",
+         (unsigned long)(uintptr_t)fmt, stream_index,
+         fmt ? fmt->nb_streams : 0u, sync_mode);
+      media_audio_activity_stage(255u, 1u, 0u);
       return -1;
+   }
    stream = fmt->streams[stream_index];
+   if (!stream) {
+      printf("unifrog media auddec invalid_stream stream_ptr=0x%08lx par_ptr=0x%08lx stream=%d\n",
+         (unsigned long)(uintptr_t)stream,
+         0ul, stream_index);
+      media_audio_activity_stage(255u, 2u, 0u);
+      return -1;
+   }
    par = stream->codecpar;
+   if (!par) {
+      printf("unifrog media auddec invalid_stream stream_ptr=0x%08lx par_ptr=0x%08lx stream=%d\n",
+         (unsigned long)(uintptr_t)stream,
+         (unsigned long)(uintptr_t)par, stream_index);
+      media_audio_activity_stage(255u, 2u, 0u);
+      return -1;
+   }
    hc_codec = media_hc_audio_codec_from_av(par->codec_id);
+   printf("unifrog media auddec begin stream=%d fmt=0x%08lx stream_ptr=0x%08lx par_ptr=0x%08lx codec=%d name=%s tag=0x%lx rate=%d ch=%d bits=%d block=%d extra=%d sync=%d\n",
+      stream_index, (unsigned long)(uintptr_t)fmt,
+      (unsigned long)(uintptr_t)stream, (unsigned long)(uintptr_t)par,
+      par->codec_id, media_avcodec_name(par->codec_id),
+      (unsigned long)par->codec_tag, par->sample_rate, par->channels,
+      par->bits_per_coded_sample, par->block_align, par->extradata_size,
+      sync_mode);
+   media_audio_activity_stage(2u,
+      (((uint32_t)(par->codec_id & 0xffffu)) << 8) |
+      ((uint32_t)sync_mode & 0xffu),
+      (uint32_t)(par->extradata_size & 0xffffu));
    if (!hc_codec) {
       printf("unifrog media auddec unsupported codec=%d stream=%d\n",
          par->codec_id, stream_index);
+      media_audio_activity_stage(255u, 3u, (uint32_t)par->codec_id);
       return -1;
    }
 
@@ -2289,6 +2348,11 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
          base_cfg.extradata_mode = 1;
       }
    }
+   printf("unifrog media auddec base stream=%d codec=%u sync=%u rate=%u ch=%u bits=%u block=%u extra=%u mode=%u\n",
+      stream_index, base_cfg.codec_id, base_cfg.sync_mode,
+      base_cfg.sample_rate, base_cfg.channels,
+      base_cfg.bits_per_coded_sample, base_cfg.block_align,
+      base_cfg.extradata_size, base_cfg.extradata_mode);
 
    for (unsigned i = 0; i < ARRAY_SIZE(variants); i++) {
       const struct media_auddec_variant *variant = &variants[i];
@@ -2305,7 +2369,7 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       cfg.audio_flush_thres = variant->audio_flush_thres;
       cfg.buffering_start = 200;
       cfg.buffering_end = 1000;
-      cfg.kshm_size = MEDIA_AUDIO_KSHM_SIZE;
+      cfg.kshm_size = variant->kshm_size;
       if (variant->force_rate)
          cfg.sample_rate = (uint32_t)variant->force_rate;
       if (variant->full_stream_fields) {
@@ -2315,23 +2379,70 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
             (uint32_t)par->block_align : 0u;
          cfg.channel_layout = par->channel_layout;
       }
+      last_stage = 3u;
+      media_audio_activity_stage(3u,
+         (((uint32_t)i & 0xffu) << 16) |
+         (((uint32_t)cfg.sync_mode & 0xffu) << 8) |
+         ((uint32_t)cfg.extradata_mode & 0xffu),
+         (uint32_t)(cfg.extradata_size & 0xffffu));
+      printf("unifrog media auddec variant begin label=%s idx=%u stream=%d codec=%u av=%d name=%s rate=%u ch=%u bits=%u block=%u extra=%u mode=%u sync=%u snd=0x%lx audsink=%d flush=%d kshm=%d\n",
+         variant->label, i, stream_index, cfg.codec_id, par->codec_id,
+         media_avcodec_name(par->codec_id), cfg.sample_rate, cfg.channels,
+         cfg.bits_per_coded_sample, cfg.block_align, cfg.extradata_size,
+         cfg.extradata_mode, cfg.sync_mode, (unsigned long)cfg.snd_devs,
+         cfg.enable_audsink, cfg.audio_flush_thres, cfg.kshm_size);
 
       fd = open("/dev/auddec", O_RDWR);
       if (fd < 0) {
          printf("unifrog media auddec open failed errno=%d stream=%d codec=%d try=%s\n",
             errno, stream_index, par->codec_id, variant->label);
+         media_audio_activity_stage(4u,
+            (((uint32_t)i & 0xffu) << 16) | 0xffffu,
+            (uint32_t)(errno & 0xffffu));
          continue;
       }
-      if (cfg.extradata_mode == 1)
+      last_stage = 4u;
+      media_audio_activity_stage(4u,
+         (((uint32_t)i & 0xffu) << 16) | ((uint32_t)fd & 0xffffu),
+         0u);
+      if (cfg.extradata_mode == 1) {
+         last_stage = 5u;
+         media_audio_activity_stage(5u,
+            (((uint32_t)i & 0xffu) << 16) |
+            ((uint32_t)(par->extradata_size & 0xffffu)),
+            0u);
          extra_ret = media_write_extra_before_init(fd, "auddec",
             par->extradata,
             par->extradata_size);
+         media_audio_activity_stage(6u,
+            (((uint32_t)i & 0xffu) << 16) |
+            ((uint32_t)(extra_ret & 0xffffu)),
+            (uint32_t)(errno & 0xffffu));
+      }
       errno = 0;
+      last_stage = 7u;
+      media_audio_activity_stage(7u,
+         (((uint32_t)i & 0xffu) << 16) |
+         ((uint32_t)(AUDDEC_INIT & 0xffffu)),
+         (uint32_t)(cfg.kshm_size & 0xffffu));
       init_ret = extra_ret == 0 ? ioctl(fd, AUDDEC_INIT, &cfg) : -1;
       init_errno = errno;
+      media_audio_activity_stage(8u,
+         (((uint32_t)i & 0xffu) << 16) |
+         ((uint32_t)(init_ret & 0xffffu)),
+         (uint32_t)(init_errno & 0xffffu));
       errno = 0;
+      last_stage = 9u;
+      media_audio_activity_stage(9u,
+         (((uint32_t)i & 0xffu) << 16) |
+         ((uint32_t)(AUDDEC_START & 0xffffu)),
+         (uint32_t)(cfg.sync_mode & 0xffffu));
       start_ret = init_ret == 0 ? ioctl(fd, AUDDEC_START, 0) : -1;
       start_errno = errno;
+      media_audio_activity_stage(10u,
+         (((uint32_t)i & 0xffu) << 16) |
+         ((uint32_t)(start_ret & 0xffffu)),
+         (uint32_t)(start_errno & 0xffffu));
       printf("unifrog media auddec init_try label=%s fd=%d extra=%d init=%d init_errno=%d start=%d start_errno=%d stream=%d codec=%u av=%d name=%s tag=0x%lx rate=%u ch=%u bits=%u block=%u extra_size=%u mode=%u sync=%u snd=0x%lx audsink=%d flush=%d adts=%d prof=%u sridx=%u\n",
          variant->label, fd, extra_ret, init_ret, init_errno, start_ret,
          start_errno, stream_index, cfg.codec_id, par->codec_id,
@@ -2351,13 +2462,21 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
          auddec->freerun = cfg.sync_mode == 0;
          printf("unifrog media auddec open ok label=%s fd=%d stream=%d freerun=%d\n",
             variant->label, fd, stream_index, auddec->freerun);
+         media_audio_activity_stage(12u,
+            (((uint32_t)i & 0xffu) << 16) | ((uint32_t)fd & 0xffffu),
+            ((uint32_t)auddec->freerun & 0xffffu));
          return 0;
       }
+      media_audio_activity_stage(11u,
+         (((uint32_t)i & 0xffu) << 16),
+         ((uint32_t)(init_errno & 0xffffu) << 16) |
+         ((uint32_t)(start_errno & 0xffffu)));
       close(fd);
    }
    printf("unifrog media auddec open failed stream=%d codec=%d name=%s rate=%d ch=%d extra=%d\n",
       stream_index, par->codec_id, media_avcodec_name(par->codec_id),
       par->sample_rate, par->channels, par->extradata_size);
+   media_audio_activity_stage(255u, 4u, last_stage);
    return -1;
 }
 
@@ -4316,13 +4435,22 @@ static void media_init_drivers_once(void)
       (unsigned long)((uintptr_t)&_pvdec_end - (uintptr_t)&_pvdec_start),
       (unsigned long)((uintptr_t)&_deca_audio_stream_struct_end -
          (uintptr_t)&_deca_audio_stream_struct_start));
-   printf("unifrog media abi audio_cfg=%lu audio_status=%lu video_cfg=%lu pkt=%lu cmd_auddec_init=0x%lx cmd_viddec_init=0x%lx\n",
+   printf("unifrog media abi audio_cfg=%lu audio_status=%lu video_cfg=%lu pkt=%lu cmd_auddec_init=0x%lx cmd_viddec_init=0x%lx off_audio_extradata=%lu off_audio_extrasz=%lu off_audio_extramode=%lu off_audio_bypass=%lu off_audio_kshm=%lu off_audio_chlayout=%lu off_audio_buf_start=%lu off_audio_buf_end=%lu off_audio_audsink=%lu\n",
       (unsigned long)sizeof(struct audio_config),
       (unsigned long)sizeof(struct audio_decore_status),
       (unsigned long)sizeof(struct video_config),
       (unsigned long)sizeof(AvPktHd),
       (unsigned long)AUDDEC_INIT,
-      (unsigned long)VIDDEC_INIT);
+      (unsigned long)VIDDEC_INIT,
+      (unsigned long)offsetof(struct audio_config, extradata),
+      (unsigned long)offsetof(struct audio_config, extradata_size),
+      (unsigned long)offsetof(struct audio_config, extradata_mode),
+      (unsigned long)offsetof(struct audio_config, bypass),
+      (unsigned long)offsetof(struct audio_config, kshm_size),
+      (unsigned long)offsetof(struct audio_config, channel_layout),
+      (unsigned long)offsetof(struct audio_config, buffering_start),
+      (unsigned long)offsetof(struct audio_config, buffering_end),
+      (unsigned long)offsetof(struct audio_config, enable_audsink));
    (void)unifrog_log_flush();
    initialized = 1;
 }
