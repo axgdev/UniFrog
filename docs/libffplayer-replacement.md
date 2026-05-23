@@ -101,6 +101,13 @@ For source-level SDK behavior clues, inspect:
 - Container audio paths should keep codec setup data separate from ES payloads.
   For example, native FLAC passes STREAMINFO as decoder extradata and begins ES
   writes at the first FLAC audio frame after metadata blocks.
+- MP4/M4A AAC follows that same rule: pass AudioSpecificConfig as auddec
+  extradata and feed raw AAC access units. Do not synthesize ADTS around MP4 AAC
+  packets unless target logs prove a specific raw-ADTS stream needs it.
+- `/dev/auddec` packets should carry PTS/duration when FFmpeg provides them,
+  including freerun audio-only playback. Audio-only file playback should pace
+  packet feeding with a bounded prefeed window so the KSHM ring is a jitter
+  buffer, not a full-file dump.
 - The SF2000 audio path must stay muted/gated until real PCM exists. Digital
   zeroes alone can still expose board noise.
 

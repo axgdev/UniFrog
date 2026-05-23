@@ -77,6 +77,9 @@
 #define VIDEO_WRITE_SPACE_POLL_US 2000u
 #define VIDEO_EOS_TIMEOUT_MS 1000u
 #define VIDEO_LOG_AUTO_FLUSH_BYTES (64u * 1024u)
+#define MEDIA_AUDIO_WRITE_SPACE_TIMEOUT_MS 5000u
+#define MEDIA_AUDIO_PREFEED_MS 1200u
+#define MEDIA_AUDIO_PACE_MAX_SLEEP_MS 100u
 #define MEDIA_AUDIO_VOLUME 75u
 #define MEDIA_WAV_CHUNK_FRAMES 512u
 #define MEDIA_FFMPEG_CHUNK_FRAMES 512u
@@ -125,10 +128,21 @@ struct media_auddec {
    uint32_t packets;
    int freerun;
    int aac_adts;
+   unsigned write_timeout_ms;
    unsigned aac_profile;
    unsigned aac_sample_rate_index;
    unsigned aac_channels;
 };
+
+struct media_audio_pacer {
+   int started;
+   int64_t base_ms;
+   int64_t next_ms;
+   uint32_t wall_start_ms;
+};
+
+static void media_audio_pacer_wait(struct media_audio_pacer *pacer,
+   const AVPacket *packet, AVRational time_base);
 
 struct media_auddec_variant {
    const char *label;
@@ -1845,21 +1859,28 @@ static int media_play_native_audio_compressed(const char *path)
    AVFormatContext *fmt = NULL;
    AVPacket *packet = NULL;
    struct media_auddec auddec;
+   struct media_audio_pacer pacer;
+   struct media_buffered_input input;
    int stream = -1;
    int ret = -1;
    unsigned finish_timeout_ms = 600000u;
    uint32_t loop_polls = 0;
    uint32_t start_ms = unifrog_perf_time_ms();
    int sd_read_active = 0;
+   int write_failed = 0;
+   int eof_seen = 0;
 
    memset(&auddec, 0, sizeof(auddec));
+   memset(&pacer, 0, sizeof(pacer));
+   memset(&input, 0, sizeof(input));
    auddec.fd = -1;
+   input.fd = -1;
    media_ffmpeg_register_once();
    media_sd_read_begin("auddec_open", path);
    sd_read_active = 1;
    printf("unifrog media auddec open_input begin path=%s\n",
       path ? path : "");
-   int open_ret = avformat_open_input(&fmt, path, NULL, NULL);
+   int open_ret = media_buffered_input_open(&fmt, &input, path, "auddec");
    printf("unifrog media auddec open_input done ret=%d fmt=0x%08lx path=%s\n",
       open_ret, (unsigned long)(uintptr_t)fmt, path ? path : "");
    printf("unifrog media auddec stream_info begin path=%s\n",
@@ -1875,6 +1896,8 @@ static int media_play_native_audio_compressed(const char *path)
       media_log_format_streams(fmt, path, "auddec_partial");
       goto out;
    }
+   media_buffered_input_log_coverage(&input, fmt, "auddec", path);
+   (void)media_buffered_input_enable_readahead(&input, fmt, "auddec", path);
    media_log_format_streams(fmt, path, "auddec_open");
    printf("unifrog media auddec find_audio begin streams=%u path=%s\n",
       fmt ? fmt->nb_streams : 0, path ? path : "");
@@ -1896,41 +1919,55 @@ static int media_play_native_audio_compressed(const char *path)
    if (media_auddec_open(fmt, stream, AVSYNC_TYPE_FREERUN, &auddec) != 0 &&
        media_auddec_open(fmt, stream, AVSYNC_TYPE_UPDATESTC, &auddec) != 0)
       goto out;
+   auddec.write_timeout_ms = MEDIA_AUDIO_WRITE_SPACE_TIMEOUT_MS;
    packet = av_packet_alloc();
    if (!packet)
       goto out;
-   printf("unifrog media auddec play stream=%d path=%s\n", stream, path);
+   printf("unifrog media auddec play stream=%d timeout=%u prefeed_ms=%u tb=%d/%d path=%s\n",
+      stream, auddec.write_timeout_ms, MEDIA_AUDIO_PREFEED_MS,
+      fmt->streams[stream]->time_base.num, fmt->streams[stream]->time_base.den,
+      path);
    while (!media_exit_down()) {
       int read_ret = av_read_frame(fmt, packet);
 
-      if (read_ret < 0)
+      if (read_ret < 0) {
+         eof_seen = 1;
          break;
-      if (packet->stream_index == stream &&
-          media_auddec_send_packet(&auddec, packet) != 0) {
-         printf("unifrog media auddec write failed packets=%lu path=%s\n",
-            (unsigned long)auddec.packets, path);
-         av_packet_unref(packet);
-         break;
+      }
+      if (packet->stream_index == stream) {
+         media_audio_pacer_wait(&pacer, packet,
+            fmt->streams[stream]->time_base);
+         if (media_auddec_send_packet(&auddec, packet) != 0) {
+            printf("unifrog media auddec write failed packets=%lu path=%s\n",
+               (unsigned long)auddec.packets, path);
+            write_failed = 1;
+            av_packet_unref(packet);
+            break;
+         }
       }
       av_packet_unref(packet);
       if ((++loop_polls % 240u) == 0) {
          struct audio_decore_status status;
+         int64_t cur_time = -1;
 
          memset(&status, 0, sizeof(status));
+         (void)ioctl(auddec.fd, AUDDEC_GET_CUR_TIME, &cur_time);
          if (ioctl(auddec.fd, AUDDEC_GET_STATUS, &status) == 0)
-            printf("unifrog media auddec monitor packets=%lu decoded=%lu rate=%lu ch=%u bits=%u ms=%lu\n",
+            printf("unifrog media auddec monitor packets=%lu decoded=%lu rate=%lu ch=%u bits=%u ms=%lu atime=%lld feed_ms=%lld\n",
                (unsigned long)auddec.packets,
                (unsigned long)status.frames_decoded,
                (unsigned long)status.sample_rate,
                status.channels, status.bits_per_sample,
-               (unsigned long)(unifrog_perf_time_ms() - start_ms));
+               (unsigned long)(unifrog_perf_time_ms() - start_ms),
+               (long long)cur_time, (long long)pacer.next_ms);
       }
    }
-   ret = auddec.packets ? 0 : -1;
+   ret = auddec.packets && !write_failed ? 0 : -1;
 
 out:
-   printf("unifrog media auddec end ret=%d packets=%lu ms=%lu path=%s\n",
+   printf("unifrog media auddec end ret=%d packets=%lu write_failed=%d eof=%d ms=%lu path=%s\n",
       ret, (unsigned long)auddec.packets,
+      write_failed, eof_seen,
       (unsigned long)(unifrog_perf_time_ms() - start_ms), path ? path : "");
    if (ret == 0)
       media_auddec_finish(&auddec, finish_timeout_ms);
@@ -1939,6 +1976,7 @@ out:
       av_packet_free(&packet);
    if (fmt)
       avformat_close_input(&fmt);
+   media_buffered_input_close(&input, "auddec_close", path);
    if (sd_read_active)
       media_sd_read_end("auddec_close", path);
    return ret;
@@ -2076,6 +2114,52 @@ static int32_t media_packet_duration_ms(const AVPacket *packet,
    return (int32_t)dur;
 }
 
+static void media_audio_pacer_wait(struct media_audio_pacer *pacer,
+   const AVPacket *packet, AVRational time_base)
+{
+   int32_t pts_ms;
+   int32_t dur_ms;
+   int64_t target_ms;
+   int64_t elapsed_ms;
+
+   if (!pacer || !packet)
+      return;
+   pts_ms = media_packet_pts_ms(packet, time_base);
+   dur_ms = media_packet_duration_ms(packet, time_base);
+   if (!pacer->started) {
+      pacer->started = 1;
+      pacer->base_ms = pts_ms >= 0 ? pts_ms : 0;
+      pacer->next_ms = 0;
+      pacer->wall_start_ms = unifrog_perf_time_ms();
+   }
+   target_ms = pts_ms >= 0 ? (int64_t)pts_ms - pacer->base_ms :
+      pacer->next_ms;
+   if (target_ms < 0)
+      target_ms = 0;
+   for (;;) {
+      int64_t lead_ms;
+
+      elapsed_ms = (int64_t)(unifrog_perf_time_ms() -
+         pacer->wall_start_ms);
+      lead_ms = target_ms - elapsed_ms;
+      if (lead_ms <= (int64_t)MEDIA_AUDIO_PREFEED_MS)
+         break;
+      if (media_exit_down())
+         break;
+      if (lead_ms > (int64_t)MEDIA_AUDIO_PACE_MAX_SLEEP_MS)
+         lead_ms = MEDIA_AUDIO_PACE_MAX_SLEEP_MS;
+      usleep((unsigned)lead_ms * 1000u);
+   }
+   if (dur_ms > 0) {
+      int64_t end_ms = target_ms + dur_ms;
+
+      if (end_ms > pacer->next_ms)
+         pacer->next_ms = end_ms;
+   } else if (target_ms > pacer->next_ms) {
+      pacer->next_ms = target_ms;
+   }
+}
+
 static int media_aac_sample_rate_index(unsigned sample_rate)
 {
    static const unsigned rates[] = {
@@ -2148,7 +2232,8 @@ static void media_aac_make_adts(uint8_t header[7], unsigned frame_size,
    header[6] = 0xfc;
 }
 
-static int media_write_all(int fd, const void *data, size_t size)
+static int media_write_all_timeout(int fd, const void *data, size_t size,
+   unsigned timeout_ms, const char *scope)
 {
    const uint8_t *p = (const uint8_t *)data;
    size_t written = 0;
@@ -2164,16 +2249,18 @@ static int media_write_all(int fd, const void *data, size_t size)
          if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EBUSY) {
             uint32_t elapsed = unifrog_perf_time_ms() - start_ms;
 
-            if (elapsed >= VIDEO_WRITE_SPACE_TIMEOUT_MS) {
-               printf("unifrog media write timeout fd=%d size=%lu written=%lu errno=%d retries=%u waited=%lu\n",
+            if (elapsed >= timeout_ms) {
+               printf("unifrog media write timeout scope=%s fd=%d size=%lu written=%lu errno=%d retries=%u waited=%lu limit=%u\n",
+                  scope ? scope : "?",
                   fd, (unsigned long)size, (unsigned long)written, errno,
-                  retries, (unsigned long)elapsed);
+                  retries, (unsigned long)elapsed, timeout_ms);
                return -1;
             }
             if (retries == 0 || (retries % 200u) == 0)
-               printf("unifrog media write retry fd=%d size=%lu written=%lu errno=%d retries=%u waited=%lu\n",
+               printf("unifrog media write retry scope=%s fd=%d size=%lu written=%lu errno=%d retries=%u waited=%lu limit=%u\n",
+                  scope ? scope : "?",
                   fd, (unsigned long)size, (unsigned long)written, errno,
-                  retries, (unsigned long)elapsed);
+                  retries, (unsigned long)elapsed, timeout_ms);
             retries++;
             usleep(VIDEO_WRITE_SPACE_POLL_US);
             continue;
@@ -2183,10 +2270,11 @@ static int media_write_all(int fd, const void *data, size_t size)
       if (ret == 0) {
          uint32_t elapsed = unifrog_perf_time_ms() - start_ms;
 
-         if (elapsed >= VIDEO_WRITE_SPACE_TIMEOUT_MS) {
-            printf("unifrog media write zero timeout fd=%d size=%lu written=%lu retries=%u waited=%lu\n",
+         if (elapsed >= timeout_ms) {
+            printf("unifrog media write zero timeout scope=%s fd=%d size=%lu written=%lu retries=%u waited=%lu limit=%u\n",
+               scope ? scope : "?",
                fd, (unsigned long)size, (unsigned long)written, retries,
-               (unsigned long)elapsed);
+               (unsigned long)elapsed, timeout_ms);
             return -1;
          }
          retries++;
@@ -2196,6 +2284,22 @@ static int media_write_all(int fd, const void *data, size_t size)
       written += (size_t)ret;
    }
    return 0;
+}
+
+static int media_write_all(int fd, const void *data, size_t size)
+{
+   return media_write_all_timeout(fd, data, size,
+      VIDEO_WRITE_SPACE_TIMEOUT_MS, "video");
+}
+
+static int media_auddec_write_all(struct media_auddec *auddec,
+   const void *data, size_t size)
+{
+   unsigned timeout_ms = auddec && auddec->write_timeout_ms ?
+      auddec->write_timeout_ms : VIDEO_WRITE_SPACE_TIMEOUT_MS;
+
+   return media_write_all_timeout(auddec ? auddec->fd : -1, data, size,
+      timeout_ms, "auddec");
 }
 
 static const char *media_avcodec_name(enum AVCodecID codec_id)
@@ -2682,22 +2786,21 @@ static int media_auddec_send_packet(struct media_auddec *auddec,
    if (auddec->aac_adts)
       payload_size += (uint32_t)sizeof(adts);
    memset(&header, 0, sizeof(header));
-   header.pts = auddec->freerun ? -1 :
-      media_packet_pts_ms(packet, auddec->time_base);
-   header.dur = auddec->freerun ? 0 :
-      media_packet_duration_ms(packet, auddec->time_base);
+   header.pts = media_packet_pts_ms(packet, auddec->time_base);
+   header.dur = media_packet_duration_ms(packet, auddec->time_base);
    header.size = payload_size;
    header.flag = AV_PACKET_ES_DATA;
-   if (media_write_all(auddec->fd, &header, sizeof(header)) != 0)
+   if (media_auddec_write_all(auddec, &header, sizeof(header)) != 0)
       return -1;
    if (auddec->aac_adts) {
       media_aac_make_adts(adts, (unsigned)packet->size,
          auddec->aac_profile, auddec->aac_sample_rate_index,
          auddec->aac_channels);
-      if (media_write_all(auddec->fd, adts, sizeof(adts)) != 0)
+      if (media_auddec_write_all(auddec, adts, sizeof(adts)) != 0)
          return -1;
    }
-   if (media_write_all(auddec->fd, packet->data, (size_t)packet->size) != 0)
+   if (media_auddec_write_all(auddec, packet->data,
+       (size_t)packet->size) != 0)
       return -1;
    auddec->packets++;
    media_auddec_log_packet_status(auddec,
@@ -2715,7 +2818,7 @@ static void media_auddec_send_eos(struct media_auddec *auddec)
    memset(&header, 0, sizeof(header));
    header.pts = -1;
    header.flag = AV_PACKET_EOS;
-   (void)media_write_all(auddec->fd, &header, sizeof(header));
+   (void)media_auddec_write_all(auddec, &header, sizeof(header));
 }
 
 static void media_auddec_close(struct media_auddec *auddec)
@@ -2812,12 +2915,12 @@ static int media_auddec_send_raw(struct media_auddec *auddec,
       return -1;
    packet_index = auddec->packets;
    memset(&header, 0, sizeof(header));
-   header.pts = auddec->freerun ? -1 : pts;
-   header.dur = auddec->freerun ? 0 : dur;
+   header.pts = pts;
+   header.dur = dur;
    header.size = (uint32_t)size;
    header.flag = AV_PACKET_ES_DATA;
-   if (media_write_all(auddec->fd, &header, sizeof(header)) != 0 ||
-       media_write_all(auddec->fd, data, size) != 0)
+   if (media_auddec_write_all(auddec, &header, sizeof(header)) != 0 ||
+       media_auddec_write_all(auddec, data, size) != 0)
       return -1;
    auddec->packets++;
    media_auddec_log_packet_status(auddec, "raw", packet_index, data, size,
@@ -2858,6 +2961,7 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
    auddec->stream = 0;
    auddec->time_base = (AVRational){ 1, 1000 };
    auddec->freerun = sync_mode == 0;
+   auddec->write_timeout_ms = MEDIA_AUDIO_WRITE_SPACE_TIMEOUT_MS;
    memset(&base_cfg, 0, sizeof(base_cfg));
    base_cfg.codec_id = codec_id;
    base_cfg.sync_mode = (uint8_t)sync_mode;
@@ -2972,6 +3076,7 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
    auddec->packets = 0;
    auddec->freerun = sync_mode == 0;
    auddec->aac_adts = 0;
+   auddec->write_timeout_ms = VIDEO_WRITE_SPACE_TIMEOUT_MS;
    auddec->aac_profile = 1;
    auddec->aac_sample_rate_index = 4;
    auddec->aac_channels = 2;
@@ -3028,16 +3133,25 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       (uint32_t)par->sample_rate : 44100u;
    if (par->codec_id == AV_CODEC_ID_AAC) {
       /*
-       * The HCRTOS AAC decoder accepts ADTS elementary stream packets. MP4/M4A
-       * streams carry raw AAC frames plus AudioSpecificConfig extradata; passing
-       * that ASC directly makes AUDDEC_INIT reject the stream on SF2000.
+       * HCPlayer passes MP4/M4A AAC as raw frames with AudioSpecificConfig in
+       * audio_config. Synthesizing ADTS around those raw packets initialized
+       * cleanly on SF2000 but produced no audible audio.
        */
-      auddec->aac_adts = 1;
       media_aac_parse_asc(par, &auddec->aac_profile,
          &auddec->aac_sample_rate_index, &auddec->aac_channels);
+      if (par->extradata && par->extradata_size > 0) {
+         base_cfg.extradata_size = (uint32_t)par->extradata_size;
+         if (par->extradata_size <= (int)sizeof(base_cfg.extra_data)) {
+            base_cfg.extradata_mode = 0;
+            memcpy(base_cfg.extra_data, par->extradata,
+               (size_t)par->extradata_size);
+         } else {
+            base_cfg.extradata_mode = 1;
+         }
+      }
    } else if (par->extradata && par->extradata_size > 0) {
       base_cfg.extradata_size = (uint32_t)par->extradata_size;
-      if (par->extradata_size <= (int)sizeof(cfg.extra_data)) {
+      if (par->extradata_size <= (int)sizeof(base_cfg.extra_data)) {
          base_cfg.extradata_mode = 0;
          memcpy(base_cfg.extra_data, par->extradata,
             (size_t)par->extradata_size);
@@ -3045,11 +3159,15 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
          base_cfg.extradata_mode = 1;
       }
    }
-   printf("unifrog media auddec base stream=%d codec=%u sync=%u rate=%u ch=%u bits=%u block=%u extra=%u mode=%u\n",
+   printf("unifrog media auddec base stream=%d codec=%u sync=%u rate=%u ch=%u bits=%u block=%u extra=%u mode=%u aac_packet=%s prof=%u sridx=%u\n",
       stream_index, base_cfg.codec_id, base_cfg.sync_mode,
       base_cfg.sample_rate, base_cfg.channels,
       base_cfg.bits_per_coded_sample, base_cfg.block_align,
-      base_cfg.extradata_size, base_cfg.extradata_mode);
+      base_cfg.extradata_size, base_cfg.extradata_mode,
+      par->codec_id == AV_CODEC_ID_AAC ?
+      (auddec->aac_adts ? "adts_wrap" :
+      (base_cfg.extradata_size ? "raw_asc" : "raw_es")) : "na",
+      auddec->aac_profile, auddec->aac_sample_rate_index);
 
    for (unsigned i = 0; i < ARRAY_SIZE(variants); i++) {
       const struct media_auddec_variant *variant = &variants[i];
@@ -3784,6 +3902,7 @@ static int media_play_native_video(const char *path,
    int video_freerun = 0;
    int video_sync_mode = AVSYNC_TYPE_FREERUN;
    int sd_read_active = 0;
+   int auddec_write_failed = 0;
 
    memset(&audio, 0, sizeof(audio));
    audio.fd = -1;
@@ -3948,9 +4067,21 @@ static int media_play_native_video(const char *path,
             break;
          }
       } else if (auddec.fd >= 0 && packet->stream_index == audio_stream) {
-         if (media_auddec_send_packet(&auddec, packet) != 0)
-            printf("unifrog media native auddec write failed packets=%lu path=%s\n",
-               (unsigned long)auddec.packets, path);
+         if (!auddec_write_failed &&
+             media_auddec_send_packet(&auddec, packet) != 0) {
+            struct audio_decore_status status;
+            int64_t audio_time = -1;
+
+            memset(&status, 0, sizeof(status));
+            (void)ioctl(auddec.fd, AUDDEC_GET_STATUS, &status);
+            (void)ioctl(auddec.fd, AUDDEC_GET_CUR_TIME, &audio_time);
+            printf("unifrog media native auddec write failed packets=%lu errno=%d decoded=%lu rate=%lu ch=%u bits=%u atime=%lld path=%s\n",
+               (unsigned long)auddec.packets, errno,
+               (unsigned long)status.frames_decoded,
+               (unsigned long)status.sample_rate, status.channels,
+               status.bits_per_sample, (long long)audio_time, path);
+            auddec_write_failed = 1;
+         }
       } else if (audio_enabled && packet->stream_index == audio_stream) {
          int send_ret = avcodec_send_packet(audio_ctx, packet);
 

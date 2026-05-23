@@ -58,8 +58,9 @@ HCRTOS KSHM is separate from decoded frame memory. Because the DTS does not
 define a named `kshm` MMZ pool, KSHM falls back to normal aligned heap
 allocation for compressed packet rings while playback is active and releases
 them when `VIDDEC_RLS`/`AUDDEC_RLS` runs. The current media DTS advertises a
-16 MiB `viddec.kshm_size` and 2 MiB `auddec.kshm_size`; native playback should
-match those sizes when opening the drivers.
+16 MiB `viddec.kshm_size`; native audio currently opens `/dev/auddec` with the
+stock-style `0xa0000` compressed ring used by HCRTOS cast examples. These rings
+are dynamic playback allocations, not permanent DTS reservations.
 
 UniFrog media playback uses streaming buffers instead of loading the whole file
 into memory. The native FFmpeg custom AVIO buffer is intentionally a small

@@ -76,6 +76,10 @@ This preserves the useful part of the old behavior: playback does not reserve a
 large compressed-stream ring forever. The part that must be reserved is only the
 media hardware's decoded-surface pool.
 
+Current native playback sizes are 16 MiB for the video compressed ring and
+`0xa0000` bytes for the audio compressed ring. File IO buffering is separate
+from these driver rings.
+
 ## Application Arena Contract
 
 `appmem` is not hardcoded by callers. UniFrog reports it through

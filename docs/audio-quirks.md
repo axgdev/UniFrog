@@ -39,9 +39,10 @@ or `src/unifrog_media.c`.
   lower-cost and closer to the stock speaker behavior than direct one-channel
   SND playback. The libretro host still controls the outer SND mute and amp
   gate so silence does not hold the analog path open.
-- Audio-only and native video-container audio playback use UniFrog's direct
-  FFmpeg decode path where possible, so decoded PCM goes through the same
-  silence gate as UI sounds.
+- Audio-only and native video-container audio playback prefer compressed
+  packets through `/dev/auddec` when the linked HCRTOS plugin supports the
+  codec. Unsupported or failed software-only routes still fall back to
+  FFmpeg-decoded PCM through the UniFrog SND silence gate.
 - Native media must use the audio decoder ABI from the linked HCRTOS
   `libauddrv.a`, not blindly copy either adjacent public header. The bundled
   driver switches on `AUDDEC_INIT == 0x82500301`, which corresponds to a
@@ -64,6 +65,15 @@ or `src/unifrog_media.c`.
 - Audio-only compressed playback should open `/dev/auddec` in freerun mode
   first. STC update/sync modes are reserved for audio plus video, where the
   video decoder can synchronize to the audio-owned clock.
+- Freerun does not mean "drop packet timing." HCLinux/HCRTOS feed examples and
+  reverse-engineering of `libffplayer.a` both write packet PTS into `AvPktHd`.
+  UniFrog keeps packet PTS/duration for `/dev/auddec` and paces audio-only
+  demuxing with a small prefeed window instead of dumping the whole compressed
+  file into the KSHM ring at SD-card speed.
+- MP4/M4A AAC must be passed like HCPlayer does: AudioSpecificConfig in
+  `audio_config.extra_data`, then raw demuxed AAC access units as ES packets.
+  Wrapping those raw MP4 packets in synthetic ADTS headers initialized the
+  SF2000 decoder but produced no audible audio in 0109 logs.
 
 ## Stock Firmware Notes
 
