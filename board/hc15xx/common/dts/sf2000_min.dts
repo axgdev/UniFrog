@@ -487,8 +487,11 @@ hcrtos {
 
 	irc {
 		/*
-		 * R07 is the external speaker gate on SF2000/GB300. Do not let
-		 * the IR receiver driver claim the same pad while audio is active.
+		 * R07 is the SF2000 external speaker gate and the HCRTOS SND
+		 * mute pin. GB300 uses L15 for the external amp gate, which
+		 * UniFrog manages in runtime code because panel-swapped units
+		 * cannot be identified from this shared DTS alone. Do not let
+		 * the IR receiver driver claim R07 while audio is active.
 		 */
 		pinmux-active = <PINPAD_R07 7>;
 		linux,rc-map-name = "rc-hcdemo";

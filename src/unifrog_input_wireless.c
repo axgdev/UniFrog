@@ -10,6 +10,7 @@
 #include <hcuapi/pinpad.h>
 #include <hcuapi/pinmux.h>
 
+#include <unifrog/audio.h>
 #include <unifrog/log.h>
 #include <unifrog/perf.h>
 
@@ -688,6 +689,7 @@ void unifrog_input_wireless_poll(void)
    for (unsigned i = 0; i < 4; i++)
       unifrog_input_wireless_poll_once();
    unifrog_input_restore_local_bus();
+   unifrog_audio_restore_output_gate();
 }
 
 int unifrog_input_wireless_receive_window(const char *tag, uint8_t channel,
@@ -740,5 +742,6 @@ int unifrog_input_wireless_receive_window(const char *tag, uint8_t channel,
    printf("WIRELESS_DIAG window end tag=%s ch=0x%02x polls=%u ready=%u final_status=0x%02x\n",
       tag, channel, polls, ready, (unsigned)wireless_last_status);
    unifrog_input_restore_local_bus();
+   unifrog_audio_restore_output_gate();
    return ready > 0;
 }

@@ -137,6 +137,10 @@ Set these in `config.mk` or on the `make` command line:
   hardware audio clock. Keep this above `MEDIA_AUDIO_FEED_LEAD_MS`; if both
   values are equal, tiny decoder-clock jitter can become constant wait/log
   churn.
+- `MEDIA_SEEK_WARMUP_PACKETS`: bounded packet window allowed through after a
+  demux seek before hardware-ahead caps resume. This is separate from steady
+  playback buffering; it only gives the flushed HCRTOS decoder clocks enough
+  data to advance from zero again.
 - `MEDIA_VIDEO_BUFFERING_START_MS` and `MEDIA_VIDEO_BUFFERING_END_MS`: decoder
   buffering thresholds passed to `/dev/viddec`.
 - `MEDIA_AUDIO_BUFFERING_START_MS` and `MEDIA_AUDIO_BUFFERING_END_MS`: decoder

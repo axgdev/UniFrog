@@ -44,11 +44,14 @@ extern unsigned long PINMUXR;
 extern unsigned long PINMUXT;
 extern unsigned long SND0;
 extern unsigned long SND0_DAC;
+extern int unifrog_input_uses_stock_bits(void) __attribute__((weak));
 
 enum audio_gate {
    AUDIO_GATE_SF2000_R07,
    AUDIO_GATE_GB300_L15,
 };
+
+static int stock_audio_output_gate_enabled;
 
 static void clear_audio(struct unifrog_audio *audio)
 {
@@ -66,9 +69,16 @@ static enum audio_gate current_audio_gate(void)
 
    if (lcd_id == LCD_ID_GB300 || lcd_id == LCD_ID_DY14)
       return AUDIO_GATE_GB300_L15;
+   if (unifrog_input_uses_stock_bits && unifrog_input_uses_stock_bits())
+      return AUDIO_GATE_GB300_L15;
 
    (void)LCD_ID_SF2000;
    return AUDIO_GATE_SF2000_R07;
+}
+
+static const char *audio_gate_name(enum audio_gate gate)
+{
+   return gate == AUDIO_GATE_GB300_L15 ? "gb300_l15" : "sf2000_r07";
 }
 
 static void set_reg_gate(volatile uint32_t *dir, volatile uint32_t *out,
@@ -85,7 +95,7 @@ static void set_reg_gate(volatile uint32_t *dir, volatile uint32_t *out,
    *out = value;
 }
 
-static void set_stock_audio_output_gate(int enabled)
+static void apply_stock_audio_output_gate(int enabled)
 {
    enum audio_gate gate = current_audio_gate();
 
@@ -100,10 +110,23 @@ static void set_stock_audio_output_gate(int enabled)
    }
 }
 
+static void set_stock_audio_output_gate(int enabled)
+{
+   stock_audio_output_gate_enabled = enabled ? 1 : 0;
+   apply_stock_audio_output_gate(enabled);
+}
+
 void unifrog_audio_set_output_gate_enabled(int enabled)
 {
    set_stock_audio_output_gate(enabled);
-   printf("unifrog audio output_gate enabled=%d\n", enabled ? 1 : 0);
+   printf("unifrog audio output_gate enabled=%d preferred=%s\n",
+      enabled ? 1 : 0, audio_gate_name(current_audio_gate()));
+}
+
+void unifrog_audio_restore_output_gate(void)
+{
+   if (stock_audio_output_gate_enabled)
+      apply_stock_audio_output_gate(1);
 }
 
 static void apply_stock_audio_silence_policy(const char *tag)
@@ -611,10 +634,10 @@ void unifrog_audio_debug_dump(struct unifrog_audio *audio, const char *tag)
       hw_ret = ioctl(audio->fd, SND_IOCTL_GET_HW_INFO, &hw);
 
    unifrog_audio_debug_gate(&l_dir, &l_out, &r_dir, &r_out);
-   printf("unifrog audio diag tag=%s lcd=0x%06lx gate=%s l=0x%08lx/0x%08lx r=0x%08lx/0x%08lx\n",
+   printf("unifrog audio diag tag=%s lcd=0x%06lx preferred_gate=%s gate_enabled=%d l=0x%08lx/0x%08lx r=0x%08lx/0x%08lx\n",
       tag ? tag : "?",
       lcd_id,
-      current_audio_gate() == AUDIO_GATE_GB300_L15 ? "gb300_l15" : "sf2000_r07",
+      audio_gate_name(current_audio_gate()), stock_audio_output_gate_enabled,
       (unsigned long)l_dir, (unsigned long)l_out,
       (unsigned long)r_dir, (unsigned long)r_out);
    printf("unifrog audio mux tag=%s l22=%u l23=%u l24=%u l25=%u l26=%u l27=%u l28=%u l29=%u r07=%u\n",

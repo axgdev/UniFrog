@@ -254,6 +254,14 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 - The DB-B210 schematic shows the speaker amp is fed from the SoC analog/PWM
   DAC left output (`LO_PWMLP`) through the MX2018A amplifier. The R07/L15 gate
   only controls the downstream amp enable; it does not silence the DAC output.
+- Reverse-engineered stock firmware shows SF2000 opens the amp with GPIO R07
+  low, while GB300 opens it with GPIO L15 low. Do not derive this solely from
+  the LCD panel ID: screen-swapped GB300 units can report the SF2000 panel.
+  UniFrog uses the panel ID as the boot default, then lets the GB300 keypad bus
+  probe select the GB300/L15 route when the physical controls prove it.
+- RF controller polling can temporarily reconfigure GPIO-L pins. When audio is
+  enabled, UniFrog reasserts the selected amp gate after RF polling so GB300
+  L15 audio is not lost when the wireless code restores its bus state.
 - Use `/dev/sndC0i2so` `SND_IOCTL_SET_VOLUME` and `SND_IOCTL_SET_MUTE` for the
   low-level DAC path before opening the amp gate. Opening only the gate can
   expose DAC idle noise, which is why raising software gain masked noise but

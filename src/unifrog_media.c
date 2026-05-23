@@ -131,6 +131,9 @@
 #ifndef UNIFROG_MEDIA_VIDEO_MAX_HW_AHEAD_MS
 #define UNIFROG_MEDIA_VIDEO_MAX_HW_AHEAD_MS 4000
 #endif
+#ifndef UNIFROG_MEDIA_SEEK_WARMUP_PACKETS
+#define UNIFROG_MEDIA_SEEK_WARMUP_PACKETS 96
+#endif
 #ifndef UNIFROG_MEDIA_FILE_SLOW_READ_LOG_MS
 #define UNIFROG_MEDIA_FILE_SLOW_READ_LOG_MS 250
 #endif
@@ -156,6 +159,7 @@
 #define MEDIA_HW_AHEAD_POLL_US 10000u
 #define MEDIA_HW_AHEAD_LOG_MS 500u
 #define MEDIA_HW_AHEAD_LOG_MIN_MS 100u
+#define MEDIA_SEEK_WARMUP_PACKETS ((unsigned)UNIFROG_MEDIA_SEEK_WARMUP_PACKETS)
 #define MEDIA_AUDIO_PACE_MAX_SLEEP_MS 100u
 #define MEDIA_AUDIO_VOLUME 75u
 #define MEDIA_WAV_CHUNK_FRAMES 512u
@@ -250,6 +254,8 @@ struct media_audio_pacer {
    int64_t base_ms;
    int64_t next_ms;
    uint32_t wall_start_ms;
+   unsigned seek_warmup_packets;
+   unsigned seek_warmup_total;
 };
 
 struct media_controls {
@@ -270,7 +276,7 @@ static void media_audio_pacer_wait_lead(struct media_audio_pacer *pacer,
 static void media_audio_pacer_seek_reset(struct media_audio_pacer *pacer,
    int64_t target_ms);
 static void media_wait_hardware_ahead(const char *kind, int fd, int video,
-   const struct media_audio_pacer *pacer, unsigned max_ahead_ms,
+   struct media_audio_pacer *pacer, unsigned max_ahead_ms,
    const char *path);
 static int64_t media_format_duration_ms(AVFormatContext *fmt);
 static int64_t media_seek_target_ms(int64_t current_ms, int delta_ms,
@@ -3054,10 +3060,12 @@ static void media_audio_pacer_seek_reset(struct media_audio_pacer *pacer,
    memset(pacer, 0, sizeof(*pacer));
    pacer->started = 1;
    pacer->base_ms = 0;
-   /* Align wall time to the seek target, but avoid over-ahead blocking until
-    * the first post-seek packet repopulates next_ms from its absolute PTS. */
+   /* Align wall time to the seek target. The decoder clock is reset by flush,
+    * so let a bounded packet burst through before enforcing clock-ahead caps. */
    pacer->next_ms = 0;
    pacer->wall_start_ms = now - (uint32_t)target_ms;
+   pacer->seek_warmup_packets = MEDIA_SEEK_WARMUP_PACKETS;
+   pacer->seek_warmup_total = MEDIA_SEEK_WARMUP_PACKETS;
 }
 
 static void media_audio_pacer_wait(struct media_audio_pacer *pacer,
@@ -3068,7 +3076,7 @@ static void media_audio_pacer_wait(struct media_audio_pacer *pacer,
 }
 
 static void media_wait_hardware_ahead(const char *kind, int fd, int video,
-   const struct media_audio_pacer *pacer, unsigned max_ahead_ms,
+   struct media_audio_pacer *pacer, unsigned max_ahead_ms,
    const char *path)
 {
    uint32_t start_ms;
@@ -3077,6 +3085,15 @@ static void media_wait_hardware_ahead(const char *kind, int fd, int video,
 
    if (fd < 0 || !pacer || !pacer->started || max_ahead_ms == 0)
       return;
+   if (pacer->seek_warmup_packets > 0) {
+      if (pacer->seek_warmup_packets == pacer->seek_warmup_total) {
+         printf("unifrog media hw_ahead seek_warmup kind=%s packets=%u feed=%lld max=%u path=%s\n",
+            kind ? kind : "?", pacer->seek_warmup_total,
+            (long long)pacer->next_ms, max_ahead_ms, path ? path : "");
+      }
+      pacer->seek_warmup_packets--;
+      return;
+   }
    start_ms = unifrog_perf_time_ms();
    for (;;) {
       int64_t cur_time = -1;

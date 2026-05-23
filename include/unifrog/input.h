@@ -56,6 +56,7 @@ uint32_t unifrog_input_menu_buttons(void);
 uint32_t unifrog_input_previous_buttons(void);
 uint32_t unifrog_input_local_buttons(void);
 uint32_t unifrog_input_local_raw(void);
+int unifrog_input_uses_stock_bits(void);
 int unifrog_input_down(enum unifrog_button button);
 int unifrog_input_pressed(enum unifrog_button button);
 int unifrog_input_menu_pressed(enum unifrog_button button);

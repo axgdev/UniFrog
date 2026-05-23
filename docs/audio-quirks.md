@@ -12,11 +12,20 @@ or `src/unifrog_media.c`.
 - The loud buzz reported during video playback and audio diagnostics was tied
   to the speaker/output path being enabled while no real PCM signal was being
   delivered.
-- On SF2000 hardware the practical output gate is GPIO R07. The muted/off state
-  is visible in diagnostics as R07 output bit set; the enabled state clears it.
-- `SND_IOCTL_SET_MUTE` controls the same useful mute/output path through the
-  HCRTOS sound platform driver. For UniFrog-owned SND playback, this is the
-  reliable way to keep the amplifier quiet until non-silent PCM is available.
+- On SF2000 hardware the practical output gate is GPIO R07. GB300 stock
+  firmware uses GPIO L15 for the same active-low amp-enable role. The muted/off
+  state is visible in diagnostics as the selected gate output bit set; the
+  enabled state clears it.
+- The LCD panel ID is only a default board hint. Some GB300 units can have an
+  SF2000 panel, so UniFrog also switches to the GB300/L15 audio gate when the
+  local input scanner proves that the GB300 stock-bit keypad bus is present.
+- The wireless RF code temporarily owns part of the GPIO-L group and historically
+  configured L15 as an input. UniFrog reasserts the enabled audio gate after RF
+  polling so GB300 audio is not silently disabled by controller polling.
+- `SND_IOCTL_SET_MUTE` controls the low-level HCRTOS sound output path. For
+  UniFrog-owned SND playback, this is the reliable way to keep the DAC quiet
+  until non-silent PCM is available; the board-specific GPIO gate is still
+  handled separately.
 - Digital zero samples are not enough by themselves. If the amplifier path is
   unmuted and enabled, zero PCM can still produce audible board noise.
 
@@ -106,6 +115,11 @@ or `src/unifrog_media.c`.
   followed by a large catch-up burst that queues many seconds into `/dev/viddec`
   or `/dev/auddec`. The caps should remain above the active feed lead; equal
   values make normal decoder-clock jitter look like constant over-ahead waits.
+- After an explicit seek, `/dev/auddec` and `/dev/viddec` report their decoded
+  clocks from zero until enough post-flush packets are fed. The bounded
+  `MEDIA_SEEK_WARMUP_PACKETS` window lets those packets through before
+  re-enabling hardware-ahead caps; without it, seeks can stall forever with
+  `clock=0` and a large absolute packet PTS.
 - MP4/M4A AAC must be passed like HCPlayer does: AudioSpecificConfig in
   `audio_config.extra_data`, then raw demuxed AAC access units as ES packets.
   Wrapping those raw MP4 packets in synthetic ADTS headers initialized the
