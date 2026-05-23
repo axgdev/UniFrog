@@ -92,10 +92,13 @@
 #define UNIFROG_FASTBOOT_RESERVED_SIZE (0x00019000)
 #define UNIFROG_RECOVERY_LOG_SIZE (0x00100000)
 #define HCRTOS_MMZ_BLOCKLOG (12)
+/*
+ * Keep media buffers reclaimable. HCRTOS KSHM first tries the optional "kshm"
+ * MMZ pool, then falls back to normal aligned heap allocation when no pool is
+ * present, so viddec/auddec buffers can be created only while playback runs.
+ */
 #define HCRTOS_MMZ0_SIZE                                                       \
-	(__HCRTOS_MMZ0_SIZE +                                                  \
-	 (16 * (__HCRTOS_MMZ0_SIZE >> HCRTOS_MMZ_BLOCKLOG)) +                  \
-	 (16 << HCRTOS_MMZ_BLOCKLOG))
+	(0)
 #define HCRTOS_MMZ0_OFFSET                                                     \
 	(CONFIG_MEMORY_SIZE - UNIFROG_FASTBOOT_RESERVED_SIZE -                 \
 	 UNIFROG_RECOVERY_LOG_SIZE - HCRTOS_MMZ0_SIZE)

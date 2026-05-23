@@ -41,6 +41,10 @@
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 
+#ifndef AVSEEK_FORCE
+#define AVSEEK_FORCE 0
+#endif
+
 #include <unifrog/abi.h>
 #include <unifrog/audio.h>
 #include <unifrog/diag.h>
@@ -76,13 +80,19 @@
 #define MEDIA_AUDIO_VOLUME 75u
 #define MEDIA_WAV_CHUNK_FRAMES 512u
 #define MEDIA_FFMPEG_CHUNK_FRAMES 512u
+#define MEDIA_VIDEO_AUDIO_PERIOD_BYTES 2048u
+#define MEDIA_VIDEO_AUDIO_PERIODS 16u
 #define MEDIA_AUDIO_KSHM_SIZE 0x000a0000u
 #define MEDIA_VIDEO_KSHM_SIZE 0x01000000u
-#define MEDIA_FILE_BUFFER_SIZE (2u * 1024u * 1024u)
-#define MEDIA_FILE_BUFFER_MIN_SIZE (512u * 1024u)
+#define MEDIA_FILE_BUFFER_SIZE (64u * 1024u)
+#define MEDIA_FILE_BUFFER_MIN_SIZE (16u * 1024u)
+#define MEDIA_SW_AUDIO_VIDEO_LEAD_MS 180u
+#define MEDIA_SW_AUDIO_MAX_WAIT_MS 60u
+#define MEDIA_SW_AUDIO_WAIT_POLL_US 4000u
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define MEDIA_SEEK_STEP_MS 10000
 #define MEDIA_SWVIDEO_MMZ_ID 0
+#define MEDIA_TIME_UNSET INT32_MIN
 
 #if UNIFROG_ENABLE_HCPLAYER
 struct playback_preset {
@@ -457,14 +467,19 @@ static int64_t media_buffered_seek(void *opaque, int64_t offset, int whence)
 {
    struct media_buffered_input *input = opaque;
    off_t pos;
+   int seek_whence;
 
    if (!input || input->fd < 0)
       return AVERROR(EINVAL);
    if (whence == AVSEEK_SIZE)
       return input->file_size >= 0 ? input->file_size : AVERROR(ENOSYS);
+   seek_whence = whence & ~AVSEEK_FORCE;
+   if (seek_whence != SEEK_SET && seek_whence != SEEK_CUR &&
+       seek_whence != SEEK_END)
+      return AVERROR(EINVAL);
    input->seek_calls++;
    errno = 0;
-   pos = lseek(input->fd, (off_t)offset, whence);
+   pos = lseek(input->fd, (off_t)offset, seek_whence);
    if (pos < 0) {
       input->last_errno = errno;
       return AVERROR(errno ? errno : EIO);
@@ -551,7 +566,7 @@ static void media_buffered_input_log_coverage(
       return;
    if (bit_rate > 0)
       cover_ms = ((uint64_t)input->buffer_size * 8000ull) / (uint64_t)bit_rate;
-   printf("unifrog media buffered_io coverage tag=%s buffer=%lu min=%lu bitrate=%lld cover_ms=%llu duration_us=%lld path=%s\n",
+   printf("unifrog media buffered_io coverage tag=%s io_chunk=%lu min=%lu bitrate=%lld chunk_cover_ms=%llu duration_us=%lld path=%s\n",
       tag ? tag : "", (unsigned long)input->buffer_size,
       (unsigned long)MEDIA_FILE_BUFFER_MIN_SIZE, (long long)bit_rate,
       (unsigned long long)cover_ms, fmt ? (long long)fmt->duration : -1ll,
@@ -1957,6 +1972,7 @@ enum {
    MEDIA_H264_EXTRA_CFG_RAW,
    MEDIA_H264_EXTRA_PRE_EXTRA,
    MEDIA_H264_EXTRA_POST_ES,
+   MEDIA_H264_EXTRA_CFG_AVCC_POST_ES,
 };
 
 static const char *media_h264_mode_name(int mode)
@@ -1982,6 +1998,8 @@ static const char *media_h264_extra_delivery_name(int delivery)
       return "pre_extra";
    case MEDIA_H264_EXTRA_POST_ES:
       return "post_es";
+   case MEDIA_H264_EXTRA_CFG_AVCC_POST_ES:
+      return "cfg_avcc_post_es";
    default:
       return "none";
    }
@@ -2961,7 +2979,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    int pre_extra_size = 0;
    int write_extra_before_init = 0;
    const uint8_t *pre_extra_data = NULL;
-   uint8_t post_extra[512];
+   uint8_t post_extra[1024];
    size_t post_extra_used = 0;
    int win_ret = -1;
    int win_errno = 0;
@@ -3002,8 +3020,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    cfg.preview = 0;
    cfg.b_aux_layer = 0;
    cfg.extradata_mode = 0;
-   cfg.frame_rate = par->codec_id == AV_CODEC_ID_H264 ? 60000u :
-      media_video_frame_rate_milli(stream);
+   cfg.frame_rate = media_video_frame_rate_milli(stream);
    cfg.codec_frame_size = (int)(((int64_t)cfg.pic_width *
       (int64_t)cfg.pic_height * 3) / 2);
    cfg.src_area.x = 0;
@@ -3068,6 +3085,17 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
             write_extra_before_init = 1;
             media_h264_extra_delivery = MEDIA_H264_EXTRA_PRE_EXTRA;
          }
+      }
+      if (par->extradata && par->extradata_size > 0 &&
+          media_h264_packet_mode == MEDIA_H264_MODE_AVCC &&
+          media_h264_extradata_annexb(par->extradata, par->extradata_size,
+             post_extra, sizeof(post_extra), &post_extra_used) == 0 &&
+          post_extra_used > 0) {
+         post_extra_size = (int)post_extra_used;
+         if (media_h264_extra_delivery == MEDIA_H264_EXTRA_CFG_AVCC)
+            media_h264_extra_delivery = MEDIA_H264_EXTRA_CFG_AVCC_POST_ES;
+         else if (media_h264_extra_delivery == MEDIA_H264_EXTRA_NONE)
+            media_h264_extra_delivery = MEDIA_H264_EXTRA_POST_ES;
       }
    } else if (par->extradata && par->extradata_size > 0) {
       cfg.extradata_size = par->extradata_size;
@@ -3304,6 +3332,98 @@ static int media_video_bsf_init(AVStream *stream, AVBSFContext **bsf_out)
    return 0;
 }
 
+static uint32_t media_audio_frames_to_ms(uint32_t frames, int rate)
+{
+   if (rate <= 0)
+      return 0;
+   return (uint32_t)(((uint64_t)frames * 1000ull) / (uint64_t)rate);
+}
+
+static uint32_t media_sw_audio_clock_ms(struct unifrog_audio *audio,
+   uint32_t frames, int rate, uint32_t start_ms)
+{
+   unsigned long delay_frames = 0;
+   uint32_t written_ms;
+
+   if (frames == 0 || rate <= 0)
+      return 0;
+   if (audio && audio->fd >= 0 &&
+       unifrog_audio_delay(audio, &delay_frames) == 0) {
+      uint32_t played_frames = 0;
+
+      if (delay_frames < (unsigned long)frames)
+         played_frames = frames - (uint32_t)delay_frames;
+      return media_audio_frames_to_ms(played_frames, rate);
+   }
+   written_ms = media_audio_frames_to_ms(frames, rate);
+   if (start_ms) {
+      uint32_t elapsed_ms = unifrog_perf_time_ms() - start_ms;
+
+      if (elapsed_ms < written_ms)
+         return elapsed_ms;
+   }
+   return written_ms;
+}
+
+static int media_video_relative_packet_ms(const AVPacket *packet,
+   AVRational time_base, int *base_ms)
+{
+   int packet_ms;
+   int64_t relative_ms;
+
+   if (!base_ms)
+      return -1;
+   packet_ms = media_video_packet_time_ms(packet, time_base, 1);
+   if (packet_ms == -1)
+      return -1;
+   if (*base_ms == MEDIA_TIME_UNSET)
+      *base_ms = packet_ms;
+   relative_ms = (int64_t)packet_ms - (int64_t)*base_ms;
+   if (relative_ms < 0)
+      return 0;
+   if (relative_ms > INT32_MAX)
+      return INT32_MAX;
+   return (int)relative_ms;
+}
+
+static void media_video_wait_for_sw_audio(struct unifrog_audio *audio,
+   const AVPacket *packet, AVRational time_base, int *video_base_ms,
+   uint32_t audio_frames, int audio_rate, uint32_t audio_start_ms,
+   const char *path)
+{
+   uint32_t start_ms;
+   unsigned polls = 0;
+   int packet_ms;
+
+   if (!audio || audio->fd < 0 || audio_frames == 0 || audio_rate <= 0)
+      return;
+   packet_ms = media_video_relative_packet_ms(packet, time_base,
+      video_base_ms);
+   if (packet_ms < 0)
+      return;
+   start_ms = unifrog_perf_time_ms();
+   while (!media_exit_down()) {
+      uint32_t audio_ms = media_sw_audio_clock_ms(audio, audio_frames,
+         audio_rate, audio_start_ms);
+      uint32_t lead_ms = (uint32_t)packet_ms > audio_ms ?
+         (uint32_t)packet_ms - audio_ms : 0;
+      uint32_t elapsed_ms;
+
+      if ((uint32_t)packet_ms <= audio_ms + MEDIA_SW_AUDIO_VIDEO_LEAD_MS)
+         break;
+      elapsed_ms = unifrog_perf_time_ms() - start_ms;
+      if (polls == 0 || elapsed_ms >= MEDIA_SW_AUDIO_MAX_WAIT_MS)
+         printf("unifrog media native swsync wait pkt_ms=%d audio_ms=%lu lead=%lu frames=%lu rate=%d waited=%lu path=%s\n",
+            packet_ms, (unsigned long)audio_ms, (unsigned long)lead_ms,
+            (unsigned long)audio_frames, audio_rate,
+            (unsigned long)elapsed_ms, path ? path : "");
+      if (elapsed_ms >= MEDIA_SW_AUDIO_MAX_WAIT_MS)
+         break;
+      polls++;
+      usleep(MEDIA_SW_AUDIO_WAIT_POLL_US);
+   }
+}
+
 static int media_video_send_filtered(int fd, AVBSFContext *bsf,
    AVPacket *packet, AVRational time_base, int freerun, int h264,
    uint32_t *video_packets)
@@ -3355,8 +3475,10 @@ static int media_play_native_video(const char *path,
    int audio_enabled = 0;
    uint32_t video_packets = 0;
    uint32_t audio_frames = 0;
+   uint32_t sw_audio_start_ms = 0;
    uint32_t loop_polls = 0;
    uint32_t start_ms = unifrog_perf_time_ms();
+   int sw_video_base_ms = MEDIA_TIME_UNSET;
    unsigned long frames_decoded = 0;
    unsigned long frames_displayed = 0;
    int disable_audio = options && options->disable_audio;
@@ -3463,7 +3585,8 @@ static int media_play_native_video(const char *path,
              audio_ctx->sample_rate >= 8000 &&
              audio_ctx->sample_rate <= 48000 &&
              unifrog_audio_open(&audio, (unsigned)audio_ctx->sample_rate, 1,
-                512, 8) == 0) {
+                MEDIA_VIDEO_AUDIO_PERIOD_BYTES,
+                MEDIA_VIDEO_AUDIO_PERIODS) == 0) {
             pcm = malloc(sizeof(*pcm) * MEDIA_FFMPEG_CHUNK_FRAMES);
             if (pcm) {
                (void)unifrog_audio_set_volume(&audio, MEDIA_AUDIO_VOLUME);
@@ -3471,6 +3594,13 @@ static int media_play_native_video(const char *path,
                (void)unifrog_audio_start(&audio);
                (void)unifrog_audio_set_output_enabled(&audio, 1);
                audio_enabled = 1;
+               printf("unifrog media native software_audio open rate=%d period_bytes=%u periods=%u buffer_ms=%lu\n",
+                  audio_ctx->sample_rate, MEDIA_VIDEO_AUDIO_PERIOD_BYTES,
+                  MEDIA_VIDEO_AUDIO_PERIODS,
+                  (unsigned long)(((uint64_t)MEDIA_VIDEO_AUDIO_PERIOD_BYTES *
+                  (uint64_t)MEDIA_VIDEO_AUDIO_PERIODS * 1000ull) /
+                  ((uint64_t)audio_ctx->sample_rate * sizeof(int16_t))));
+               unifrog_audio_debug_dump(&audio, "native_video_after_start");
             }
          }
       }
@@ -3496,6 +3626,11 @@ static int media_play_native_video(const char *path,
       if (read_ret < 0)
          break;
       if (packet->stream_index == video_stream) {
+         if (audio_enabled && auddec.fd < 0)
+            media_video_wait_for_sw_audio(&audio, packet,
+               fmt->streams[video_stream]->time_base, &sw_video_base_ms,
+               audio_frames, audio_ctx ? audio_ctx->sample_rate : 0,
+               sw_audio_start_ms, path);
          int write_ret = media_video_send_filtered(video_fd, video_bsf,
             packet, fmt->streams[video_stream]->time_base,
             video_freerun,
@@ -3524,9 +3659,15 @@ static int media_play_native_video(const char *path,
                   break;
                if (recv_ret < 0)
                   break;
-               write_ret = media_ffmpeg_write_frame(&audio, audio_ctx,
-                  &audio_converter, frame, pcm, MEDIA_FFMPEG_CHUNK_FRAMES,
-                  &audio_frames, path);
+               {
+                  uint32_t before_audio_frames = audio_frames;
+
+                  write_ret = media_ffmpeg_write_frame(&audio, audio_ctx,
+                     &audio_converter, frame, pcm, MEDIA_FFMPEG_CHUNK_FRAMES,
+                     &audio_frames, path);
+                  if (before_audio_frames == 0 && audio_frames > 0)
+                     sw_audio_start_ms = unifrog_perf_time_ms();
+               }
                if (write_ret != 0)
                   break;
             }
@@ -3535,10 +3676,19 @@ static int media_play_native_video(const char *path,
       av_packet_unref(packet);
       if ((++loop_polls % 180u) == 0) {
          struct vdec_decore_status status;
+         int64_t video_time = -1;
+         int64_t audio_time = -1;
+         uint32_t sw_audio_ms = media_sw_audio_clock_ms(
+            audio_enabled ? &audio : NULL, audio_frames,
+            audio_ctx ? audio_ctx->sample_rate : 0, sw_audio_start_ms);
 
          memset(&status, 0, sizeof(status));
+         if (video_fd >= 0)
+            (void)ioctl(video_fd, VIDDEC_GET_CUR_TIME, &video_time);
+         if (auddec.fd >= 0)
+            (void)ioctl(auddec.fd, AUDDEC_GET_CUR_TIME, &audio_time);
          if (ioctl(video_fd, VIDDEC_GET_STATUS, &status) == 0)
-            printf("unifrog media native monitor packets=%lu audio=%lu decoded=%lu displayed=%lu hdr=%d pic=%d show=%d eos=%u err=%lu underrun=%lu used=%lu/%lu ms=%lu\n",
+            printf("unifrog media native monitor packets=%lu audio=%lu decoded=%lu displayed=%lu hdr=%d pic=%d show=%d eos=%u err=%lu underrun=%lu used=%lu/%lu ms=%lu vtime=%lld atime=%lld sw_audio_ms=%lu\n",
                (unsigned long)video_packets,
                (unsigned long)(audio_frames + auddec.packets),
                (unsigned long)status.frames_decoded,
@@ -3551,18 +3701,28 @@ static int media_play_native_video(const char *path,
                (unsigned long)status.under_run_cnt,
                (unsigned long)status.buffer_used,
                (unsigned long)status.buffer_size,
-               (unsigned long)(unifrog_perf_time_ms() - start_ms));
+               (unsigned long)(unifrog_perf_time_ms() - start_ms),
+               (long long)video_time, (long long)audio_time,
+               (unsigned long)sw_audio_ms);
       }
    }
    media_video_finish_eos(video_fd, VIDEO_EOS_TIMEOUT_MS);
    if (video_fd >= 0) {
       struct vdec_decore_status status;
+      int64_t video_time = -1;
+      int64_t audio_time = -1;
+      uint32_t sw_audio_ms = media_sw_audio_clock_ms(
+         audio_enabled ? &audio : NULL, audio_frames,
+         audio_ctx ? audio_ctx->sample_rate : 0, sw_audio_start_ms);
 
       memset(&status, 0, sizeof(status));
+      (void)ioctl(video_fd, VIDDEC_GET_CUR_TIME, &video_time);
+      if (auddec.fd >= 0)
+         (void)ioctl(auddec.fd, AUDDEC_GET_CUR_TIME, &audio_time);
       if (ioctl(video_fd, VIDDEC_GET_STATUS, &status) == 0) {
          frames_decoded = (unsigned long)status.frames_decoded;
          frames_displayed = (unsigned long)status.frames_displayed;
-         printf("unifrog media native final_status decoded=%lu displayed=%lu hdr=%d pic=%d show=%d eos=%u err=%lu underrun=%lu used=%lu/%lu packets=%lu\n",
+         printf("unifrog media native final_status decoded=%lu displayed=%lu hdr=%d pic=%d show=%d eos=%u err=%lu underrun=%lu used=%lu/%lu packets=%lu vtime=%lld atime=%lld sw_audio_ms=%lu\n",
             frames_decoded, frames_displayed,
             status.first_header_got,
             status.first_pic_decoded,
@@ -3572,7 +3732,8 @@ static int media_play_native_video(const char *path,
             (unsigned long)status.under_run_cnt,
             (unsigned long)status.buffer_used,
             (unsigned long)status.buffer_size,
-            (unsigned long)video_packets);
+            (unsigned long)video_packets, (long long)video_time,
+            (long long)audio_time, (unsigned long)sw_audio_ms);
       }
    }
    if (auddec.fd >= 0)

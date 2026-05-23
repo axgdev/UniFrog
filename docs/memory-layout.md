@@ -49,14 +49,18 @@ loaders must reject cores that do not fit.
 
 ## Media Memory
 
-The SF2000 DTS keeps a small MMZ pool for the native media drivers while leaving
-the rest of high memory to the application arena. The current media DTS uses a
-16 MiB `viddec.kshm_size` and 2 MiB `auddec.kshm_size`; native playback should
-match those sizes when opening the drivers.
+The SF2000 DTS keeps `mmz0` at size zero. HCRTOS KSHM falls back to normal
+aligned heap allocation when no `kshm` MMZ pool exists, so native media buffers
+are allocated from the application arena while playback is active and released
+when `VIDDEC_RLS`/`AUDDEC_RLS` runs. The current media DTS advertises a 16 MiB
+`viddec.kshm_size` and 2 MiB `auddec.kshm_size`; native playback should match
+those sizes when opening the drivers.
 
 UniFrog media playback uses streaming buffers instead of loading the whole file
-into memory. The current native video demux read buffer is 2 MiB, with a 512 KiB
-allocation fallback if memory is fragmented.
+into memory. The native FFmpeg custom AVIO buffer is intentionally a small
+64 KiB read chunk, with a 16 KiB allocation fallback if memory is fragmented.
+Larger AVIO chunks caused MP4 probing and seeks to over-read tens of MiB before
+playback started.
 
 ## Compatibility Rule
 

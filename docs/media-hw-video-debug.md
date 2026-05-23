@@ -75,3 +75,23 @@
 - The same logs still show `decoded=0 displayed=0` for 720p and 1080p native
   attempts. If that persists with the larger buffers, investigate quick-mode
   behavior and 1080p/profile/MMZ requirements separately from SD refill.
+
+### v050 0104 Follow-Up
+- Logs from `../latest_log/v050/0104` show the 2 MiB custom AVIO buffer was
+  acting as FFmpeg's read chunk, not as a useful playback prebuffer. MP4
+  probing/seeking over-read most files before playback, including about 43 MiB
+  before the 1080p native open completed.
+- The native custom AVIO chunk is now 64 KiB with a 16 KiB fallback. Keep using
+  the close log's `reads`, `bytes`, `requested`, and `seeks` fields to confirm
+  whether startup IO is bounded.
+- Hardware `auddec` still fails in these logs, so native video runs freerun
+  while audio is decoded through the software FFmpeg/SND path. The native path
+  now paces video packet submission against the software audio clock and logs
+  `swsync wait`, `vtime`, `atime`, and `sw_audio_ms`.
+- H.264 viddec config now uses the stream frame rate instead of forcing
+  60 fps, and AVCC H.264 also sends converted SPS/PPS as a post-init ES packet
+  while keeping the original `avcC` config. This is intended to distinguish
+  high-resolution header/feed problems from SD refill or display geometry.
+- The DTS is back to zero reserved `mmz0`; `viddec`/`auddec` KSHM buffers are
+  expected to allocate from normal aligned heap while playback is active and be
+  released on close.
