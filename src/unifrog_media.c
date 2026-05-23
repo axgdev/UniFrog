@@ -29,10 +29,12 @@
 #include <libavcodec/avcodec.h>
 #include <libavcodec/bsf.h>
 #include <libavformat/avformat.h>
+#include <libavformat/avio.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/error.h>
 #include <libavutil/frame.h>
 #include <libavutil/mathematics.h>
+#include <libavutil/mem.h>
 #include <libavutil/pixdesc.h>
 #include <libavutil/pixfmt.h>
 #include <libavutil/samplefmt.h>
@@ -75,7 +77,9 @@
 #define MEDIA_WAV_CHUNK_FRAMES 512u
 #define MEDIA_FFMPEG_CHUNK_FRAMES 512u
 #define MEDIA_AUDIO_KSHM_SIZE 0x000a0000u
-#define MEDIA_VIDEO_KSHM_SIZE 0x00800000u
+#define MEDIA_VIDEO_KSHM_SIZE 0x01000000u
+#define MEDIA_FILE_BUFFER_SIZE (2u * 1024u * 1024u)
+#define MEDIA_FILE_BUFFER_MIN_SIZE (512u * 1024u)
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define MEDIA_SEEK_STEP_MS 10000
 #define MEDIA_SWVIDEO_MMZ_ID 0
@@ -129,6 +133,21 @@ struct media_raw_auddec_variant {
    int enable_audsink;
    int audio_flush_thres;
    int kshm_size;
+};
+
+struct media_buffered_input {
+   int fd;
+   AVIOContext *avio;
+   size_t buffer_size;
+   int64_t file_size;
+   uint64_t read_calls;
+   uint64_t read_bytes;
+   uint64_t read_requested;
+   uint32_t short_reads;
+   uint32_t seek_calls;
+   int max_request;
+   int max_read;
+   int last_errno;
 };
 
 extern void *mmz_memalign(int id, size_t alignment, size_t size)
@@ -383,6 +402,183 @@ static void media_sd_read_recover_stale(const char *tag)
    media_sd_read_depth = 0;
    media_disk_suspend_depth = 0;
    unifrog_log_set_disk_suspended(0);
+}
+
+static uint8_t *media_alloc_file_buffer(size_t *size_out)
+{
+   size_t size = MEDIA_FILE_BUFFER_SIZE;
+   size_t min_size = MEDIA_FILE_BUFFER_MIN_SIZE;
+   uint8_t *buffer = NULL;
+
+   if (size_out)
+      *size_out = 0;
+   if (size < min_size)
+      min_size = size;
+   while (size >= min_size && size > 0) {
+      buffer = av_malloc(size);
+      if (buffer) {
+         if (size_out)
+            *size_out = size;
+         return buffer;
+      }
+      size /= 2u;
+   }
+   return NULL;
+}
+
+static int media_buffered_read(void *opaque, uint8_t *buf, int buf_size)
+{
+   struct media_buffered_input *input = opaque;
+   int got;
+
+   if (!input || input->fd < 0 || !buf || buf_size <= 0)
+      return AVERROR(EINVAL);
+   input->read_calls++;
+   input->read_requested += (uint64_t)buf_size;
+   if (buf_size > input->max_request)
+      input->max_request = buf_size;
+   errno = 0;
+   got = (int)read(input->fd, buf, (size_t)buf_size);
+   if (got < 0) {
+      input->last_errno = errno;
+      return AVERROR(errno ? errno : EIO);
+   }
+   if (got == 0)
+      return AVERROR_EOF;
+   input->read_bytes += (uint64_t)got;
+   if (got > input->max_read)
+      input->max_read = got;
+   if (got < buf_size)
+      input->short_reads++;
+   return got;
+}
+
+static int64_t media_buffered_seek(void *opaque, int64_t offset, int whence)
+{
+   struct media_buffered_input *input = opaque;
+   off_t pos;
+
+   if (!input || input->fd < 0)
+      return AVERROR(EINVAL);
+   if (whence == AVSEEK_SIZE)
+      return input->file_size >= 0 ? input->file_size : AVERROR(ENOSYS);
+   input->seek_calls++;
+   errno = 0;
+   pos = lseek(input->fd, (off_t)offset, whence);
+   if (pos < 0) {
+      input->last_errno = errno;
+      return AVERROR(errno ? errno : EIO);
+   }
+   return (int64_t)pos;
+}
+
+static int media_buffered_input_open(AVFormatContext **fmt_out,
+   struct media_buffered_input *input, const char *path, const char *tag)
+{
+   AVFormatContext *fmt = NULL;
+   uint8_t *buffer = NULL;
+   size_t buffer_size = 0;
+   struct stat st;
+   int ret;
+
+   if (fmt_out)
+      *fmt_out = NULL;
+   if (!fmt_out || !input || !path)
+      return AVERROR(EINVAL);
+   memset(input, 0, sizeof(*input));
+   input->fd = -1;
+   input->file_size = -1;
+   errno = 0;
+   input->fd = open(path, O_RDONLY);
+   if (input->fd < 0) {
+      input->last_errno = errno;
+      printf("unifrog media buffered_io open_failed tag=%s path=%s errno=%d\n",
+         tag ? tag : "", path, errno);
+      return AVERROR(errno ? errno : EIO);
+   }
+   memset(&st, 0, sizeof(st));
+   if (fstat(input->fd, &st) == 0)
+      input->file_size = (int64_t)st.st_size;
+   buffer = media_alloc_file_buffer(&buffer_size);
+   if (!buffer) {
+      printf("unifrog media buffered_io alloc_failed tag=%s path=%s want=%lu min=%lu\n",
+         tag ? tag : "", path, (unsigned long)MEDIA_FILE_BUFFER_SIZE,
+         (unsigned long)MEDIA_FILE_BUFFER_MIN_SIZE);
+      close(input->fd);
+      input->fd = -1;
+      return AVERROR(ENOMEM);
+   }
+   input->buffer_size = buffer_size;
+   input->avio = avio_alloc_context(buffer, (int)buffer_size, 0, input,
+      media_buffered_read, NULL, media_buffered_seek);
+   if (!input->avio) {
+      av_freep(&buffer);
+      close(input->fd);
+      input->fd = -1;
+      return AVERROR(ENOMEM);
+   }
+   fmt = avformat_alloc_context();
+   if (!fmt) {
+      av_freep(&input->avio->buffer);
+      avio_context_free(&input->avio);
+      close(input->fd);
+      input->fd = -1;
+      return AVERROR(ENOMEM);
+   }
+   fmt->pb = input->avio;
+   ret = avformat_open_input(&fmt, path, NULL, NULL);
+   printf("unifrog media buffered_io open tag=%s ret=%d fd=%d buffer=%lu file=%lld reads=%llu bytes=%llu path=%s\n",
+      tag ? tag : "", ret, input->fd, (unsigned long)input->buffer_size,
+      (long long)input->file_size, (unsigned long long)input->read_calls,
+      (unsigned long long)input->read_bytes, path);
+   if (ret < 0) {
+      if (fmt)
+         avformat_close_input(&fmt);
+      return ret;
+   }
+   *fmt_out = fmt;
+   return 0;
+}
+
+static void media_buffered_input_log_coverage(
+   const struct media_buffered_input *input, const AVFormatContext *fmt,
+   const char *tag, const char *path)
+{
+   uint64_t cover_ms = 0;
+   int64_t bit_rate = fmt ? fmt->bit_rate : 0;
+
+   if (!input || input->buffer_size == 0)
+      return;
+   if (bit_rate > 0)
+      cover_ms = ((uint64_t)input->buffer_size * 8000ull) / (uint64_t)bit_rate;
+   printf("unifrog media buffered_io coverage tag=%s buffer=%lu min=%lu bitrate=%lld cover_ms=%llu duration_us=%lld path=%s\n",
+      tag ? tag : "", (unsigned long)input->buffer_size,
+      (unsigned long)MEDIA_FILE_BUFFER_MIN_SIZE, (long long)bit_rate,
+      (unsigned long long)cover_ms, fmt ? (long long)fmt->duration : -1ll,
+      path ? path : "");
+}
+
+static void media_buffered_input_close(struct media_buffered_input *input,
+   const char *tag, const char *path)
+{
+   if (!input || (input->fd < 0 && !input->avio))
+      return;
+   printf("unifrog media buffered_io close tag=%s fd=%d buffer=%lu file=%lld reads=%llu bytes=%llu requested=%llu max_req=%d max_read=%d short=%lu seeks=%lu errno=%d path=%s\n",
+      tag ? tag : "", input->fd, (unsigned long)input->buffer_size,
+      (long long)input->file_size, (unsigned long long)input->read_calls,
+      (unsigned long long)input->read_bytes,
+      (unsigned long long)input->read_requested, input->max_request,
+      input->max_read, (unsigned long)input->short_reads,
+      (unsigned long)input->seek_calls, input->last_errno, path ? path : "");
+   if (input->avio) {
+      av_freep(&input->avio->buffer);
+      avio_context_free(&input->avio);
+   }
+   if (input->fd >= 0)
+      close(input->fd);
+   memset(input, 0, sizeof(*input));
+   input->fd = -1;
+   input->file_size = -1;
 }
 
 static void media_log_file_probe(const char *path, const char *tag)
@@ -3149,6 +3345,7 @@ static int media_play_native_video(const char *path,
    AVBSFContext *video_bsf = NULL;
    struct unifrog_audio audio;
    struct media_auddec auddec;
+   struct media_buffered_input input;
    struct media_ffmpeg_audio_converter audio_converter;
    int16_t *pcm = NULL;
    int video_stream = -1;
@@ -3170,6 +3367,9 @@ static int media_play_native_video(const char *path,
    audio.fd = -1;
    memset(&auddec, 0, sizeof(auddec));
    auddec.fd = -1;
+   memset(&input, 0, sizeof(input));
+   input.fd = -1;
+   input.file_size = -1;
    memset(&audio_converter, 0, sizeof(audio_converter));
    unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_MEDIA_VIDEO,
       unifrog_exception_activity_hash(path ? path : "native_video"), 0, 1);
@@ -3180,7 +3380,8 @@ static int media_play_native_video(const char *path,
    sd_read_active = 1;
    printf("unifrog media native open_input begin path=%s\n",
       path ? path : "");
-   int open_ret = avformat_open_input(&fmt, path, NULL, NULL);
+   int open_ret = media_buffered_input_open(&fmt, &input, path,
+      "native_video");
    printf("unifrog media native open_input done ret=%d fmt=0x%08lx path=%s\n",
       open_ret, (unsigned long)(uintptr_t)fmt, path ? path : "");
    printf("unifrog media native stream_info begin path=%s\n",
@@ -3188,6 +3389,8 @@ static int media_play_native_video(const char *path,
    int info_ret = open_ret == 0 ? avformat_find_stream_info(fmt, NULL) : 0;
    printf("unifrog media native stream_info done ret=%d streams=%u path=%s\n",
       info_ret, fmt ? fmt->nb_streams : 0, path ? path : "");
+   if (open_ret == 0 && info_ret == 0)
+      media_buffered_input_log_coverage(&input, fmt, "native_video", path);
 
    if (open_ret < 0 || info_ret < 0) {
       printf("unifrog media native open failed open=%d info=%d path=%s\n",
@@ -3408,6 +3611,7 @@ out:
       avcodec_free_context(&audio_ctx);
    if (fmt)
       avformat_close_input(&fmt);
+   media_buffered_input_close(&input, "native_video_close", path);
    if (sd_read_active)
       media_sd_read_end("native_video_close", path);
    return ret;
@@ -3426,6 +3630,7 @@ static int media_play_ffmpeg_video(const char *path,
    struct unifrog_audio audio;
    struct media_ffmpeg_audio_converter audio_converter;
    struct media_sw_video sw_video;
+   struct media_buffered_input input;
    int16_t *pcm = NULL;
    int video_stream = -1;
    int audio_stream = -1;
@@ -3442,6 +3647,9 @@ static int media_play_ffmpeg_video(const char *path,
    audio.fd = -1;
    memset(&audio_converter, 0, sizeof(audio_converter));
    memset(&sw_video, 0, sizeof(sw_video));
+   memset(&input, 0, sizeof(input));
+   input.fd = -1;
+   input.file_size = -1;
    media_ffmpeg_register_once();
    unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_MEDIA_VIDEO,
       unifrog_exception_activity_hash(path ? path : "ffmpeg_video"), 0, 1);
@@ -3449,7 +3657,7 @@ static int media_play_ffmpeg_video(const char *path,
    sd_read_active = 1;
    printf("unifrog media ffmpeg video open_input begin path=%s\n",
       path ? path : "");
-   if (avformat_open_input(&fmt, path, NULL, NULL) < 0) {
+   if (media_buffered_input_open(&fmt, &input, path, "ffmpeg_video") < 0) {
       printf("unifrog media ffmpeg video open_input failed path=%s\n",
          path ? path : "");
       goto out;
@@ -3459,6 +3667,7 @@ static int media_play_ffmpeg_video(const char *path,
          path ? path : "");
       goto out;
    }
+   media_buffered_input_log_coverage(&input, fmt, "ffmpeg_video", path);
    media_log_format_streams(fmt, path, "ffmpeg_video_open");
    video_stream = media_find_stream_type(fmt, AVMEDIA_TYPE_VIDEO);
    if (!disable_audio)
@@ -3643,6 +3852,7 @@ out:
       avcodec_free_context(&video_ctx);
    if (fmt)
       avformat_close_input(&fmt);
+   media_buffered_input_close(&input, "ffmpeg_video_close", path);
    if (sd_read_active)
       media_sd_read_end("ffmpeg_video_close", path);
    return ret;

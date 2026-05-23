@@ -49,15 +49,14 @@ loaders must reject cores that do not fit.
 
 ## Media Memory
 
-MMZ is intentionally size zero in the default UniFrog layout. Vendor media code
-still calls MMZ allocation APIs, so the SDK routes zero-sized MMZ allocations to
-normal sysmem instead of requiring a reserved driver pool. This keeps MP4
-playback working while leaving the high-memory arena available for applications.
+The SF2000 DTS keeps a small MMZ pool for the native media drivers while leaving
+the rest of high memory to the application arena. The current media DTS uses a
+16 MiB `viddec.kshm_size` and 2 MiB `auddec.kshm_size`; native playback should
+match those sizes when opening the drivers.
 
-UniFrog media playback should use an application-owned streaming buffer instead
-of loading the whole file into memory. The current default stream cache is 1 MiB
-inside the app arena; it can be tuned lower after device testing confirms SD
-refill latency stays hidden.
+UniFrog media playback uses streaming buffers instead of loading the whole file
+into memory. The current native video demux read buffer is 2 MiB, with a 512 KiB
+allocation fallback if memory is fragmented.
 
 ## Compatibility Rule
 

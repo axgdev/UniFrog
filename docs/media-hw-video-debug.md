@@ -59,3 +59,19 @@
 - Native viddec quick mode is disabled to match the lower-ghosting hcplayer
   presets that previously behaved best. The packet feed still logs enough
   status to decide later whether actual buffering is needed.
+
+### v050 0103 Follow-Up
+- Logs from `../latest_log/v050/0103` confirm the display geometry fix:
+  native `VIDDEC_SET_DISPLAY_RECT` and `DIS_SET_ZOOM` use `1920x1080` source
+  and destination rectangles.
+- The test MP4 total bitrates are about 229 kbps, 304 kbps, 391 kbps,
+  605 kbps, and 2.19 Mbps. A 2 MiB demux read buffer therefore covers about
+  73 s, 55 s, 43 s, 28 s, and 7.7 s respectively, with a 512 KiB allocation
+  fallback if memory is fragmented.
+- Native FFmpeg demux now opens video files through a custom `AVIOContext`
+  backed by that read buffer and logs read/seek statistics on close.
+- Native viddec now requests a 16 MiB KSHM buffer, matching the SF2000 DTS
+  `viddec.kshm_size = <0x1000000>`, instead of the older 8 MiB request.
+- The same logs still show `decoded=0 displayed=0` for 720p and 1080p native
+  attempts. If that persists with the larger buffers, investigate quick-mode
+  behavior and 1080p/profile/MMZ requirements separately from SD refill.
