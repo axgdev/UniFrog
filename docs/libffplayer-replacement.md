@@ -108,6 +108,9 @@ For source-level SDK behavior clues, inspect:
   including freerun audio-only playback. Audio-only file playback should pace
   packet feeding with a bounded prefeed window so the KSHM ring is a jitter
   buffer, not a full-file dump.
+- Native video file playback also needs bounded packet-feed pacing. HCRTOS cast
+  examples are already paced by network/input arrival; local SD files are not,
+  so UniFrog paces video and hardware-audio ES writes against stream timestamps.
 - The SF2000 audio path must stay muted/gated until real PCM exists. Digital
   zeroes alone can still expose board noise.
 
