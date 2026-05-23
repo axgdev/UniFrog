@@ -101,10 +101,17 @@ struct audio_config {
    int buffering_end;
    int enable_audsink;
    int dma_buffer_time;
-   int mix_priority;
-   int mix_maximum_weight;
-   int slave_mode;
 } __attribute__((aligned(8)));
+
+/*
+ * The SDK's public HCRTOS audio header is incomplete for this prebuilt
+ * libauddrv.a, while the Linux-driver header is newer. Disassembly of
+ * libauddrv.a shows AUDDEC_INIT is switched as 0x82500301, i.e. a 592-byte
+ * struct with codec_frame_size and dma_buffer_time, but without the later
+ * mix/slave fields.
+ */
+typedef char unifrog_audio_config_size_must_match_libauddrv[
+   (sizeof(struct audio_config) == 592) ? 1 : -1];
 
 struct audio_decore_status {
    uint32_t sample_rate;

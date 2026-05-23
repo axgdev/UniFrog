@@ -88,9 +88,9 @@
 #define MEDIA_FILE_BUFFER_MIN_SIZE (16u * 1024u)
 #define MEDIA_FILE_READAHEAD_SIZE (2u * 1024u * 1024u)
 #define MEDIA_FILE_READAHEAD_MIN_SIZE (512u * 1024u)
-#define MEDIA_SW_AUDIO_VIDEO_LEAD_MS 180u
-#define MEDIA_SW_AUDIO_MAX_WAIT_MS 60u
-#define MEDIA_SW_AUDIO_WAIT_POLL_US 4000u
+#define MEDIA_SW_AUDIO_VIDEO_LEAD_MS 60u
+#define MEDIA_SW_AUDIO_MAX_WAIT_MS 160u
+#define MEDIA_SW_AUDIO_WAIT_POLL_US 2000u
 #define MEDIA_SWVIDEO_DISPLAY_FAIL_LIMIT 3u
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define MEDIA_SEEK_STEP_MS 10000
@@ -5345,7 +5345,7 @@ static void media_init_drivers_once(void)
       (unsigned long)((uintptr_t)&_pvdec_end - (uintptr_t)&_pvdec_start),
       (unsigned long)((uintptr_t)&_deca_audio_stream_struct_end -
          (uintptr_t)&_deca_audio_stream_struct_start));
-   printf("unifrog media abi audio_cfg=%lu audio_status=%lu video_cfg=%lu pkt=%lu cmd_auddec_init=0x%lx cmd_viddec_init=0x%lx off_audio_extradata=%lu off_audio_frame=%lu off_audio_extrasz=%lu off_audio_extramode=%lu off_audio_bypass=%lu off_audio_kshm=%lu off_audio_chlayout=%lu off_audio_buf_start=%lu off_audio_buf_end=%lu off_audio_audsink=%lu off_audio_dma=%lu off_audio_mixpri=%lu off_audio_mixmax=%lu off_audio_slave=%lu\n",
+   printf("unifrog media abi audio_cfg=%lu audio_status=%lu video_cfg=%lu pkt=%lu cmd_auddec_init=0x%lx cmd_viddec_init=0x%lx off_audio_extradata=%lu off_audio_frame=%lu off_audio_extrasz=%lu off_audio_extramode=%lu off_audio_bypass=%lu off_audio_kshm=%lu off_audio_chlayout=%lu off_audio_buf_start=%lu off_audio_buf_end=%lu off_audio_audsink=%lu off_audio_dma=%lu\n",
       (unsigned long)sizeof(struct audio_config),
       (unsigned long)sizeof(struct audio_decore_status),
       (unsigned long)sizeof(struct video_config),
@@ -5362,10 +5362,7 @@ static void media_init_drivers_once(void)
       (unsigned long)offsetof(struct audio_config, buffering_start),
       (unsigned long)offsetof(struct audio_config, buffering_end),
       (unsigned long)offsetof(struct audio_config, enable_audsink),
-      (unsigned long)offsetof(struct audio_config, dma_buffer_time),
-      (unsigned long)offsetof(struct audio_config, mix_priority),
-      (unsigned long)offsetof(struct audio_config, mix_maximum_weight),
-      (unsigned long)offsetof(struct audio_config, slave_mode));
+      (unsigned long)offsetof(struct audio_config, dma_buffer_time));
    (void)unifrog_log_flush();
    initialized = 1;
 }

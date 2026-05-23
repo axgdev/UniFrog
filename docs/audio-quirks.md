@@ -42,6 +42,13 @@ or `src/unifrog_media.c`.
 - Audio-only and native video-container audio playback use UniFrog's direct
   FFmpeg decode path where possible, so decoded PCM goes through the same
   silence gate as UI sounds.
+- Native media must use the audio decoder ABI from the linked HCRTOS
+  `libauddrv.a`, not blindly copy either adjacent public header. The bundled
+  driver switches on `AUDDEC_INIT == 0x82500301`, which corresponds to a
+  592-byte `struct audio_config`: it includes `codec_frame_size` and
+  `dma_buffer_time`, but not the newer `mix_*` or `slave_mode` fields from the
+  Linux-driver header. A 584-byte or 608-byte ioctl is rejected before
+  `/dev/auddec` can initialize.
 
 ## Stock Firmware Notes
 
