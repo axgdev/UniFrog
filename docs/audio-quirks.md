@@ -88,9 +88,11 @@ or `src/unifrog_media.c`.
   `MEDIA_VIDEO_READAHEAD_SIZE`/`MEDIA_VIDEO_READAHEAD_SLOTS` in `config.mk` or
   on the `make` command line when device logs show either
   `ahead_ms`/`ahead_a` too close to zero or excessive SD reads. Video readahead
-  is a small multi-window cache with a bounded startup prefill. For slower
-  cards, tune `MEDIA_VIDEO_PREFILL_MAX_BYTES`; for no-stutter small-video
-  playback, optionally set `MEDIA_VIDEO_PRELOAD_MAX_BYTES`. See
+  is a small multi-window cache with a bounded startup prefill. Native video
+  allocates that cache after the audio/video decoder KSHM setup so it cannot
+  starve hardware decode. For slower cards, tune
+  `MEDIA_VIDEO_PREFILL_MAX_BYTES`; for no-stutter small-video playback,
+  optionally set `MEDIA_VIDEO_PRELOAD_MAX_BYTES`. See
   `docs/media-buffering-algorithm.md`.
 - Video and audio hardware queues are also capped against the actual decoder
   clocks with `MEDIA_VIDEO_MAX_HW_AHEAD_MS` and

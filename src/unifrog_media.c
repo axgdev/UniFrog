@@ -1176,6 +1176,9 @@ static int media_buffered_input_enable_readahead(
    unsigned slots;
    int video = media_buffered_readahead_mode_values(tag, &want, &min_size,
       &slots);
+   size_t normal_want;
+   size_t normal_min_size;
+   unsigned normal_slots;
    int preload = 0;
 
    if (!input || input->fd < 0)
@@ -1187,6 +1190,9 @@ static int media_buffered_input_enable_readahead(
          tag ? tag : "", video ? "video" : "audio", path ? path : "");
       return -1;
    }
+   normal_want = want;
+   normal_min_size = min_size;
+   normal_slots = slots;
    if (video && MEDIA_VIDEO_PRELOAD_MAX_BYTES > 0 && input->file_size > 0 &&
        (uint64_t)input->file_size <= (uint64_t)MEDIA_VIDEO_PRELOAD_MAX_BYTES) {
       want = (size_t)input->file_size;
@@ -1196,6 +1202,17 @@ static int media_buffered_input_enable_readahead(
    }
    input->readahead = media_alloc_readahead_buffer(&input->readahead_size,
       &input->readahead_slot_count, want, min_size, slots);
+   if (!input->readahead && preload) {
+      printf("unifrog media buffered_io preload alloc_failed tag=%s path=%s want=%lu fallback_want=%lu fallback_slots=%u\n",
+         tag ? tag : "", path ? path : "", (unsigned long)want,
+         (unsigned long)normal_want, normal_slots);
+      want = normal_want;
+      min_size = normal_min_size;
+      slots = normal_slots;
+      preload = 0;
+      input->readahead = media_alloc_readahead_buffer(&input->readahead_size,
+         &input->readahead_slot_count, want, min_size, slots);
+   }
    if (!input->readahead) {
       printf("unifrog media buffered_io readahead alloc_failed tag=%s mode=%s path=%s want=%lu min=%lu slots=%u\n",
          tag ? tag : "", video ? "video" : "audio", path ? path : "",
@@ -1221,6 +1238,28 @@ static int media_buffered_input_enable_readahead(
       (long long)input->logical_pos, (long long)input->fd_pos,
       path ? path : "");
    return 0;
+}
+
+static void media_buffered_input_enable_video_readahead(
+   struct media_buffered_input *input, const AVFormatContext *fmt,
+   const struct unifrog_media_video_options *options, const char *path)
+{
+   if (!input || input->readahead_enabled)
+      return;
+   (void)media_buffered_input_enable_readahead(input, fmt, "native_video",
+      path);
+   if (!input->readahead_enabled)
+      return;
+   if (input->readahead_preload && input->file_size > 0) {
+      (void)media_buffered_prefill_readahead(input, 0,
+         (size_t)input->file_size, options, "preload", path);
+   } else {
+      size_t prefill = media_video_startup_prefill_bytes(input, fmt);
+
+      if (prefill > 0)
+         (void)media_buffered_prefill_readahead(input, input->logical_pos,
+            prefill, options, "buffering", path);
+   }
 }
 
 static int media_buffered_input_open(AVFormatContext **fmt_out,
@@ -1634,6 +1673,35 @@ static void close_display(void)
       close(dis_fd);
       dis_fd = -1;
    }
+}
+
+static int media_native_video_reveal_if_ready(int video_fd, int *revealed,
+   unsigned long *frames_decoded, unsigned long *frames_displayed,
+   const char *path)
+{
+   struct vdec_decore_status status;
+
+   if (!revealed || *revealed || video_fd < 0)
+      return revealed ? *revealed : 0;
+   memset(&status, 0, sizeof(status));
+   if (ioctl(video_fd, VIDDEC_GET_STATUS, &status) != 0)
+      return 0;
+   if (frames_decoded)
+      *frames_decoded = status.frames_decoded;
+   if (frames_displayed)
+      *frames_displayed = status.frames_displayed;
+   if (!status.first_pic_decoded && !status.first_pic_showed &&
+       status.frames_decoded == 0 && status.frames_displayed == 0)
+      return 0;
+   media_set_aspect_mode(DIS_TV_16_9, DIS_PILLBOX);
+   (void)set_video_layer_visible(1, VIDEO_SOURCE_W, VIDEO_SOURCE_H,
+      VIDEO_OUTPUT_W, VIDEO_OUTPUT_H);
+   *revealed = 1;
+   printf("unifrog media native video reveal decoded=%lu displayed=%lu hdr=%d pic=%d show=%d path=%s\n",
+      (unsigned long)status.frames_decoded,
+      (unsigned long)status.frames_displayed, status.first_header_got,
+      status.first_pic_decoded, status.first_pic_showed, path ? path : "");
+   return 1;
 }
 
 static void media_swvideo_close(struct media_sw_video *video)
@@ -4492,6 +4560,7 @@ static int media_play_native_video(const char *path,
    int disable_audio = options && options->disable_audio;
    int video_freerun = 0;
    int video_sync_mode = AVSYNC_TYPE_FREERUN;
+   int video_layer_revealed = 0;
    int sd_read_active = 0;
    int auddec_write_failed = 0;
 
@@ -4527,20 +4596,6 @@ static int media_play_native_video(const char *path,
       info_ret, fmt ? fmt->nb_streams : 0, path ? path : "");
    if (open_ret == 0 && info_ret == 0) {
       media_buffered_input_log_coverage(&input, fmt, "native_video", path);
-      (void)media_buffered_input_enable_readahead(&input, fmt,
-         "native_video", path);
-      if (input.readahead_enabled) {
-         if (input.readahead_preload && input.file_size > 0) {
-            (void)media_buffered_prefill_readahead(&input, 0,
-               (size_t)input.file_size, options, "preload", path);
-         } else {
-            size_t prefill = media_video_startup_prefill_bytes(&input, fmt);
-
-            if (prefill > 0)
-               (void)media_buffered_prefill_readahead(&input,
-                  input.logical_pos, prefill, options, "buffering", path);
-         }
-      }
       media_video_progress(options, "decoders", 75, 100);
    }
 
@@ -4571,6 +4626,7 @@ static int media_play_native_video(const char *path,
    media_init_drivers_once();
    printf("unifrog media native init_drivers done\n");
    (void)unifrog_log_flush();
+   (void)set_video_layer_visible(0, 0, 0, 0, 0);
    if (!disable_audio && audio_stream >= 0) {
       int auddec_ret;
 
@@ -4597,6 +4653,7 @@ static int media_play_native_video(const char *path,
    (void)unifrog_log_flush();
    if (video_fd < 0)
       goto out;
+   media_buffered_input_enable_video_readahead(&input, fmt, options, path);
    printf("unifrog media native bsf begin stream=%d\n", video_stream);
    (void)unifrog_log_flush();
    (void)media_video_bsf_init(fmt->streams[video_stream], &video_bsf);
@@ -4651,8 +4708,6 @@ static int media_play_native_video(const char *path,
    printf("unifrog media native play video=%d audio=%d audio_enabled=%d auddec=%d path=%s\n",
       video_stream, audio_stream, audio_enabled, auddec.fd >= 0, path);
    media_video_progress(options, "playing", 100, 100);
-   if (fb_fd >= 0)
-      (void)ioctl(fb_fd, FBIOBLANK, FB_BLANK_NORMAL);
 
    while (!media_exit_down()) {
       int read_ret = av_read_frame(fmt, packet);
@@ -4685,6 +4740,8 @@ static int media_play_native_video(const char *path,
             av_packet_unref(packet);
             break;
          }
+         (void)media_native_video_reveal_if_ready(video_fd,
+            &video_layer_revealed, &frames_decoded, &frames_displayed, path);
       } else if (auddec.fd >= 0 && packet->stream_index == audio_stream) {
          if (!auddec_write_failed) {
             media_video_activity_stage(21u, auddec.packets & 0x00ffffffu,

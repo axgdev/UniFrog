@@ -53,13 +53,17 @@ callbacks.
 - A read miss fills one window from the current logical position, not the whole
   file and not an unbounded prebuffer.
 - When all windows are occupied, the least recently used window is evicted.
-- Before playback starts, native video pre-fills a bounded startup cushion. The
-  default target is 5 seconds of file bitrate, clamped between 512 KiB and
-  2 MiB. This moves the first SD stall into the loading screen rather than the
-  first seconds of playback.
+- Native video allocates and pre-fills its cache only after `/dev/auddec` and
+  `/dev/viddec` have reserved their KSHM buffers. This keeps the cache
+  opportunistic: it can shrink or fail without preventing hardware decode.
+- Before packet feeding starts, native video pre-fills a bounded startup
+  cushion. The default target is 5 seconds of file bitrate, clamped between
+  512 KiB and 2 MiB. This moves the first SD stall into the loading screen
+  rather than the first seconds of playback.
 - `MEDIA_VIDEO_PRELOAD_MAX_BYTES` can enable whole-file preload for small
   videos. It defaults to `0` because full preload trades stutter resistance for
-  a longer startup wait.
+  a longer startup wait. If whole-file allocation fails after the decoders have
+  reserved memory, playback falls back to the normal window cache.
 
 This keeps the algorithm simple: no threads, no speculative parser, no second
 copy of the demuxer, and no dependency on private `hcplayer` state. The only
@@ -123,6 +127,10 @@ Practical tuning rules:
   `MEDIA_VIDEO_PREFILL_MAX_BYTES` first.
 - If a card is fast and users prefer stutter-free small videos over fast start,
   set `MEDIA_VIDEO_PRELOAD_MAX_BYTES` to a safe cap such as `16777216`.
+- If `VIDDEC_INIT` returns `errno=12`, do not increase the startup cache before
+  checking log order. The `native_video readahead enabled` line should appear
+  after `native video_open done fd=...`; a cache allocated before decoder init
+  can starve the decoder heap even when total RAM looks sufficient.
 - If `slow_read` is rare but `ahead_a` or `ahead_v` reaches zero during monitor
   lines, increase hardware ahead or decoder buffering thresholds cautiously.
 - If `/dev/viddec` or `/dev/auddec` write retries become frequent, decrease the
