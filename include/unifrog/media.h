@@ -5,6 +5,9 @@
 extern "C" {
 #endif
 
+typedef void (*unifrog_media_progress_cb)(void *userdata,
+   const char *stage, unsigned done, unsigned total);
+
 struct unifrog_media_video_options {
    int preset;
    int disable_audio;
@@ -12,6 +15,8 @@ struct unifrog_media_video_options {
    int force_native;
    int force_hcplayer;
    int force_ffmpeg;
+   unifrog_media_progress_cb progress;
+   void *progress_userdata;
 };
 
 int unifrog_media_play_video_ex(const char *path,

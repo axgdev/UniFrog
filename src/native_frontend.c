@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6462,9 +6463,31 @@ static void launch_game(struct native_frontend *fe, struct frontend_item *item)
    unifrog_input_clear();
 }
 
+struct frontend_media_progress {
+   struct native_frontend *fe;
+   char name[96];
+};
+
+static void frontend_media_progress_update(void *userdata, const char *stage,
+   unsigned done, unsigned total)
+{
+   struct frontend_media_progress *progress = userdata;
+   unsigned percent = done;
+
+   if (!progress || !progress->fe)
+      return;
+   if (total > 0)
+      percent = (unsigned)(((uint64_t)done * 100ull) / (uint64_t)total);
+   if (percent > 100u)
+      percent = 100u;
+   frontend_loading_show(progress->fe, "Media", progress->name,
+      stage && stage[0] ? stage : "loading", percent);
+}
+
 static void launch_media(struct native_frontend *fe, struct frontend_item *item)
 {
    struct unifrog_media_video_options options;
+   struct frontend_media_progress progress;
    int ret = -1;
 
    if (!item || !item->path[0])
@@ -6476,6 +6499,9 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
       return;
    }
    unifrog_log("frontend launch media path=%s\n", item->path);
+   memset(&progress, 0, sizeof(progress));
+   progress.fe = fe;
+   unifrog_text_copy(progress.name, sizeof(progress.name), item->name);
    if (fe->launch_splash) {
       if (media_path_is_audio(item->path))
          frontend_loading_show(fe, "Now Playing", item->name,
@@ -6485,6 +6511,10 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
    }
    memset(&options, 0, sizeof(options));
    options.preset = -1;
+   if (fe->launch_splash && !media_path_is_audio(item->path)) {
+      options.progress = frontend_media_progress_update;
+      options.progress_userdata = &progress;
+   }
    if (strcmp(item->core, "native") == 0) {
       options.force_native = 1;
    } else if (strcmp(item->core, "ffmpeg") == 0) {

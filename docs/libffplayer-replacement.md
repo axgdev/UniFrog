@@ -123,9 +123,11 @@ For source-level SDK behavior clues, inspect:
   `MEDIA_FILE_READAHEAD_SIZE`. Video has its own multi-window cache controlled
   by `MEDIA_VIDEO_READAHEAD_SIZE` and `MEDIA_VIDEO_READAHEAD_SLOTS` because
   seek-heavy MP4 demuxing alternates between active audio/video file regions.
-  Set these in `config.mk` for device experiments instead of editing
-  `src/unifrog_media.c` directly. The algorithm and log counters are documented
-  in `docs/media-buffering-algorithm.md`.
+  Startup buffering is controlled by `MEDIA_VIDEO_PREFILL_*`, and optional
+  full-file preload for small videos is controlled by
+  `MEDIA_VIDEO_PRELOAD_MAX_BYTES`. Set these in `config.mk` for device
+  experiments instead of editing `src/unifrog_media.c` directly. The algorithm
+  and log counters are documented in `docs/media-buffering-algorithm.md`.
 - `MEDIA_AUDIO_MAX_HW_AHEAD_MS` and `MEDIA_VIDEO_MAX_HW_AHEAD_MS` cap how far
   packet feeding can run ahead of the hardware decoder clocks after a stall.
   These are separate from the wall-clock feed-lead settings.

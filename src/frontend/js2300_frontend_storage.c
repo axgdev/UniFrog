@@ -845,6 +845,36 @@ int run_storage_quick_benchmark(struct js2300_frontend *frontend)
       reread_result.path);
    (void)unlink(temp_path);
 
+   {
+      unsigned long source_kib_s =
+         storage_test_kib_s(read_result.bytes, read_result.ms);
+      unsigned long reread_kib_s =
+         storage_test_kib_s(reread_result.bytes, reread_result.ms);
+      unsigned long sustained_kib_s = source_kib_s;
+      unsigned long window = 524288ul;
+      unsigned slots = 16u;
+      unsigned long prefill = 2097152ul;
+      unsigned long preload = 0ul;
+
+      if (reread_kib_s != 0 &&
+          (sustained_kib_s == 0 || reread_kib_s < sustained_kib_s))
+         sustained_kib_s = reread_kib_s;
+      if (sustained_kib_s < 512ul) {
+         window = 262144ul;
+         prefill = 1048576ul;
+      } else if (sustained_kib_s >= 4096ul) {
+         window = 1048576ul;
+         prefill = 4194304ul;
+         preload = 33554432ul;
+      } else if (sustained_kib_s >= 1536ul) {
+         prefill = 4194304ul;
+         preload = 16777216ul;
+      }
+      storage_test_append(report, sizeof(report), &used,
+         "item|OK|Media buffer suggestion|%lu KiB/s sustained|MEDIA_VIDEO_READAHEAD_SIZE=%lu MEDIA_VIDEO_READAHEAD_SLOTS=%u MEDIA_VIDEO_PREFILL_MAX_BYTES=%lu MEDIA_VIDEO_PRELOAD_MAX_BYTES=%lu\n",
+         sustained_kib_s, window, slots, prefill, preload);
+   }
+
    (void)unifrog_platform_sd_describe(state_after, sizeof(state_after));
    unifrog_platform_sd_debug_dump("storage_quick_after");
    storage_test_append(report, sizeof(report), &used,
