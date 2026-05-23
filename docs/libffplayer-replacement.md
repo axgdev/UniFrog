@@ -73,6 +73,10 @@ For source-level SDK behavior clues, inspect:
 - MP4 H.264 `avcC` extradata is not passed in `video_config.extra_data`. It is
   written after `VIDDEC_INIT` as an ES packet, then `/dev/vidsink` is opened.
 - Normal compressed packets use `AvPktHd` followed by elementary stream data.
+- `render_vframe` in vendor `libffplayer.a` allocates a `0x5c` `vframe_info`
+  payload and submits it with ioctl `0x805c1a00` (`VIDSINK_DISPLAY_FRAME`) on
+  `/dev/vidsink`. `DIS_SET_DISPLAY_INFO` is a different ABI and can produce
+  green frames for software-decoded FFmpeg video.
 - Video writes should check `/dev/viddec` queue space with `VIDDEC_GET_STATUS`
   before filling the KSHM ring, then send EOS and wait briefly with
   `VIDDEC_CHECK_EOS`.
