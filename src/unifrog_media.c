@@ -2639,7 +2639,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    cfg.dst_area.y = 0;
    cfg.dst_area.w = VIDEO_OUTPUT_W;
    cfg.dst_area.h = VIDEO_OUTPUT_H;
-   cfg.quick_mode = 0;
+   cfg.quick_mode = 3;
    cfg.img_dis_mode = IMG_DIS_FULLSCREEN;
    cfg.mirror_type = MIRROR_TYPE_NONE;
    cfg.rotate_type = ROTATE_TYPE_0;
@@ -2658,9 +2658,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
           media_h264_extradata_annexb(par->extradata, par->extradata_size,
              post_extra, sizeof(post_extra), &post_extra_used) == 0 &&
           post_extra_used > 0) {
-         pre_extra_data = post_extra;
-         pre_extra_size = (int)post_extra_used;
-         write_extra_before_init = 1;
+         post_extra_size = (int)post_extra_used;
       } else if (par->extradata && par->extradata_size > 0) {
          if (par->extradata_size <= (int)sizeof(cfg.extra_data)) {
             cfg.extradata_size = par->extradata_size;
@@ -2751,6 +2749,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
       printf("unifrog media native video post_extra begin fd=%d size=%d\n",
          fd, post_extra_size);
       post_extra_ret = media_send_packet_blob(fd, post_extra, post_extra_size,
+         par->codec_id == AV_CODEC_ID_H264 ? AV_PACKET_ES_DATA :
          AV_PACKET_EXTRA_DATA);
       media_video_activity_stage(11u,
          ((uint32_t)(post_extra_ret & 0xffffu) << 16) |
