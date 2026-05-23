@@ -1792,8 +1792,14 @@ static int media_video_send_packet(int fd, const AVPacket *packet,
    packet_dur = media_packet_duration_ms(packet, time_base);
    if (packet_dur < 0)
       packet_dur = 0;
-   if (packet_pts < 0 && freerun)
+   if (freerun) {
+      /*
+       * No hardware AV sync clock is available in freerun mode (for example
+       * when audio is software-decoded), so always force decoder-side freerun.
+       */
       packet_pts = -1;
+      packet_dur = 0;
+   }
    memset(&header, 0, sizeof(header));
    header.pts = packet_pts;
    header.dur = packet_dur;
@@ -1939,7 +1945,8 @@ static void media_video_finish_eos(int fd, unsigned timeout_ms)
       timeout_ms);
 }
 
-static int media_send_extra_packet(int fd, const uint8_t *data, int size)
+static int media_send_packet_blob(int fd, const uint8_t *data, int size,
+   uint32_t flag)
 {
    AvPktHd header;
 
@@ -1948,11 +1955,16 @@ static int media_send_extra_packet(int fd, const uint8_t *data, int size)
    memset(&header, 0, sizeof(header));
    header.pts = 0;
    header.size = (uint32_t)size;
-   header.flag = AV_PACKET_EXTRA_DATA;
+   header.flag = flag;
    if (media_write_all(fd, &header, sizeof(header)) != 0 ||
        media_write_all(fd, data, (size_t)size) != 0)
       return -1;
    return 0;
+}
+
+static int media_send_extra_packet(int fd, const uint8_t *data, int size)
+{
+   return media_send_packet_blob(fd, data, size, AV_PACKET_EXTRA_DATA);
 }
 
 static int media_write_extra_before_init(int fd, const char *tag,
@@ -2580,7 +2592,9 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    if (init_ret == 0 && post_extra_size > 0) {
       printf("unifrog media native video post_extra begin fd=%d size=%d\n",
          fd, post_extra_size);
-      post_extra_ret = media_send_extra_packet(fd, post_extra, post_extra_size);
+      post_extra_ret = media_send_packet_blob(fd, post_extra, post_extra_size,
+         par->codec_id == AV_CODEC_ID_H264 ? AV_PACKET_ES_DATA :
+         AV_PACKET_EXTRA_DATA);
       media_video_activity_stage(11u,
          ((uint32_t)(post_extra_ret & 0xffffu) << 16) |
          ((uint32_t)(errno & 0xffffu)),
@@ -2872,7 +2886,9 @@ static int media_play_native_video(const char *path,
          }
       }
    }
-   video_freerun = disable_audio || (auddec.fd < 0 && !audio_enabled);
+   video_freerun = disable_audio || (auddec.fd < 0);
+   if (auddec.fd < 0 && audio_enabled)
+      printf("unifrog media native video forcing freerun due to software audio path\n");
    printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d audio_enabled=%d\n",
       video_freerun, disable_audio, auddec.fd >= 0, audio_enabled);
    packet = av_packet_alloc();
