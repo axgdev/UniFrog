@@ -96,9 +96,30 @@
 #ifndef UNIFROG_MEDIA_FILE_READAHEAD_MIN_SIZE
 #define UNIFROG_MEDIA_FILE_READAHEAD_MIN_SIZE 524288
 #endif
+#ifndef UNIFROG_MEDIA_VIDEO_READAHEAD_SIZE
+#define UNIFROG_MEDIA_VIDEO_READAHEAD_SIZE 524288
+#endif
+#ifndef UNIFROG_MEDIA_VIDEO_READAHEAD_MIN_SIZE
+#define UNIFROG_MEDIA_VIDEO_READAHEAD_MIN_SIZE 131072
+#endif
+#ifndef UNIFROG_MEDIA_AUDIO_MAX_HW_AHEAD_MS
+#define UNIFROG_MEDIA_AUDIO_MAX_HW_AHEAD_MS 2000
+#endif
+#ifndef UNIFROG_MEDIA_VIDEO_MAX_HW_AHEAD_MS
+#define UNIFROG_MEDIA_VIDEO_MAX_HW_AHEAD_MS 3000
+#endif
+#ifndef UNIFROG_MEDIA_FILE_SLOW_READ_LOG_MS
+#define UNIFROG_MEDIA_FILE_SLOW_READ_LOG_MS 250
+#endif
 /* Decoder rings are live after START; large leads play as startup bursts. */
 #define MEDIA_VIDEO_FEED_LEAD_MS ((unsigned)UNIFROG_MEDIA_VIDEO_FEED_LEAD_MS)
 #define MEDIA_AUDIO_FEED_LEAD_MS ((unsigned)UNIFROG_MEDIA_AUDIO_FEED_LEAD_MS)
+#define MEDIA_VIDEO_MAX_HW_AHEAD_MS \
+   ((unsigned)UNIFROG_MEDIA_VIDEO_MAX_HW_AHEAD_MS)
+#define MEDIA_AUDIO_MAX_HW_AHEAD_MS \
+   ((unsigned)UNIFROG_MEDIA_AUDIO_MAX_HW_AHEAD_MS)
+#define MEDIA_HW_AHEAD_POLL_US 10000u
+#define MEDIA_HW_AHEAD_LOG_MS 500u
 #define MEDIA_AUDIO_PACE_MAX_SLEEP_MS 100u
 #define MEDIA_AUDIO_VOLUME 75u
 #define MEDIA_WAV_CHUNK_FRAMES 512u
@@ -114,6 +135,12 @@
    ((size_t)UNIFROG_MEDIA_FILE_READAHEAD_SIZE)
 #define MEDIA_FILE_READAHEAD_MIN_SIZE \
    ((size_t)UNIFROG_MEDIA_FILE_READAHEAD_MIN_SIZE)
+#define MEDIA_VIDEO_READAHEAD_SIZE \
+   ((size_t)UNIFROG_MEDIA_VIDEO_READAHEAD_SIZE)
+#define MEDIA_VIDEO_READAHEAD_MIN_SIZE \
+   ((size_t)UNIFROG_MEDIA_VIDEO_READAHEAD_MIN_SIZE)
+#define MEDIA_FILE_SLOW_READ_LOG_MS \
+   ((unsigned)UNIFROG_MEDIA_FILE_SLOW_READ_LOG_MS)
 #define MEDIA_SW_AUDIO_VIDEO_LEAD_MS 60u
 #define MEDIA_SW_AUDIO_MAX_WAIT_MS 160u
 #define MEDIA_SW_AUDIO_WAIT_POLL_US 2000u
@@ -166,6 +193,9 @@ struct media_audio_pacer {
 
 static void media_audio_pacer_wait(struct media_audio_pacer *pacer,
    const AVPacket *packet, AVRational time_base);
+static void media_wait_hardware_ahead(const char *kind, int fd, int video,
+   const struct media_audio_pacer *pacer, unsigned max_ahead_ms,
+   const char *path);
 
 struct media_auddec_variant {
    const char *label;
@@ -188,6 +218,8 @@ struct media_raw_auddec_variant {
 struct media_buffered_input {
    int fd;
    AVIOContext *avio;
+   const char *tag;
+   const char *path;
    size_t buffer_size;
    uint8_t *readahead;
    size_t readahead_size;
@@ -204,11 +236,16 @@ struct media_buffered_input {
    uint64_t disk_read_bytes;
    uint64_t readahead_hits;
    uint64_t readahead_hit_bytes;
+   uint64_t readahead_fills;
+   uint64_t slow_disk_reads;
+   uint64_t disk_read_ms_total;
    uint32_t short_reads;
    uint32_t seek_calls;
    int max_request;
    int max_read;
    int max_disk_read;
+   uint32_t max_disk_read_ms;
+   int64_t max_disk_read_pos;
    int last_errno;
 };
 
@@ -497,14 +534,16 @@ static uint8_t *media_alloc_file_buffer(size_t *size_out)
    return NULL;
 }
 
-static uint8_t *media_alloc_readahead_buffer(size_t *size_out)
+static uint8_t *media_alloc_readahead_buffer(size_t *size_out, size_t want,
+   size_t min_size)
 {
-   size_t size = MEDIA_FILE_READAHEAD_SIZE;
-   size_t min_size = MEDIA_FILE_READAHEAD_MIN_SIZE;
+   size_t size = want;
    uint8_t *buffer = NULL;
 
    if (size_out)
       *size_out = 0;
+   if (size == 0)
+      return NULL;
    if (size < min_size)
       min_size = size;
    while (size >= min_size && size > 0) {
@@ -517,6 +556,35 @@ static uint8_t *media_alloc_readahead_buffer(size_t *size_out)
       size /= 2u;
    }
    return NULL;
+}
+
+static int media_buffered_tag_is_video(const char *tag)
+{
+   return tag && strstr(tag, "video") != NULL;
+}
+
+static void media_buffered_record_disk_read(struct media_buffered_input *input,
+   int64_t pos, ssize_t got, uint32_t elapsed_ms, size_t want)
+{
+   if (!input)
+      return;
+   input->disk_read_calls++;
+   input->disk_read_ms_total += elapsed_ms;
+   if (got > input->max_disk_read)
+      input->max_disk_read = (int)got;
+   if (elapsed_ms > input->max_disk_read_ms) {
+      input->max_disk_read_ms = elapsed_ms;
+      input->max_disk_read_pos = pos;
+   }
+   if (elapsed_ms >= MEDIA_FILE_SLOW_READ_LOG_MS) {
+      input->slow_disk_reads++;
+      printf("unifrog media buffered_io slow_read tag=%s ms=%lu pos=%lld want=%lu got=%ld disk_reads=%llu seeks=%lu path=%s\n",
+         input->tag ? input->tag : "", (unsigned long)elapsed_ms,
+         (long long)pos, (unsigned long)want, (long)got,
+         (unsigned long long)input->disk_read_calls,
+         (unsigned long)input->seek_calls,
+         input->path ? input->path : "");
+   }
 }
 
 static void media_buffered_input_invalidate_cache(
@@ -551,13 +619,20 @@ static int media_buffered_read_direct(struct media_buffered_input *input,
 {
    int ret;
    ssize_t got;
+   int64_t pos;
+   uint32_t start_ms;
+   uint32_t elapsed_ms;
 
    ret = media_buffered_sync_fd(input);
    if (ret < 0)
       return ret;
+   pos = input->logical_pos;
+   start_ms = unifrog_perf_time_ms();
    errno = 0;
    got = read(input->fd, buf, (size_t)buf_size);
-   input->disk_read_calls++;
+   elapsed_ms = unifrog_perf_time_ms() - start_ms;
+   media_buffered_record_disk_read(input, pos, got, elapsed_ms,
+      (size_t)buf_size);
    if (got < 0) {
       input->last_errno = errno;
       return AVERROR(errno ? errno : EIO);
@@ -565,8 +640,6 @@ static int media_buffered_read_direct(struct media_buffered_input *input,
    if (got == 0)
       return AVERROR_EOF;
    input->disk_read_bytes += (uint64_t)got;
-   if (got > input->max_disk_read)
-      input->max_disk_read = (int)got;
    input->logical_pos += (int64_t)got;
    input->fd_pos += (int64_t)got;
    return (int)got;
@@ -576,15 +649,22 @@ static int media_buffered_fill_readahead(struct media_buffered_input *input)
 {
    int ret;
    ssize_t got;
+   int64_t pos;
+   uint32_t start_ms;
+   uint32_t elapsed_ms;
 
    if (!input || !input->readahead || input->readahead_size == 0)
       return AVERROR(EINVAL);
    ret = media_buffered_sync_fd(input);
    if (ret < 0)
       return ret;
+   pos = input->logical_pos;
+   start_ms = unifrog_perf_time_ms();
    errno = 0;
    got = read(input->fd, input->readahead, input->readahead_size);
-   input->disk_read_calls++;
+   elapsed_ms = unifrog_perf_time_ms() - start_ms;
+   media_buffered_record_disk_read(input, pos, got, elapsed_ms,
+      input->readahead_size);
    input->cache_start = input->logical_pos;
    input->cache_size = 0;
    if (got < 0) {
@@ -594,10 +674,9 @@ static int media_buffered_fill_readahead(struct media_buffered_input *input)
    if (got == 0)
       return AVERROR_EOF;
    input->disk_read_bytes += (uint64_t)got;
-   if (got > input->max_disk_read)
-      input->max_disk_read = (int)got;
    input->fd_pos += (int64_t)got;
    input->cache_size = (size_t)got;
+   input->readahead_fills++;
    return 0;
 }
 
@@ -732,17 +811,28 @@ static int media_buffered_input_enable_readahead(
 {
    uint64_t cover_ms = 0;
    int64_t bit_rate = fmt ? fmt->bit_rate : 0;
+   int video = media_buffered_tag_is_video(tag);
+   size_t want = video ? MEDIA_VIDEO_READAHEAD_SIZE :
+      MEDIA_FILE_READAHEAD_SIZE;
+   size_t min_size = video ? MEDIA_VIDEO_READAHEAD_MIN_SIZE :
+      MEDIA_FILE_READAHEAD_MIN_SIZE;
 
    if (!input || input->fd < 0)
       return -1;
    if (input->readahead_enabled)
       return 0;
-   input->readahead = media_alloc_readahead_buffer(&input->readahead_size);
+   if (want == 0) {
+      printf("unifrog media buffered_io readahead disabled tag=%s mode=%s path=%s\n",
+         tag ? tag : "", video ? "video" : "audio", path ? path : "");
+      return -1;
+   }
+   input->readahead = media_alloc_readahead_buffer(&input->readahead_size,
+      want, min_size);
    if (!input->readahead) {
-      printf("unifrog media buffered_io readahead alloc_failed tag=%s path=%s want=%lu min=%lu\n",
-         tag ? tag : "", path ? path : "",
-         (unsigned long)MEDIA_FILE_READAHEAD_SIZE,
-         (unsigned long)MEDIA_FILE_READAHEAD_MIN_SIZE);
+      printf("unifrog media buffered_io readahead alloc_failed tag=%s mode=%s path=%s want=%lu min=%lu\n",
+         tag ? tag : "", video ? "video" : "audio", path ? path : "",
+         (unsigned long)want,
+         (unsigned long)min_size);
       return -1;
    }
    input->readahead_enabled = 1;
@@ -750,9 +840,10 @@ static int media_buffered_input_enable_readahead(
    if (bit_rate > 0)
       cover_ms = ((uint64_t)input->readahead_size * 8000ull) /
          (uint64_t)bit_rate;
-   printf("unifrog media buffered_io readahead enabled tag=%s size=%lu min=%lu bitrate=%lld cover_ms=%llu logical=%lld fd_pos=%lld path=%s\n",
-      tag ? tag : "", (unsigned long)input->readahead_size,
-      (unsigned long)MEDIA_FILE_READAHEAD_MIN_SIZE, (long long)bit_rate,
+   printf("unifrog media buffered_io readahead enabled tag=%s mode=%s size=%lu want=%lu min=%lu bitrate=%lld cover_ms=%llu logical=%lld fd_pos=%lld path=%s\n",
+      tag ? tag : "", video ? "video" : "audio",
+      (unsigned long)input->readahead_size, (unsigned long)want,
+      (unsigned long)min_size, (long long)bit_rate,
       (unsigned long long)cover_ms, (long long)input->logical_pos,
       (long long)input->fd_pos, path ? path : "");
    return 0;
@@ -773,6 +864,8 @@ static int media_buffered_input_open(AVFormatContext **fmt_out,
       return AVERROR(EINVAL);
    memset(input, 0, sizeof(*input));
    input->fd = -1;
+   input->tag = tag;
+   input->path = path;
    input->file_size = -1;
    input->cache_start = 0;
    input->logical_pos = 0;
@@ -852,7 +945,7 @@ static void media_buffered_input_close(struct media_buffered_input *input,
 {
    if (!input || (input->fd < 0 && !input->avio))
       return;
-   printf("unifrog media buffered_io close tag=%s fd=%d buffer=%lu readahead=%lu file=%lld reads=%llu bytes=%llu requested=%llu disk_reads=%llu disk_bytes=%llu hits=%llu hit_bytes=%llu max_req=%d max_read=%d max_disk=%d short=%lu seeks=%lu logical=%lld fd_pos=%lld errno=%d path=%s\n",
+   printf("unifrog media buffered_io close tag=%s fd=%d buffer=%lu readahead=%lu file=%lld reads=%llu bytes=%llu requested=%llu disk_reads=%llu disk_bytes=%llu hits=%llu hit_bytes=%llu fills=%llu slow=%llu disk_ms=%llu max_disk_ms=%lu max_disk_pos=%lld max_req=%d max_read=%d max_disk=%d short=%lu seeks=%lu logical=%lld fd_pos=%lld errno=%d path=%s\n",
       tag ? tag : "", input->fd, (unsigned long)input->buffer_size,
       (unsigned long)input->readahead_size, (long long)input->file_size,
       (unsigned long long)input->read_calls,
@@ -861,7 +954,12 @@ static void media_buffered_input_close(struct media_buffered_input *input,
       (unsigned long long)input->disk_read_calls,
       (unsigned long long)input->disk_read_bytes,
       (unsigned long long)input->readahead_hits,
-      (unsigned long long)input->readahead_hit_bytes, input->max_request,
+      (unsigned long long)input->readahead_hit_bytes,
+      (unsigned long long)input->readahead_fills,
+      (unsigned long long)input->slow_disk_reads,
+      (unsigned long long)input->disk_read_ms_total,
+      (unsigned long)input->max_disk_read_ms,
+      (long long)input->max_disk_read_pos, input->max_request,
       input->max_read, input->max_disk_read,
       (unsigned long)input->short_reads, (unsigned long)input->seek_calls,
       (long long)input->logical_pos, (long long)input->fd_pos,
@@ -1946,10 +2044,10 @@ static int media_play_native_audio_compressed(const char *path)
    packet = av_packet_alloc();
    if (!packet)
       goto out;
-   printf("unifrog media auddec play stream=%d timeout=%u feed_lead_ms=%u tb=%d/%d path=%s\n",
+   printf("unifrog media auddec play stream=%d timeout=%u feed_lead_ms=%u max_hw_ahead_ms=%u tb=%d/%d path=%s\n",
       stream, auddec.write_timeout_ms, MEDIA_AUDIO_FEED_LEAD_MS,
-      fmt->streams[stream]->time_base.num, fmt->streams[stream]->time_base.den,
-      path);
+      MEDIA_AUDIO_MAX_HW_AHEAD_MS, fmt->streams[stream]->time_base.num,
+      fmt->streams[stream]->time_base.den, path);
    while (!media_exit_down()) {
       int read_ret = av_read_frame(fmt, packet);
 
@@ -1960,6 +2058,8 @@ static int media_play_native_audio_compressed(const char *path)
       if (packet->stream_index == stream) {
          media_audio_pacer_wait(&pacer, packet,
             fmt->streams[stream]->time_base);
+         media_wait_hardware_ahead("auddec", auddec.fd, 0, &pacer,
+            MEDIA_AUDIO_MAX_HW_AHEAD_MS, path);
          if (media_auddec_send_packet(&auddec, packet) != 0) {
             printf("unifrog media auddec write failed packets=%lu path=%s\n",
                (unsigned long)auddec.packets, path);
@@ -2197,6 +2297,57 @@ static void media_audio_pacer_wait(struct media_audio_pacer *pacer,
       MEDIA_AUDIO_FEED_LEAD_MS);
 }
 
+static void media_wait_hardware_ahead(const char *kind, int fd, int video,
+   const struct media_audio_pacer *pacer, unsigned max_ahead_ms,
+   const char *path)
+{
+   uint32_t start_ms;
+   uint32_t last_log_ms = 0;
+   int logged = 0;
+
+   if (fd < 0 || !pacer || !pacer->started || max_ahead_ms == 0)
+      return;
+   start_ms = unifrog_perf_time_ms();
+   for (;;) {
+      int64_t cur_time = -1;
+      int64_t ahead_ms;
+      uint32_t now_ms;
+      uint32_t waited_ms;
+
+      errno = 0;
+      if (ioctl(fd, video ? VIDDEC_GET_CUR_TIME : AUDDEC_GET_CUR_TIME,
+            &cur_time) != 0 || cur_time < 0)
+         return;
+      ahead_ms = pacer->next_ms - cur_time;
+      if (ahead_ms <= (int64_t)max_ahead_ms)
+         break;
+      if (media_exit_down())
+         break;
+      now_ms = unifrog_perf_time_ms();
+      waited_ms = now_ms - start_ms;
+      if (!logged || now_ms - last_log_ms >= MEDIA_HW_AHEAD_LOG_MS) {
+         printf("unifrog media hw_ahead wait kind=%s ahead=%lld max=%u clock=%lld feed=%lld waited=%lu path=%s\n",
+            kind ? kind : "?", (long long)ahead_ms, max_ahead_ms,
+            (long long)cur_time, (long long)pacer->next_ms,
+            (unsigned long)waited_ms, path ? path : "");
+         logged = 1;
+         last_log_ms = now_ms;
+      }
+      usleep(MEDIA_HW_AHEAD_POLL_US);
+   }
+   if (logged) {
+      int64_t cur_time = -1;
+      uint32_t waited_ms = unifrog_perf_time_ms() - start_ms;
+
+      (void)ioctl(fd, video ? VIDDEC_GET_CUR_TIME : AUDDEC_GET_CUR_TIME,
+         &cur_time);
+      printf("unifrog media hw_ahead done kind=%s clock=%lld feed=%lld ahead=%lld waited=%lu path=%s\n",
+         kind ? kind : "?", (long long)cur_time, (long long)pacer->next_ms,
+         cur_time >= 0 ? (long long)(pacer->next_ms - cur_time) : -1ll,
+         (unsigned long)waited_ms, path ? path : "");
+   }
+}
+
 static int media_aac_sample_rate_index(unsigned sample_rate)
 {
    static const unsigned rates[] = {
@@ -2280,11 +2431,15 @@ static int media_write_all_timeout(int fd, const void *data, size_t size,
    while (written < size) {
       ssize_t ret = write(fd, p + written, size - written);
 
-      if (ret < 0) {
-         if (errno == EINTR)
-            continue;
-         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EBUSY) {
-            uint32_t elapsed = unifrog_perf_time_ms() - start_ms;
+	      if (ret < 0) {
+	         int retry_write = errno == EAGAIN || errno == EWOULDBLOCK ||
+	            errno == EBUSY ||
+	            (errno == EPERM && scope && strcmp(scope, "video") == 0);
+
+	         if (errno == EINTR)
+	            continue;
+	         if (retry_write) {
+	            uint32_t elapsed = unifrog_perf_time_ms() - start_ms;
 
             if (elapsed >= timeout_ms) {
                printf("unifrog media write timeout scope=%s fd=%d size=%lu written=%lu errno=%d retries=%u waited=%lu limit=%u\n",
@@ -4090,9 +4245,10 @@ static int media_play_native_video(const char *path,
    video_freerun = video_sync_mode == AVSYNC_TYPE_FREERUN;
    if (video_freerun && audio_enabled)
       printf("unifrog media native video forcing freerun due to software audio path\n");
-   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d video_feed_lead_ms=%u audio_feed_lead_ms=%u\n",
+   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d video_feed_lead_ms=%u audio_feed_lead_ms=%u video_max_hw_ahead_ms=%u audio_max_hw_ahead_ms=%u\n",
       video_freerun, disable_audio, auddec.fd >= 0, auddec.freerun,
-      audio_enabled, MEDIA_VIDEO_FEED_LEAD_MS, MEDIA_AUDIO_FEED_LEAD_MS);
+      audio_enabled, MEDIA_VIDEO_FEED_LEAD_MS, MEDIA_AUDIO_FEED_LEAD_MS,
+      MEDIA_VIDEO_MAX_HW_AHEAD_MS, MEDIA_AUDIO_MAX_HW_AHEAD_MS);
    packet = av_packet_alloc();
    frame = av_frame_alloc();
    if (!packet || !frame)
@@ -4113,9 +4269,12 @@ static int media_play_native_video(const char *path,
                fmt->streams[video_stream]->time_base, &sw_video_base_ms,
                audio_frames, audio_ctx ? audio_ctx->sample_rate : 0,
                sw_audio_start_ms, path);
-         else
+         else {
             media_video_pacer_wait(&hw_video_pacer, packet,
                fmt->streams[video_stream]->time_base);
+            media_wait_hardware_ahead("viddec", video_fd, 1,
+               &hw_video_pacer, MEDIA_VIDEO_MAX_HW_AHEAD_MS, path);
+         }
          int write_ret = media_video_send_filtered(video_fd, video_bsf,
             packet, fmt->streams[video_stream]->time_base,
             video_freerun,
@@ -4132,6 +4291,8 @@ static int media_play_native_video(const char *path,
          if (!auddec_write_failed) {
             media_audio_pacer_wait(&hw_audio_pacer, packet,
                fmt->streams[audio_stream]->time_base);
+            media_wait_hardware_ahead("native_auddec", auddec.fd, 0,
+               &hw_audio_pacer, MEDIA_AUDIO_MAX_HW_AHEAD_MS, path);
             if (media_auddec_send_packet(&auddec, packet) != 0) {
                struct audio_decore_status status;
                int64_t audio_time = -1;

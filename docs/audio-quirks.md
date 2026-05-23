@@ -84,9 +84,15 @@ or `src/unifrog_media.c`.
   running decoder rings seconds ahead.
 - The hardware feed lead and SD read buffers are build tunables. Use
   `MEDIA_AUDIO_FEED_LEAD_MS`, `MEDIA_VIDEO_FEED_LEAD_MS`,
-  `MEDIA_FILE_BUFFER_SIZE`, and `MEDIA_FILE_READAHEAD_SIZE` in `config.mk` or
-  on the `make` command line when device logs show either `ahead_ms`/`ahead_a`
-  too close to zero or excessive SD reads.
+  `MEDIA_FILE_BUFFER_SIZE`, `MEDIA_FILE_READAHEAD_SIZE`, and
+  `MEDIA_VIDEO_READAHEAD_SIZE` in `config.mk` or on the `make` command line
+  when device logs show either `ahead_ms`/`ahead_a` too close to zero or
+  excessive SD reads.
+- Video and audio hardware queues are also capped against the actual decoder
+  clocks with `MEDIA_VIDEO_MAX_HW_AHEAD_MS` and
+  `MEDIA_AUDIO_MAX_HW_AHEAD_MS`. This prevents a long SD/demux stall from being
+  followed by a large catch-up burst that queues many seconds into `/dev/viddec`
+  or `/dev/auddec`.
 - MP4/M4A AAC must be passed like HCPlayer does: AudioSpecificConfig in
   `audio_config.extra_data`, then raw demuxed AAC access units as ES packets.
   Wrapping those raw MP4 packets in synthetic ADTS headers initialized the
