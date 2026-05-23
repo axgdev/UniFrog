@@ -34,7 +34,7 @@
 #define SYSTEM_AUDIO_VOLUME 65u
 #define UNIFROG_AUDIO_ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #ifndef UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE
-#define UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE 1
+#define UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE 0
 #endif
 #ifndef UNIFROG_AUDIO_GB300_PREFER_SND
 #define UNIFROG_AUDIO_GB300_PREFER_SND 1
@@ -581,6 +581,7 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
    int last_errno = 0;
    static unsigned failure_log_count;
    static unsigned success_log_count;
+   static unsigned mute_transition_log_count;
 
    if (!audio || audio->fd < 0 || !samples || frames == 0)
       return -1;
@@ -605,10 +606,25 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
             break;
          }
       }
-      if (has_signal && audio->muted)
-         (void)unifrog_audio_set_mute(audio, 0);
-      else if (!has_signal && !audio->muted)
-         (void)unifrog_audio_set_mute(audio, 1);
+      if (has_signal && audio->muted) {
+         int mute_ret = unifrog_audio_set_mute(audio, 0);
+
+         if (unifrog_audio_prefers_stereo_output() &&
+             mute_transition_log_count < 12) {
+            mute_transition_log_count++;
+            printf("unifrog audio signal_gate backend=snd fd=%d action=unmute ret=%d frames=%u ch=%u\n",
+               audio->fd, mute_ret, frames, channels);
+         }
+      } else if (!has_signal && !audio->muted) {
+         int mute_ret = unifrog_audio_set_mute(audio, 1);
+
+         if (unifrog_audio_prefers_stereo_output() &&
+             mute_transition_log_count < 12) {
+            mute_transition_log_count++;
+            printf("unifrog audio signal_gate backend=snd fd=%d action=mute ret=%d frames=%u ch=%u\n",
+               audio->fd, mute_ret, frames, channels);
+         }
+      }
    }
 
    pollfd.fd = audio->fd;

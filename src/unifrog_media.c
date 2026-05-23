@@ -164,6 +164,9 @@
 #ifndef UNIFROG_MEDIA_RESET_VIDDEC_ON_FAIL
 #define UNIFROG_MEDIA_RESET_VIDDEC_ON_FAIL 1
 #endif
+#ifndef UNIFROG_MEDIA_GB300_AUDDEC_PROBE_ONCE
+#define UNIFROG_MEDIA_GB300_AUDDEC_PROBE_ONCE 1
+#endif
 /* Decoder rings are live after START; large leads play as startup bursts. */
 #define MEDIA_VIDEO_FEED_LEAD_MS ((unsigned)UNIFROG_MEDIA_VIDEO_FEED_LEAD_MS)
 #define MEDIA_AUDIO_FEED_LEAD_MS ((unsigned)UNIFROG_MEDIA_AUDIO_FEED_LEAD_MS)
@@ -188,6 +191,11 @@
 #define MEDIA_VIDEO_AUDIO_PERIOD_BYTES 2048u
 #define MEDIA_VIDEO_AUDIO_PERIODS 16u
 #define MEDIA_AUDIO_KSHM_SIZE 0x000a0000u
+#define MEDIA_GB300_AUDDEC_PROBE_RATE 44100u
+#define MEDIA_GB300_AUDDEC_PROBE_CHANNELS 2u
+#define MEDIA_GB300_AUDDEC_PROBE_CHUNK_FRAMES 2048u
+#define MEDIA_GB300_AUDDEC_PROBE_PACKETS 4u
+#define MEDIA_GB300_AUDDEC_PROBE_PAUSE_US 280000u
 #define MEDIA_VIDEO_KSHM_SIZE 0x01000000u
 #define MEDIA_VIDEO_LOWRES_KSHM_SIZE \
    ((unsigned)UNIFROG_MEDIA_VIDEO_LOWRES_KSHM_SIZE)
@@ -548,6 +556,7 @@ static void media_auddec_log_packet_status(struct media_auddec *auddec,
 static void media_auddec_finish(struct media_auddec *auddec,
    unsigned timeout_ms);
 static void media_auddec_close(struct media_auddec *auddec);
+static void media_run_gb300_auddec_probe_once(const char *tag);
 static int media_video_wait_write_space(int fd, uint32_t need,
    unsigned packet_index);
 
@@ -4298,6 +4307,257 @@ static int media_auddec_send_raw(struct media_auddec *auddec,
    return 0;
 }
 
+struct media_gb300_auddec_probe_variant {
+   const char *label;
+   unsigned sample_rate;
+   uint32_t snd_devs;
+   int enable_audsink;
+   int audio_flush_thres;
+   int kshm_size;
+   int gate_before_init;
+   int controls_before_start;
+};
+
+static int16_t
+   media_gb300_auddec_probe_pcm[MEDIA_GB300_AUDDEC_PROBE_CHUNK_FRAMES *
+      MEDIA_GB300_AUDDEC_PROBE_CHANNELS];
+
+static void media_fill_gb300_auddec_probe_pcm(unsigned variant,
+   unsigned packet)
+{
+   unsigned half_period = 18u + (variant % 7u) * 5u;
+   int amplitude = 5200 + (int)(variant % 5u) * 900;
+   unsigned base = packet * MEDIA_GB300_AUDDEC_PROBE_CHUNK_FRAMES;
+
+   for (unsigned i = 0; i < MEDIA_GB300_AUDDEC_PROBE_CHUNK_FRAMES; i++) {
+      int16_t sample = (((base + i) / half_period) & 1u) ?
+         (int16_t)amplitude : (int16_t)-amplitude;
+
+      media_gb300_auddec_probe_pcm[i * 2u] = sample;
+      media_gb300_auddec_probe_pcm[i * 2u + 1u] = sample;
+   }
+}
+
+static void media_gb300_auddec_probe_controls(int fd, const char *label,
+   const char *stage)
+{
+   audio_channel_select_t channel = AUDIO_STEREO;
+   uint8_t volume = 90u;
+   unsigned int mute = 0;
+   int channel_ret;
+   int channel_errno;
+   int volume_ret;
+   int volume_errno;
+   int mute_ret;
+   int mute_errno;
+
+   errno = 0;
+   channel_ret = ioctl(fd, AUDIO_CHANNEL_SELECT, &channel);
+   channel_errno = errno;
+   errno = 0;
+   volume_ret = ioctl(fd, AUDIO_SET_VOLUME, &volume);
+   volume_errno = errno;
+   errno = 0;
+   mute_ret = ioctl(fd, AUDIO_SET_MUTE, &mute);
+   mute_errno = errno;
+   printf("unifrog media gb300_auddec_probe controls label=%s stage=%s fd=%d channel=%u channel_ret=%d channel_errno=%d volume=%u volume_ret=%d volume_errno=%d mute=%u mute_ret=%d mute_errno=%d\n",
+      label ? label : "?", stage ? stage : "?", fd, (unsigned)channel,
+      channel_ret, channel_errno, (unsigned)volume, volume_ret, volume_errno,
+      mute, mute_ret, mute_errno);
+}
+
+static void media_gb300_auddec_probe_status(int fd, const char *label,
+   const char *stage)
+{
+   struct audio_decore_status dec_status;
+   audio_status_t audio_status;
+   int64_t cur_time = -1;
+   unsigned int underruns = 0;
+   int dec_ret;
+   int dec_errno;
+   int audio_ret;
+   int audio_errno;
+   int time_ret;
+   int time_errno;
+   int underrun_ret;
+   int underrun_errno;
+
+   memset(&dec_status, 0, sizeof(dec_status));
+   memset(&audio_status, 0, sizeof(audio_status));
+   errno = 0;
+   dec_ret = ioctl(fd, AUDDEC_GET_STATUS, &dec_status);
+   dec_errno = errno;
+   errno = 0;
+   audio_ret = ioctl(fd, AUDIO_GET_STATUS, &audio_status);
+   audio_errno = errno;
+   errno = 0;
+   time_ret = ioctl(fd, AUDDEC_GET_CUR_TIME, &cur_time);
+   time_errno = errno;
+   errno = 0;
+   underrun_ret = ioctl(fd, AUDIO_GET_UNDERRUN_TIMES, &underruns);
+   underrun_errno = errno;
+   printf("unifrog media gb300_auddec_probe status label=%s stage=%s fd=%d dec=%d dec_errno=%d decoded=%lu rate=%lu ch=%u bits=%u hdr=%u/%u audio=%d audio_errno=%d play=%u mute=%u chsel=%u sync=%u bypass=%u time=%lld time_ret=%d time_errno=%d underruns=%lu underrun_ret=%d underrun_errno=%d\n",
+      label ? label : "?", stage ? stage : "?", fd, dec_ret, dec_errno,
+      (unsigned long)dec_status.frames_decoded,
+      (unsigned long)dec_status.sample_rate, dec_status.channels,
+      dec_status.bits_per_sample, dec_status.first_header_got,
+      dec_status.first_header_parsed, audio_ret, audio_errno,
+      (unsigned)audio_status.play_state, (unsigned)audio_status.mute_state,
+      (unsigned)audio_status.channel_select,
+      (unsigned)audio_status.AV_sync_state,
+      (unsigned)audio_status.bypass_mode, (long long)cur_time, time_ret,
+      time_errno, (unsigned long)underruns, underrun_ret, underrun_errno);
+}
+
+static int media_gb300_auddec_probe_variant(unsigned index,
+   const struct media_gb300_auddec_probe_variant *variant)
+{
+   struct media_auddec auddec;
+   struct audio_config cfg;
+   int fd;
+   int init_ret = -1;
+   int init_errno = 0;
+   int start_ret = -1;
+   int start_errno = 0;
+   int send_failed = 0;
+   unsigned sample_rate = variant && variant->sample_rate ?
+      variant->sample_rate : MEDIA_GB300_AUDDEC_PROBE_RATE;
+   int32_t chunk_ms = (int32_t)((MEDIA_GB300_AUDDEC_PROBE_CHUNK_FRAMES *
+      1000u) / sample_rate);
+
+   if (!variant)
+      return -1;
+   if (variant->gate_before_init)
+      unifrog_audio_set_system_output_enabled(1);
+   fd = open("/dev/auddec", O_RDWR);
+   if (fd < 0) {
+      printf("unifrog media gb300_auddec_probe open label=%s idx=%u fd=-1 errno=%d\n",
+         variant->label, index, errno);
+      return -1;
+   }
+
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.codec_id = HC_AVCODEC_ID_PCM_S16LE;
+   cfg.sync_mode = AVSYNC_TYPE_FREERUN;
+   cfg.bits_per_coded_sample = 16u;
+   cfg.channels = MEDIA_GB300_AUDDEC_PROBE_CHANNELS;
+   cfg.sample_rate = sample_rate;
+   cfg.bit_rate = sample_rate *
+      MEDIA_GB300_AUDDEC_PROBE_CHANNELS * 16u;
+   cfg.block_align = MEDIA_GB300_AUDDEC_PROBE_CHANNELS *
+      (16u / 8u);
+   cfg.channel_layout = AV_CH_LAYOUT_STEREO;
+   cfg.snd_devs = variant->snd_devs;
+   cfg.enable_audsink = variant->enable_audsink;
+   cfg.audio_flush_thres = variant->audio_flush_thres;
+   cfg.kshm_size = variant->kshm_size;
+   cfg.buffering_start = MEDIA_AUDIO_BUFFERING_START_MS;
+   cfg.buffering_end = MEDIA_AUDIO_BUFFERING_END_MS;
+
+   errno = 0;
+   init_ret = ioctl(fd, AUDDEC_INIT, &cfg);
+   init_errno = errno;
+   if (init_ret == 0 && variant->controls_before_start)
+      media_gb300_auddec_probe_controls(fd, variant->label, "before_start");
+   errno = 0;
+   start_ret = init_ret == 0 ? ioctl(fd, AUDDEC_START, 0) : -1;
+   start_errno = errno;
+   printf("unifrog media gb300_auddec_probe init label=%s idx=%u fd=%d init=%d init_errno=%d start=%d start_errno=%d snd=0x%lx audsink=%d flush=%d kshm=%d gate_pre=%d controls_pre=%d rate=%u ch=%u bits=%u block=%u bitrate=%lu\n",
+      variant->label, index, fd, init_ret, init_errno, start_ret,
+      start_errno, (unsigned long)cfg.snd_devs, cfg.enable_audsink,
+      cfg.audio_flush_thres, cfg.kshm_size, variant->gate_before_init,
+      variant->controls_before_start, cfg.sample_rate, cfg.channels,
+      cfg.bits_per_coded_sample, cfg.block_align,
+      (unsigned long)cfg.bit_rate);
+   if (init_ret == 0 && start_ret == 0 &&
+       !variant->controls_before_start)
+      media_gb300_auddec_probe_controls(fd, variant->label, "after_start");
+   if (!variant->gate_before_init)
+      unifrog_audio_set_system_output_enabled(1);
+   unifrog_audio_debug_dump(NULL, "gb300_auddec_probe");
+   media_gb300_auddec_probe_status(fd, variant->label, "after_start");
+
+   memset(&auddec, 0, sizeof(auddec));
+   auddec.fd = fd;
+   auddec.stream = 0;
+   auddec.time_base = (AVRational){ 1, 1000 };
+   auddec.freerun = 1;
+   auddec.write_timeout_ms = 1500u;
+   if (init_ret == 0 && start_ret == 0) {
+      for (unsigned packet = 0;
+           packet < MEDIA_GB300_AUDDEC_PROBE_PACKETS; packet++) {
+         int32_t pts = (int32_t)(packet * (unsigned)chunk_ms);
+
+         media_fill_gb300_auddec_probe_pcm(index, packet);
+         if (media_auddec_send_raw(&auddec,
+             (const uint8_t *)media_gb300_auddec_probe_pcm,
+             sizeof(media_gb300_auddec_probe_pcm), pts, chunk_ms) != 0) {
+            send_failed = 1;
+            break;
+         }
+         usleep(12000);
+      }
+      media_gb300_auddec_probe_status(fd, variant->label, "after_feed");
+      usleep(MEDIA_GB300_AUDDEC_PROBE_PAUSE_US);
+      media_gb300_auddec_probe_status(fd, variant->label, "after_pause");
+      media_auddec_send_eos(&auddec);
+   }
+
+   close(fd);
+   unifrog_audio_set_system_output_enabled(0);
+   usleep(80000);
+   printf("unifrog media gb300_auddec_probe done label=%s idx=%u fd=%d packets=%lu send_failed=%d\n",
+      variant->label, index, fd, (unsigned long)auddec.packets,
+      send_failed);
+   return init_ret == 0 && start_ret == 0 && !send_failed ? 0 : -1;
+}
+
+static void media_run_gb300_auddec_probe_once(const char *tag)
+{
+   static int done;
+   static int running;
+   static const struct media_gb300_auddec_probe_variant variants[] = {
+      { "i2so_current_after", 44100u, AUDDEV_I2SO, 0, 0,
+         MEDIA_AUDIO_KSHM_SIZE, 0, 0 },
+      { "i2so_gate_before", 44100u, AUDDEV_I2SO, 0, 0,
+         MEDIA_AUDIO_KSHM_SIZE, 1, 0 },
+      { "i2so_controls_before", 44100u, AUDDEV_I2SO, 0, 0,
+         MEDIA_AUDIO_KSHM_SIZE, 0, 1 },
+      { "i2so_audsink_after", 44100u, AUDDEV_I2SO, 1, 0,
+         MEDIA_AUDIO_KSHM_SIZE, 0, 0 },
+      { "default_current_after", 44100u, AUDDEV_DEFAULT, 0, 0,
+         MEDIA_AUDIO_KSHM_SIZE, 0, 0 },
+      { "i2so_flush200_after", 44100u, AUDDEV_I2SO, 0, 200,
+         MEDIA_AUDIO_KSHM_SIZE, 0, 0 },
+      { "i2so_48k_after", 48000u, AUDDEV_I2SO, 0, 0,
+         MEDIA_AUDIO_KSHM_SIZE, 0, 0 },
+      { "i2so_spo_after", 44100u, AUDDEV_I2SO | AUDDEV_SPO, 0, 0,
+         MEDIA_AUDIO_KSHM_SIZE, 0, 0 },
+   };
+   unsigned ok = 0;
+
+   if (!UNIFROG_MEDIA_GB300_AUDDEC_PROBE_ONCE ||
+       !unifrog_audio_prefers_stereo_output() || done || running)
+      return;
+   done = 1;
+   running = 1;
+   media_init_drivers_once();
+   printf("unifrog media gb300_auddec_probe begin tag=%s variants=%lu rate=%u chunk_frames=%u packets=%u note=auddec_pcm_not_direct_snd\n",
+      tag ? tag : "?", (unsigned long)ARRAY_SIZE(variants),
+      MEDIA_GB300_AUDDEC_PROBE_RATE,
+      MEDIA_GB300_AUDDEC_PROBE_CHUNK_FRAMES,
+      MEDIA_GB300_AUDDEC_PROBE_PACKETS);
+   unifrog_audio_debug_dump(NULL, "gb300_auddec_probe_begin");
+   for (unsigned i = 0; i < ARRAY_SIZE(variants); i++) {
+      if (media_gb300_auddec_probe_variant(i, &variants[i]) == 0)
+         ok++;
+   }
+   unifrog_audio_debug_dump(NULL, "gb300_auddec_probe_end");
+   printf("unifrog media gb300_auddec_probe end tag=%s ok=%u variants=%lu\n",
+      tag ? tag : "?", ok, (unsigned long)ARRAY_SIZE(variants));
+   running = 0;
+}
+
 static int media_auddec_open_raw(const char *label, uint32_t codec_id,
    unsigned sample_rate, unsigned channels, unsigned bits,
    const uint8_t *extradata, unsigned extradata_size, int sync_mode,
@@ -4346,7 +4606,7 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
    if (!auddec || !codec_id)
       return -1;
    media_init_drivers_once();
-   unifrog_audio_run_gb300_route_probe_once("raw_auddec_open");
+   media_run_gb300_auddec_probe_once("raw_auddec_open");
    memset(auddec, 0, sizeof(*auddec));
    auddec->fd = -1;
    auddec->stream = 0;
@@ -4563,7 +4823,7 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       media_audio_activity_stage(255u, 3u, (uint32_t)par->codec_id);
       return -1;
    }
-   unifrog_audio_run_gb300_route_probe_once("auddec_open");
+   media_run_gb300_auddec_probe_once("auddec_open");
 
    bits = par->bits_per_coded_sample > 0 ?
       (unsigned)par->bits_per_coded_sample : 16u;

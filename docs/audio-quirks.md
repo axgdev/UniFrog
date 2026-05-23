@@ -59,11 +59,16 @@ or `src/unifrog_media.c`.
   cast/sound-test examples: `O_RDWR`, AUDPAD source, `start_threshold=2`, and a
   larger DMA ring. Direct SND remains first on SF2000 because it gives the
   silence gate full PCM visibility and has been the stable route there.
-- On GB300, the first PCM or hardware-auddec audio open runs a one-shot route
-  probe before normal playback. It emits short tagged PCM beeps through every
-  plausible HCRTOS output path and logs `unifrog audio gb300_probe` for each
-  result. This is temporary diagnostic coverage for devices that initialize the
-  decoder successfully but remain silent.
+- On GB300, the broad direct-PCM route probe is now disabled by default. The
+  0128 logs proved that `/dev/sndC0i2so` can drive the speaker through the L15
+  gate; that beep proves only PCM DMA output, not compressed hardware decode.
+- On GB300, the first hardware-auddec open runs a focused `/dev/auddec` PCM
+  probe before normal playback. It feeds a generated `PCM_S16LE` tone through
+  `/dev/auddec` using several route/control orders and logs
+  `unifrog media gb300_auddec_probe`. If one of these tones is audible, the
+  auddec-to-speaker route is known and remaining silence is in compressed
+  packet/config handling. If all are silent while direct SND remains audible,
+  the missing piece is the auddec render path or mute/gate initialization.
 - Audio-only and native video-container audio playback prefer compressed
   packets through `/dev/auddec` when the linked HCRTOS plugin supports the
   codec. Unsupported or failed software-only routes still fall back to
@@ -207,26 +212,28 @@ Use Developer or Storage -> Audio Probe. The important stages are:
 When the loud buzz is fixed, only the faint hardware noise floor should remain
 during silence stages.
 
-GB300 route diagnostics run once per boot on the first GB300 audio open. The
-audible/logged order is:
+GB300 auddec diagnostics run once per boot on the first hardware-auddec open.
+The audible/logged order is:
 
-- `0 audsink_i2so_spo`: `/dev/audsink`, `AUDSINK_SND_DEVBIT_I2SO | AUDSINK_SND_DEVBIT_SPO`.
-- `1 audsink_spo`: `/dev/audsink`, `AUDSINK_SND_DEVBIT_SPO`.
-- `2 audsink_i2so`: `/dev/audsink`, `AUDSINK_SND_DEVBIT_I2SO`.
-- `3 audsink_pcmo`: `/dev/audsink`, `AUDSINK_SND_DEVBIT_PCMO`.
-- `4 audsink_i2so_pcmo`: `/dev/audsink`, `AUDSINK_SND_DEVBIT_I2SO | AUDSINK_SND_DEVBIT_PCMO`.
-- `5 snd_i2so_audpad`: direct `/dev/sndC0i2so`, `SND_PCM_SOURCE_AUDPAD`.
-- `6 snd_spo_i2sodma`: direct `/dev/sndC0spo`, `SND_SPO_SOURCE_I2SODMA`.
-- `7 snd_spo_spodma`: direct `/dev/sndC0spo`, `SND_SPO_SOURCE_SPODMA`.
-- `8 snd_pcmo_audpad`: direct `/dev/sndC0pcmo`, `SND_PCM_SOURCE_AUDPAD`.
-- `9 gb300_gate_probe`: direct `/dev/sndC0i2so` with a louder tone while
-  trying the L15/R07 output levels `both_low`, `l15_low_r07_high`,
-  `l15_high_r07_low`, and `both_high`.
+- `0 i2so_current_after`: current production route, I2SO, internal audsink,
+  gate/control after `AUDDEC_START`.
+- `1 i2so_gate_before`: same route, but system output is unmuted and L15 is
+  opened before `AUDDEC_INIT`.
+- `2 i2so_controls_before`: same route, but auddec channel/volume/mute ioctls
+  run before `AUDDEC_START`.
+- `3 i2so_audsink_after`: I2SO with `enable_audsink=1`.
+- `4 default_current_after`: `snd_devs=0`, relying on the driver default.
+- `5 i2so_flush200_after`: I2SO with the live-capture-style
+  `audio_flush_thres=200`.
+- `6 i2so_48k_after`: I2SO at 48 kHz, matching several HCRTOS cast PCM
+  examples.
+- `7 i2so_spo_after`: I2SO plus SPO mask for comparison only.
 
-If none of the probe routes is audible but the logs show successful init/start,
-focus on the GB300 amp gate, pinmux, or board detection. If a probe route is
-audible but `/dev/auddec` media remains silent, focus on the matching
-`gb300_*` auddec route label and its `snd`/`audsink` settings.
+If direct `/dev/sndC0i2so` beeps are audible but all
+`gb300_auddec_probe` tones are silent, the PCM speaker path is healthy and the
+remaining failure is inside `/dev/auddec` output routing or mute sequencing. If
+one auddec probe tone is audible, use that label as the production GB300
+auddec route before investigating compressed codec packet details.
 
 ## Open Work
 
