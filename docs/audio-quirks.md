@@ -68,10 +68,11 @@ or `src/unifrog_media.c`.
 - Freerun does not mean "drop packet timing." HCLinux/HCRTOS feed examples and
   reverse-engineering of `libffplayer.a` both write packet PTS into `AvPktHd`.
   UniFrog keeps packet PTS/duration for `/dev/auddec` and paces audio-only
-  demuxing with a small live feed-lead window instead of dumping the whole
-  compressed file into the KSHM ring at SD-card speed. Large multi-second leads
-  are not passive prebuffering because `/dev/auddec` is already running; they
-  show up as audible startup bursts.
+  demuxing with a bounded live feed-lead window instead of dumping the whole
+  compressed file into the KSHM ring at SD-card speed. The current 3000 ms lead
+  is still paced against the decoder clock; raising it much further should be
+  treated as a device-tested tuning change, not passive startup prebuffering,
+  because `/dev/auddec` is already running.
 - Do not set `audio_flush_thres` for local file playback. HCRTOS documents that
   field as an audio-master frame-drop threshold when the I2SO DMA queue is
   deeper than the configured milliseconds; it is useful for low-latency live
@@ -84,12 +85,14 @@ or `src/unifrog_media.c`.
   running decoder rings seconds ahead.
 - The hardware feed lead and SD read buffers are build tunables. Use
   `MEDIA_AUDIO_FEED_LEAD_MS`, `MEDIA_VIDEO_FEED_LEAD_MS`,
-  `MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS`,
   `MEDIA_FILE_BUFFER_SIZE`, `MEDIA_FILE_READAHEAD_SIZE`, and
   `MEDIA_VIDEO_READAHEAD_SIZE`/`MEDIA_VIDEO_READAHEAD_SLOTS` in `config.mk` or
   on the `make` command line when device logs show either
-  `ahead_ms`/`ahead_a` too close to zero or excessive SD reads. Video readahead
-  is a small multi-window cache with a bounded startup prefill. Native video
+  `ahead_ms`/`ahead_a` too close to zero or excessive SD reads. The default
+  hardware-audio feed lead is now one global `3000 ms` value for audio-only and
+  all video resolutions; the audio payload is small enough that this is simpler
+  and more robust than resolution-specific audio pacing. Video readahead is a
+  small multi-window cache with a bounded startup prefill. Native video
   allocates that cache after the audio/video decoder KSHM setup so it cannot
   starve hardware decode. Low-resolution video also uses a smaller video KSHM
   ring via `MEDIA_VIDEO_LOWRES_KSHM_SIZE` to leave heap for that cache. For

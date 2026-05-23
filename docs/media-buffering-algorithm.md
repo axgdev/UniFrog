@@ -99,11 +99,12 @@ The default uses several medium windows:
   containers have higher byte density per second and more seek pressure.
 - Hardware decoder ahead is still bounded so a long SD stall cannot be followed
   by a many-second packet dump into `/dev/auddec` or `/dev/viddec`.
-- Low-resolution video gets a slightly deeper audio feed lead by default
-  (`MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS=1500`). These streams have the same
-  packet cadence as higher resolutions but much less SD work per packet, so the
-  demux loop can run audio too close to the hardware clock unless the audio
-  side gets extra cushion.
+- Audio uses one global hardware feed lead for audio-only and all video
+  resolutions (`MEDIA_AUDIO_FEED_LEAD_MS=3000`). The 0120 logs showed 240p and
+  360p stutter with clean SD counters but low `ahead_a`, so the simpler robust
+  policy is to keep a conservative audio cushion everywhere rather than
+  carrying resolution-specific audio pacing. The separate hardware-ahead cap
+  still prevents an SD stall from turning into an unbounded packet dump.
 
 The linked HCRTOS examples and `ffplayer` headers also point to decoder-side
 buffer thresholds. UniFrog now uses `500/3000 ms` audio/video decoder buffering
@@ -120,9 +121,8 @@ Set these in `config.mk` or on the `make` command line:
 - `MEDIA_VIDEO_LOWRES_KSHM_SIZE`: video decoder compressed KSHM ring size used
   for streams at or below 640x360. The default is 8 MiB; high-resolution streams
   still use the 16 MiB ring.
-- `MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS`: hardware-audio feed lead used only
-  for low-resolution video. The default is 1500 ms and is clamped so it never
-  reduces the normal `MEDIA_AUDIO_FEED_LEAD_MS` value.
+- `MEDIA_AUDIO_FEED_LEAD_MS`: hardware-audio feed lead used by audio-only and
+  native video playback. The default is 3000 ms.
 - `MEDIA_VIDEO_PREFILL_TARGET_MS`: target media time for startup prefill.
 - `MEDIA_VIDEO_PREFILL_MIN_BYTES` and `MEDIA_VIDEO_PREFILL_MAX_BYTES`: clamp the
   startup prefill size so low-bitrate clips do not under-buffer and slow cards
@@ -139,6 +139,8 @@ Set these in `config.mk` or on the `make` command line:
   buffering thresholds passed to `/dev/viddec`.
 - `MEDIA_AUDIO_BUFFERING_START_MS` and `MEDIA_AUDIO_BUFFERING_END_MS`: decoder
   buffering thresholds passed to `/dev/auddec`.
+- `MEDIA_PROGRESS_OVERLAY`: set to `0` to disable the framebuffer progress
+  meter and seek overlay while keeping hardware playback enabled.
 - `MEDIA_FILE_SLOW_READ_LOG_MS`: threshold for logging slow physical reads.
 
 Practical tuning rules:
@@ -150,8 +152,8 @@ Practical tuning rules:
 - If startup stutter remains but mid-play is smooth, increase
   `MEDIA_VIDEO_PREFILL_MAX_BYTES` first.
 - If low-resolution video has clean `slow=0` cache close stats but monitor
-  lines show `ahead_a` approaching zero, increase
-  `MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS` before increasing SD cache sizes.
+  lines show `ahead_a` approaching zero, increase `MEDIA_AUDIO_FEED_LEAD_MS`
+  before increasing SD cache sizes.
 - If a card is fast and users prefer stutter-free small videos over fast start,
   set `MEDIA_VIDEO_PRELOAD_MAX_BYTES` to a safe cap such as `16777216`.
 - If `VIDDEC_INIT` returns `errno=12`, do not increase the startup cache before
@@ -175,12 +177,12 @@ For a default build, native video should log something like:
 unifrog media buffered_io readahead enabled tag=native_video mode=video preload=0 slot=524288 total=8388608 slots=16 ...
 ```
 
-Low-resolution H.264 should also show the selected dynamic decoder and audio
-feed profile:
+Low-resolution H.264 should also show the selected dynamic decoder KSHM policy
+while using the same audio feed lead as every other resolution:
 
 ```text
 unifrog media native video open_viddec begin ... 426x240 ... kshm=8388608 kshm_policy=lowres ...
-unifrog media native video clock ... audio_feed_lead_ms=1500 audio_feed_profile=lowres ...
+unifrog media native video clock ... audio_feed_lead_ms=3000 ... overlay=1 ...
 ```
 
 The close line now includes cache-efficiency counters:
@@ -215,3 +217,17 @@ unifrog media hw_ahead done kind=... clock=... feed=... ahead=...
 
 Occasional `hw_ahead` waits are normal. Constant waits plus audio/video stutter
 mean the feeder is oscillating between SD stalls and decoder-ring catch-up.
+
+Framebuffer progress and seek controls are logged at phase boundaries:
+
+```text
+unifrog media overlay tag=video ... pos=... dur=...
+unifrog media seek video request cur=... target=...
+unifrog media seek viddec_flush tag=video ...
+unifrog media seek auddec_flush tag=video ...
+unifrog media seek demux tag=video target=...
+```
+
+For audio-only playback, the same contract uses `tag=audio`. The overlay draws
+at most twice per second to avoid turning the framebuffer itself into a playback
+stutter source.

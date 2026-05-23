@@ -106,9 +106,9 @@ For source-level SDK behavior clues, inspect:
   packets unless target logs prove a specific raw-ADTS stream needs it.
 - `/dev/auddec` packets should carry PTS/duration when FFmpeg provides them,
   including freerun audio-only playback. Audio-only file playback should pace
-  packet feeding with a small live feed-lead window. The decoder ring is not a
-  startup prebuffer once `/dev/auddec` has started; large leads are heard as
-  initial fast playback.
+  packet feeding with a bounded live feed-lead window. The decoder ring is not a
+  startup prebuffer once `/dev/auddec` has started; the current 3000 ms lead is
+  paced against the decoder clock, and further increases need device logs.
 - Local file playback should leave `audio_flush_thres` at `0`. That HCRTOS
   field intentionally drops audio frames when the I2SO DMA queue exceeds the
   threshold, so using the live-capture examples' `100-200ms` values can sound
@@ -119,8 +119,8 @@ For source-level SDK behavior clues, inspect:
   The larger SD readahead buffer is the intended jitter absorber for local file
   reads.
 - The current local-file tuning knobs are `MEDIA_AUDIO_FEED_LEAD_MS`,
-  `MEDIA_VIDEO_FEED_LEAD_MS`, `MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS`,
-  `MEDIA_FILE_BUFFER_SIZE`, and `MEDIA_FILE_READAHEAD_SIZE`. Video has its own
+  `MEDIA_VIDEO_FEED_LEAD_MS`, `MEDIA_FILE_BUFFER_SIZE`, and
+  `MEDIA_FILE_READAHEAD_SIZE`. Video has its own
   multi-window cache controlled by `MEDIA_VIDEO_READAHEAD_SIZE` and
   `MEDIA_VIDEO_READAHEAD_SLOTS` because seek-heavy MP4 demuxing alternates
   between active audio/video file regions.
@@ -128,11 +128,13 @@ For source-level SDK behavior clues, inspect:
   full-file preload for small videos is controlled by
   `MEDIA_VIDEO_PRELOAD_MAX_BYTES`. Low-resolution video can also tune
   `MEDIA_VIDEO_LOWRES_KSHM_SIZE` to trade viddec compressed-ring depth for more
-  normal heap available to the SD cache. Set these in `config.mk` for device
-  experiments instead of editing `src/unifrog_media.c` directly. Native video
-  creates these caches after the hardware decoder KSHM allocations, so cache
-  size changes should not prevent `/dev/viddec` from opening. The algorithm and
-  log counters are documented in `docs/media-buffering-algorithm.md`.
+  normal heap available to the SD cache. `MEDIA_PROGRESS_OVERLAY=0` disables
+  the framebuffer progress/seek overlay if display-plane testing needs a quiet
+  graphics layer. Set these in `config.mk` for device experiments instead of
+  editing `src/unifrog_media.c` directly. Native video creates these caches
+  after the hardware decoder KSHM allocations, so cache size changes should not
+  prevent `/dev/viddec` from opening. The algorithm and log counters are
+  documented in `docs/media-buffering-algorithm.md`.
 - `MEDIA_AUDIO_MAX_HW_AHEAD_MS` and `MEDIA_VIDEO_MAX_HW_AHEAD_MS` cap how far
   packet feeding can run ahead of the hardware decoder clocks after a stall.
   These are separate from the wall-clock feed-lead settings.

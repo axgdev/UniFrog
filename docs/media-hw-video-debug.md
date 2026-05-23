@@ -111,3 +111,36 @@
 - FFmpeg file IO now separates probe and playback buffering. The AVIO callback
   chunk remains 64 KiB to keep MP4 probing bounded, then a post-probe
   multi-window read-ahead cache reduces SD read frequency during playback.
+
+### v050 0120 Follow-Up
+- Logs from `../latest_log/v050/0120` show the remaining 240p and 360p
+  stutters were not storage-cache misses. Their close counters had clean SD
+  behavior, but monitor lines still showed hardware audio `ahead_a` dipping
+  close to underrun.
+- Native playback now uses one conservative audio feed lead for audio-only and
+  all video resolutions: `MEDIA_AUDIO_FEED_LEAD_MS=3000`. This removes the
+  low-resolution-only audio lead branch while keeping `MEDIA_VIDEO_LOWRES_KSHM_SIZE`
+  as the low-res memory pressure optimization.
+- The screen scramble/stale black-bar symptom matched a display handoff issue:
+  `/dev/viddec` made the video layer visible before the first displayable frame
+  (`decoded=0 displayed=0 show=0`). UniFrog now clears the framebuffer after
+  the final loading progress draw, then defers video-layer visibility until the
+  first decoded/displayed frame path logs `native video reveal`.
+- Native audio and native video now support LEFT/RIGHT seek through the FFmpeg
+  demuxer with `/dev/auddec` and `/dev/viddec` flush/start diagnostics. The
+  framebuffer progress overlay is enabled by default and can be disabled with
+  `MEDIA_PROGRESS_OVERLAY=0` if a display-layer experiment needs no overlay
+  writes during playback.
+
+Expected log markers:
+
+```text
+unifrog media fb_clear tag=native_video_play ret=0 ...
+unifrog media native video layer deferred fd=... reason=wait_first_frame
+unifrog media native video reveal ...
+unifrog media native video clock ... audio_feed_lead_ms=3000 ... overlay=1 ...
+unifrog media seek video request ...
+unifrog media seek auddec_flush tag=video ...
+unifrog media seek viddec_flush tag=video ...
+unifrog media seek demux tag=video ...
+```
