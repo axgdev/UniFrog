@@ -195,9 +195,10 @@ intentionally outside individual core source changes:
   `loghcrtos38.txt`, so battery sampling still uses the direct fallback path.
 - Wireless: UniFrog owns the stock-compatible RF gamepad polling path.
 - MMZ/DSC: `/dev/mmz` and `/dev/dsc` opened in `loghcrtos38.txt`; UniFrog
-  exposes them as runtime capability bits. The default memory layout keeps
-  `mmz0` at size zero and relies on the SDK sysmem fallback for vendor media
-  callers.
+  exposes them as runtime capability bits. The media-capable SF2000 layout
+  reserves `mmz0` for decoded video/display surfaces, while compressed KSHM
+  packet rings still allocate dynamically because no named `kshm` MMZ pool is
+  defined.
 
 ## On-Device Diagnostics
 

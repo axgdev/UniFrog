@@ -56,12 +56,12 @@
 #define MAX_REF_FB_NUM (7)		//if usb wired cast:MIN NUM:5
 #define MAX_TOTAL_FB_NUM (MAX_REF_FB_NUM + MAX_EXTRA_FB_NUM)
 /*
- * The native media stack feeds /dev/viddec directly.  Keep the media heap large
- * enough for common 480p/720p H.264 files while leaving the upper retained-log
- * and fastboot handoff regions untouched.
+ * The native media stack feeds /dev/viddec directly. Keep mmz0 large enough
+ * for the upstream hc15xx 1080p H.264 surface model while leaving the upper
+ * retained-log and fastboot handoff regions untouched.
  */
-#define MAX_WIDTH (1280)
-#define MAX_HEIGHT (720)
+#define MAX_WIDTH (1920)
+#define MAX_HEIGHT (1088)
 #define MAX_MB_WIDTH (MAX_WIDTH / 16)
 #define MAX_MB_HEIGHT (MAX_HEIGHT / 16)
 #define ONE_MV_SIZE (32 * MAX_MB_WIDTH * MAX_MB_HEIGHT)
@@ -93,12 +93,15 @@
 #define UNIFROG_RECOVERY_LOG_SIZE (0x00100000)
 #define HCRTOS_MMZ_BLOCKLOG (12)
 /*
- * Keep media buffers reclaimable. HCRTOS KSHM first tries the optional "kshm"
- * MMZ pool, then falls back to normal aligned heap allocation when no pool is
- * present, so viddec/auddec buffers can be created only while playback runs.
+ * Keep decoded video/display surfaces deterministic instead of depending on
+ * runtime heap contiguity. The compressed viddec/auddec KSHM packet rings are
+ * still allocated dynamically because this DTS does not define a named "kshm"
+ * MMZ pool, but the decoder's internal frame/display allocations require mmz0.
  */
 #define HCRTOS_MMZ0_SIZE                                                       \
-	(0)
+	(__HCRTOS_MMZ0_SIZE +                                                  \
+	 (16 * (__HCRTOS_MMZ0_SIZE >> HCRTOS_MMZ_BLOCKLOG)) +                  \
+	 (16 << HCRTOS_MMZ_BLOCKLOG))
 #define HCRTOS_MMZ0_OFFSET                                                     \
 	(CONFIG_MEMORY_SIZE - UNIFROG_FASTBOOT_RESERVED_SIZE -                 \
 	 UNIFROG_RECOVERY_LOG_SIZE - HCRTOS_MMZ0_SIZE)

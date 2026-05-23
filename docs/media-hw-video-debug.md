@@ -89,9 +89,24 @@
   now paces video packet submission against the software audio clock and logs
   `swsync wait`, `vtime`, `atime`, and `sw_audio_ms`.
 - H.264 viddec config now uses the stream frame rate instead of forcing
-  60 fps, and AVCC H.264 also sends converted SPS/PPS as a post-init ES packet
-  while keeping the original `avcC` config. This is intended to distinguish
-  high-resolution header/feed problems from SD refill or display geometry.
-- The DTS is back to zero reserved `mmz0`; `viddec`/`auddec` KSHM buffers are
-  expected to allocate from normal aligned heap while playback is active and be
-  released on close.
+  60 fps. This is intended to distinguish high-resolution timing/feed problems
+  from SD refill or display geometry.
+
+### v050 0105 Follow-Up
+- Logs from `../latest_log/v050/0105` show the zero-MMZ experiment was invalid
+  for this hardware path. Every tested H.264 file failed native
+  `VIDDEC_INIT` immediately with `errno=1`, before any video packets were fed.
+- The visible artifact path was then the software-video fallback repeatedly
+  failing `VIDSINK_DISPLAY_FRAME`, not confirmed hardware decode corruption.
+  The fallback now aborts after a small number of display failures instead of
+  continuing to spam the display path.
+- The DTS now restores a deterministic `mmz0` pool sized from the upstream
+  hc15xx 1080p media formula. KSHM compressed packet rings remain dynamic
+  because no named `kshm` MMZ pool is defined.
+- AVCC H.264 is back to the known-good feed contract from 0102/0103:
+  `avcC` extradata in `video_config.extra_data` and raw FFmpeg packet bytes to
+  `/dev/viddec`. Converted SPS/PPS post-extra delivery is kept only for
+  Annex-B extradata.
+- FFmpeg file IO now separates probe and playback buffering. The AVIO callback
+  chunk remains 64 KiB to keep MP4 probing bounded, then a post-probe read-ahead
+  cache up to 2 MiB reduces SD read frequency during playback.

@@ -86,9 +86,12 @@
 #define MEDIA_VIDEO_KSHM_SIZE 0x01000000u
 #define MEDIA_FILE_BUFFER_SIZE (64u * 1024u)
 #define MEDIA_FILE_BUFFER_MIN_SIZE (16u * 1024u)
+#define MEDIA_FILE_READAHEAD_SIZE (2u * 1024u * 1024u)
+#define MEDIA_FILE_READAHEAD_MIN_SIZE (512u * 1024u)
 #define MEDIA_SW_AUDIO_VIDEO_LEAD_MS 180u
 #define MEDIA_SW_AUDIO_MAX_WAIT_MS 60u
 #define MEDIA_SW_AUDIO_WAIT_POLL_US 4000u
+#define MEDIA_SWVIDEO_DISPLAY_FAIL_LIMIT 3u
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define MEDIA_SEEK_STEP_MS 10000
 #define MEDIA_SWVIDEO_MMZ_ID 0
@@ -149,20 +152,33 @@ struct media_buffered_input {
    int fd;
    AVIOContext *avio;
    size_t buffer_size;
+   uint8_t *readahead;
+   size_t readahead_size;
+   size_t cache_size;
+   int64_t cache_start;
+   int64_t logical_pos;
+   int64_t fd_pos;
    int64_t file_size;
+   int readahead_enabled;
    uint64_t read_calls;
    uint64_t read_bytes;
    uint64_t read_requested;
+   uint64_t disk_read_calls;
+   uint64_t disk_read_bytes;
+   uint64_t readahead_hits;
+   uint64_t readahead_hit_bytes;
    uint32_t short_reads;
    uint32_t seek_calls;
    int max_request;
    int max_read;
+   int max_disk_read;
    int last_errno;
 };
 
 extern void *mmz_memalign(int id, size_t alignment, size_t size)
    __attribute__((weak));
 extern void mmz_free(int id, void *ptr) __attribute__((weak));
+extern size_t mmz_total(int id) __attribute__((weak));
 
 struct media_sw_video {
    void *buffer;
@@ -294,6 +310,11 @@ static void media_auddec_finish(struct media_auddec *auddec,
 static void media_auddec_close(struct media_auddec *auddec);
 static int media_video_wait_write_space(int fd, uint32_t need,
    unsigned packet_index);
+
+static size_t media_mmz_total0(void)
+{
+   return mmz_total ? mmz_total(MEDIA_SWVIDEO_MMZ_ID) : 0u;
+}
 
 static uint32_t media_video_activity_mark_value(void)
 {
@@ -436,10 +457,114 @@ static uint8_t *media_alloc_file_buffer(size_t *size_out)
    return NULL;
 }
 
+static uint8_t *media_alloc_readahead_buffer(size_t *size_out)
+{
+   size_t size = MEDIA_FILE_READAHEAD_SIZE;
+   size_t min_size = MEDIA_FILE_READAHEAD_MIN_SIZE;
+   uint8_t *buffer = NULL;
+
+   if (size_out)
+      *size_out = 0;
+   if (size < min_size)
+      min_size = size;
+   while (size >= min_size && size > 0) {
+      buffer = av_malloc(size);
+      if (buffer) {
+         if (size_out)
+            *size_out = size;
+         return buffer;
+      }
+      size /= 2u;
+   }
+   return NULL;
+}
+
+static void media_buffered_input_invalidate_cache(
+   struct media_buffered_input *input)
+{
+   if (!input)
+      return;
+   input->cache_start = input->logical_pos;
+   input->cache_size = 0;
+}
+
+static int media_buffered_sync_fd(struct media_buffered_input *input)
+{
+   off_t pos;
+
+   if (!input || input->fd < 0)
+      return AVERROR(EINVAL);
+   if (input->fd_pos == input->logical_pos)
+      return 0;
+   errno = 0;
+   pos = lseek(input->fd, (off_t)input->logical_pos, SEEK_SET);
+   if (pos < 0) {
+      input->last_errno = errno;
+      return AVERROR(errno ? errno : EIO);
+   }
+   input->fd_pos = (int64_t)pos;
+   return 0;
+}
+
+static int media_buffered_read_direct(struct media_buffered_input *input,
+   uint8_t *buf, int buf_size)
+{
+   int ret;
+   ssize_t got;
+
+   ret = media_buffered_sync_fd(input);
+   if (ret < 0)
+      return ret;
+   errno = 0;
+   got = read(input->fd, buf, (size_t)buf_size);
+   input->disk_read_calls++;
+   if (got < 0) {
+      input->last_errno = errno;
+      return AVERROR(errno ? errno : EIO);
+   }
+   if (got == 0)
+      return AVERROR_EOF;
+   input->disk_read_bytes += (uint64_t)got;
+   if (got > input->max_disk_read)
+      input->max_disk_read = (int)got;
+   input->logical_pos += (int64_t)got;
+   input->fd_pos += (int64_t)got;
+   return (int)got;
+}
+
+static int media_buffered_fill_readahead(struct media_buffered_input *input)
+{
+   int ret;
+   ssize_t got;
+
+   if (!input || !input->readahead || input->readahead_size == 0)
+      return AVERROR(EINVAL);
+   ret = media_buffered_sync_fd(input);
+   if (ret < 0)
+      return ret;
+   errno = 0;
+   got = read(input->fd, input->readahead, input->readahead_size);
+   input->disk_read_calls++;
+   input->cache_start = input->logical_pos;
+   input->cache_size = 0;
+   if (got < 0) {
+      input->last_errno = errno;
+      return AVERROR(errno ? errno : EIO);
+   }
+   if (got == 0)
+      return AVERROR_EOF;
+   input->disk_read_bytes += (uint64_t)got;
+   if (got > input->max_disk_read)
+      input->max_disk_read = (int)got;
+   input->fd_pos += (int64_t)got;
+   input->cache_size = (size_t)got;
+   return 0;
+}
+
 static int media_buffered_read(void *opaque, uint8_t *buf, int buf_size)
 {
    struct media_buffered_input *input = opaque;
-   int got;
+   int total = 0;
 
    if (!input || input->fd < 0 || !buf || buf_size <= 0)
       return AVERROR(EINVAL);
@@ -447,20 +572,61 @@ static int media_buffered_read(void *opaque, uint8_t *buf, int buf_size)
    input->read_requested += (uint64_t)buf_size;
    if (buf_size > input->max_request)
       input->max_request = buf_size;
-   errno = 0;
-   got = (int)read(input->fd, buf, (size_t)buf_size);
-   if (got < 0) {
-      input->last_errno = errno;
-      return AVERROR(errno ? errno : EIO);
+   if (!input->readahead_enabled || !input->readahead ||
+       input->readahead_size == 0) {
+      int got = media_buffered_read_direct(input, buf, buf_size);
+
+      if (got < 0)
+         return got;
+      input->read_bytes += (uint64_t)got;
+      if (got > input->max_read)
+         input->max_read = got;
+      if (got < buf_size)
+         input->short_reads++;
+      return got;
    }
-   if (got == 0)
+
+   while (total < buf_size) {
+      int64_t cache_end = input->cache_start + (int64_t)input->cache_size;
+      size_t available = 0;
+      size_t to_copy;
+
+      if (input->cache_size > 0 &&
+          input->logical_pos >= input->cache_start &&
+          input->logical_pos < cache_end) {
+         available = (size_t)(cache_end - input->logical_pos);
+      } else {
+         int fill_ret;
+
+         media_buffered_input_invalidate_cache(input);
+         fill_ret = media_buffered_fill_readahead(input);
+         if (fill_ret < 0) {
+            if (total > 0)
+               break;
+            return fill_ret;
+         }
+         continue;
+      }
+
+      to_copy = (size_t)(buf_size - total);
+      if (to_copy > available)
+         to_copy = available;
+      memcpy(buf + total, input->readahead +
+         (size_t)(input->logical_pos - input->cache_start), to_copy);
+      input->logical_pos += (int64_t)to_copy;
+      total += (int)to_copy;
+      input->readahead_hits++;
+      input->readahead_hit_bytes += (uint64_t)to_copy;
+   }
+
+   if (total <= 0)
       return AVERROR_EOF;
-   input->read_bytes += (uint64_t)got;
-   if (got > input->max_read)
-      input->max_read = got;
-   if (got < buf_size)
+   input->read_bytes += (uint64_t)total;
+   if (total > input->max_read)
+      input->max_read = total;
+   if (total < buf_size)
       input->short_reads++;
-   return got;
+   return total;
 }
 
 static int64_t media_buffered_seek(void *opaque, int64_t offset, int whence)
@@ -468,6 +634,7 @@ static int64_t media_buffered_seek(void *opaque, int64_t offset, int whence)
    struct media_buffered_input *input = opaque;
    off_t pos;
    int seek_whence;
+   int64_t target;
 
    if (!input || input->fd < 0)
       return AVERROR(EINVAL);
@@ -478,13 +645,77 @@ static int64_t media_buffered_seek(void *opaque, int64_t offset, int whence)
        seek_whence != SEEK_END)
       return AVERROR(EINVAL);
    input->seek_calls++;
+   if (seek_whence == SEEK_SET) {
+      target = offset;
+   } else if (seek_whence == SEEK_CUR) {
+      target = input->logical_pos + offset;
+   } else if (input->file_size >= 0) {
+      target = input->file_size + offset;
+   } else {
+      media_buffered_input_invalidate_cache(input);
+      errno = 0;
+      pos = lseek(input->fd, (off_t)offset, seek_whence);
+      if (pos < 0) {
+         input->last_errno = errno;
+         return AVERROR(errno ? errno : EIO);
+      }
+      input->logical_pos = (int64_t)pos;
+      input->fd_pos = (int64_t)pos;
+      input->cache_start = input->logical_pos;
+      return input->logical_pos;
+   }
+   if (target < 0)
+      return AVERROR(EINVAL);
+   if (input->cache_size > 0 &&
+       target >= input->cache_start &&
+       target <= input->cache_start + (int64_t)input->cache_size) {
+      input->logical_pos = target;
+      return input->logical_pos;
+   }
+   input->logical_pos = target;
+   media_buffered_input_invalidate_cache(input);
    errno = 0;
-   pos = lseek(input->fd, (off_t)offset, seek_whence);
+   pos = lseek(input->fd, (off_t)target, SEEK_SET);
    if (pos < 0) {
       input->last_errno = errno;
       return AVERROR(errno ? errno : EIO);
    }
-   return (int64_t)pos;
+   input->fd_pos = (int64_t)pos;
+   input->logical_pos = (int64_t)pos;
+   input->cache_start = input->logical_pos;
+   return input->logical_pos;
+}
+
+static int media_buffered_input_enable_readahead(
+   struct media_buffered_input *input, const AVFormatContext *fmt,
+   const char *tag, const char *path)
+{
+   uint64_t cover_ms = 0;
+   int64_t bit_rate = fmt ? fmt->bit_rate : 0;
+
+   if (!input || input->fd < 0)
+      return -1;
+   if (input->readahead_enabled)
+      return 0;
+   input->readahead = media_alloc_readahead_buffer(&input->readahead_size);
+   if (!input->readahead) {
+      printf("unifrog media buffered_io readahead alloc_failed tag=%s path=%s want=%lu min=%lu\n",
+         tag ? tag : "", path ? path : "",
+         (unsigned long)MEDIA_FILE_READAHEAD_SIZE,
+         (unsigned long)MEDIA_FILE_READAHEAD_MIN_SIZE);
+      return -1;
+   }
+   input->readahead_enabled = 1;
+   media_buffered_input_invalidate_cache(input);
+   if (bit_rate > 0)
+      cover_ms = ((uint64_t)input->readahead_size * 8000ull) /
+         (uint64_t)bit_rate;
+   printf("unifrog media buffered_io readahead enabled tag=%s size=%lu min=%lu bitrate=%lld cover_ms=%llu logical=%lld fd_pos=%lld path=%s\n",
+      tag ? tag : "", (unsigned long)input->readahead_size,
+      (unsigned long)MEDIA_FILE_READAHEAD_MIN_SIZE, (long long)bit_rate,
+      (unsigned long long)cover_ms, (long long)input->logical_pos,
+      (long long)input->fd_pos, path ? path : "");
+   return 0;
 }
 
 static int media_buffered_input_open(AVFormatContext **fmt_out,
@@ -503,6 +734,9 @@ static int media_buffered_input_open(AVFormatContext **fmt_out,
    memset(input, 0, sizeof(*input));
    input->fd = -1;
    input->file_size = -1;
+   input->cache_start = 0;
+   input->logical_pos = 0;
+   input->fd_pos = 0;
    errno = 0;
    input->fd = open(path, O_RDONLY);
    if (input->fd < 0) {
@@ -578,17 +812,25 @@ static void media_buffered_input_close(struct media_buffered_input *input,
 {
    if (!input || (input->fd < 0 && !input->avio))
       return;
-   printf("unifrog media buffered_io close tag=%s fd=%d buffer=%lu file=%lld reads=%llu bytes=%llu requested=%llu max_req=%d max_read=%d short=%lu seeks=%lu errno=%d path=%s\n",
+   printf("unifrog media buffered_io close tag=%s fd=%d buffer=%lu readahead=%lu file=%lld reads=%llu bytes=%llu requested=%llu disk_reads=%llu disk_bytes=%llu hits=%llu hit_bytes=%llu max_req=%d max_read=%d max_disk=%d short=%lu seeks=%lu logical=%lld fd_pos=%lld errno=%d path=%s\n",
       tag ? tag : "", input->fd, (unsigned long)input->buffer_size,
-      (long long)input->file_size, (unsigned long long)input->read_calls,
+      (unsigned long)input->readahead_size, (long long)input->file_size,
+      (unsigned long long)input->read_calls,
       (unsigned long long)input->read_bytes,
-      (unsigned long long)input->read_requested, input->max_request,
-      input->max_read, (unsigned long)input->short_reads,
-      (unsigned long)input->seek_calls, input->last_errno, path ? path : "");
+      (unsigned long long)input->read_requested,
+      (unsigned long long)input->disk_read_calls,
+      (unsigned long long)input->disk_read_bytes,
+      (unsigned long long)input->readahead_hits,
+      (unsigned long long)input->readahead_hit_bytes, input->max_request,
+      input->max_read, input->max_disk_read,
+      (unsigned long)input->short_reads, (unsigned long)input->seek_calls,
+      (long long)input->logical_pos, (long long)input->fd_pos,
+      input->last_errno, path ? path : "");
    if (input->avio) {
       av_freep(&input->avio->buffer);
       avio_context_free(&input->avio);
    }
+   av_freep(&input->readahead);
    if (input->fd >= 0)
       close(input->fd);
    memset(input, 0, sizeof(*input));
@@ -1972,7 +2214,6 @@ enum {
    MEDIA_H264_EXTRA_CFG_RAW,
    MEDIA_H264_EXTRA_PRE_EXTRA,
    MEDIA_H264_EXTRA_POST_ES,
-   MEDIA_H264_EXTRA_CFG_AVCC_POST_ES,
 };
 
 static const char *media_h264_mode_name(int mode)
@@ -1998,8 +2239,6 @@ static const char *media_h264_extra_delivery_name(int delivery)
       return "pre_extra";
    case MEDIA_H264_EXTRA_POST_ES:
       return "post_es";
-   case MEDIA_H264_EXTRA_CFG_AVCC_POST_ES:
-      return "cfg_avcc_post_es";
    default:
       return "none";
    }
@@ -3086,17 +3325,6 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
             media_h264_extra_delivery = MEDIA_H264_EXTRA_PRE_EXTRA;
          }
       }
-      if (par->extradata && par->extradata_size > 0 &&
-          media_h264_packet_mode == MEDIA_H264_MODE_AVCC &&
-          media_h264_extradata_annexb(par->extradata, par->extradata_size,
-             post_extra, sizeof(post_extra), &post_extra_used) == 0 &&
-          post_extra_used > 0) {
-         post_extra_size = (int)post_extra_used;
-         if (media_h264_extra_delivery == MEDIA_H264_EXTRA_CFG_AVCC)
-            media_h264_extra_delivery = MEDIA_H264_EXTRA_CFG_AVCC_POST_ES;
-         else if (media_h264_extra_delivery == MEDIA_H264_EXTRA_NONE)
-            media_h264_extra_delivery = MEDIA_H264_EXTRA_POST_ES;
-      }
    } else if (par->extradata && par->extradata_size > 0) {
       cfg.extradata_size = par->extradata_size;
       if (par->extradata_size <= (int)sizeof(cfg.extra_data)) {
@@ -3130,13 +3358,14 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
          extra && extra_size > 6 ? extra[6] : 0,
          extra && extra_size > 7 ? extra[7] : 0);
    }
-   printf("unifrog media native video open_viddec begin codec=%u av=%d tag=0x%lx cfg_tag=0x%lx ind=%d %dx%d fps_milli=%u frame=%d kshm=%lu extra=%d extra_mode=%d write_pre=%d pre_extra=%d post_extra=%d decode=%d quick=%d sync=%d\n",
+   printf("unifrog media native video open_viddec begin codec=%u av=%d tag=0x%lx cfg_tag=0x%lx ind=%d %dx%d fps_milli=%u frame=%d kshm=%lu mmz0_total=%lu extra=%d extra_mode=%d write_pre=%d pre_extra=%d post_extra=%d decode=%d quick=%d sync=%d\n",
       cfg.codec_id, par->codec_id, (unsigned long)par->codec_tag,
       (unsigned long)cfg.codec_tag, cfg.independent_url,
       cfg.pic_width, cfg.pic_height, cfg.frame_rate, cfg.codec_frame_size,
-      (unsigned long)cfg.kshm_size, cfg.extradata_size, cfg.extradata_mode,
-      write_extra_before_init, pre_extra_size, post_extra_size,
-      cfg.decode_mode, cfg.quick_mode, cfg.sync_mode);
+      (unsigned long)cfg.kshm_size, (unsigned long)media_mmz_total0(),
+      cfg.extradata_size, cfg.extradata_mode, write_extra_before_init,
+      pre_extra_size, post_extra_size, cfg.decode_mode, cfg.quick_mode,
+      cfg.sync_mode);
    media_video_activity_stage(1u,
       (((uint32_t)stream_index & 0xffu) << 16) |
       ((uint32_t)par->codec_id & 0xffffu),
@@ -3166,11 +3395,11 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
       ((uint32_t)(pre_extra_ret & 0xffffu) << 16) |
       ((uint32_t)(errno & 0xffffu)),
       (uint32_t)(pre_extra_size & 0xffffu));
-   printf("unifrog media native video init begin fd=%d req=0x%lx dis=%d vidsink=%d mode=%d kshm=%d extra=%d extra_mode=%d write_pre=%d pre_extra=%d pre_ret=%d post_extra=%d sync=%d\n",
+   printf("unifrog media native video init begin fd=%d req=0x%lx dis=%d vidsink=%d mode=%d kshm=%d mmz0_total=%lu extra=%d extra_mode=%d write_pre=%d pre_extra=%d pre_ret=%d post_extra=%d sync=%d\n",
       fd, (unsigned long)VIDDEC_INIT, dis_fd, vidsink_fd, cfg.decode_mode,
-      cfg.kshm_size, cfg.extradata_size, cfg.extradata_mode,
-      write_extra_before_init, pre_extra_size, pre_extra_ret, post_extra_size,
-      cfg.sync_mode);
+      cfg.kshm_size, (unsigned long)media_mmz_total0(), cfg.extradata_size,
+      cfg.extradata_mode, write_extra_before_init, pre_extra_size,
+      pre_extra_ret, post_extra_size, cfg.sync_mode);
    (void)unifrog_log_flush();
    media_video_activity_stage(6u,
       (((uint32_t)cfg.decode_mode & 0xffu) << 16) |
@@ -3252,15 +3481,16 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
 
       (void)ioctl(fd, VIDDEC_SET_SHOW_MASAIC_ON_ERR, mosaic);
    }
-   printf("unifrog media native video open fd=%d init=%d init_errno=%d pre_ret=%d post_ret=%d rect=%d win=%d win_errno=%d mirror=%d start=%d start_errno=%d codec=%u av=%d tag=0x%lx cfg_tag=0x%lx ind=%d %dx%d fps_milli=%u frame=%d kshm=%lu extra=%d extra_mode=%d write_pre=%d pre_extra=%d post_extra=%d decode=%d quick=%d sync=%d\n",
+   printf("unifrog media native video open fd=%d init=%d init_errno=%d pre_ret=%d post_ret=%d rect=%d win=%d win_errno=%d mirror=%d start=%d start_errno=%d codec=%u av=%d tag=0x%lx cfg_tag=0x%lx ind=%d %dx%d fps_milli=%u frame=%d kshm=%lu mmz0_total=%lu extra=%d extra_mode=%d write_pre=%d pre_extra=%d post_extra=%d decode=%d quick=%d sync=%d\n",
       fd, init_ret, init_errno, pre_extra_ret, post_extra_ret, rect_ret, win_ret,
       win_errno, mirror_ret, start_ret, start_errno,
       cfg.codec_id, par->codec_id, (unsigned long)par->codec_tag,
       (unsigned long)cfg.codec_tag, cfg.independent_url,
       cfg.pic_width, cfg.pic_height, cfg.frame_rate, cfg.codec_frame_size,
-      (unsigned long)cfg.kshm_size, cfg.extradata_size, cfg.extradata_mode,
-      write_extra_before_init, pre_extra_size, post_extra_size, cfg.decode_mode,
-      cfg.quick_mode, cfg.sync_mode);
+      (unsigned long)cfg.kshm_size, (unsigned long)media_mmz_total0(),
+      cfg.extradata_size, cfg.extradata_mode, write_extra_before_init,
+      pre_extra_size, post_extra_size, cfg.decode_mode, cfg.quick_mode,
+      cfg.sync_mode);
    if (init_ret != 0 || pre_extra_ret != 0 || post_extra_ret != 0 ||
        start_ret != 0) {
       close(fd);
@@ -3511,8 +3741,11 @@ static int media_play_native_video(const char *path,
    int info_ret = open_ret == 0 ? avformat_find_stream_info(fmt, NULL) : 0;
    printf("unifrog media native stream_info done ret=%d streams=%u path=%s\n",
       info_ret, fmt ? fmt->nb_streams : 0, path ? path : "");
-   if (open_ret == 0 && info_ret == 0)
+   if (open_ret == 0 && info_ret == 0) {
       media_buffered_input_log_coverage(&input, fmt, "native_video", path);
+      (void)media_buffered_input_enable_readahead(&input, fmt,
+         "native_video", path);
+   }
 
    if (open_ret < 0 || info_ret < 0) {
       printf("unifrog media native open failed open=%d info=%d path=%s\n",
@@ -3799,10 +4032,12 @@ static int media_play_ffmpeg_video(const char *path,
    uint32_t video_frames = 0;
    uint32_t loop_polls = 0;
    uint32_t start_ms = unifrog_perf_time_ms();
+   uint32_t swvideo_failures = 0;
    int audio_enabled = 0;
    int disable_audio = options && options->disable_audio;
    int ret = -1;
    int sd_read_active = 0;
+   int abort_video = 0;
 
    memset(&audio, 0, sizeof(audio));
    audio.fd = -1;
@@ -3829,6 +4064,8 @@ static int media_play_ffmpeg_video(const char *path,
       goto out;
    }
    media_buffered_input_log_coverage(&input, fmt, "ffmpeg_video", path);
+   (void)media_buffered_input_enable_readahead(&input, fmt, "ffmpeg_video",
+      path);
    media_log_format_streams(fmt, path, "ffmpeg_video_open");
    video_stream = media_find_stream_type(fmt, AVMEDIA_TYPE_VIDEO);
    if (!disable_audio)
@@ -3901,7 +4138,7 @@ static int media_play_ffmpeg_video(const char *path,
    if (fb_fd >= 0)
       (void)ioctl(fb_fd, FBIOBLANK, FB_BLANK_NORMAL);
 
-   while (!media_exit_down()) {
+   while (!media_exit_down() && !abort_video) {
       int read_ret = av_read_frame(fmt, packet);
 
       if (read_ret < 0)
@@ -3943,8 +4180,21 @@ static int media_play_ffmpeg_video(const char *path,
                   media_pixel_format_name((enum AVPixelFormat)frame->format),
                   path ? path : "");
             }
-            if (media_swvideo_present(&sw_video, frame) == 0)
+            if (media_swvideo_present(&sw_video, frame) == 0) {
                video_frames = sw_video.frames;
+               swvideo_failures = 0;
+            } else {
+               swvideo_failures++;
+               if (swvideo_failures >= MEDIA_SWVIDEO_DISPLAY_FAIL_LIMIT) {
+                  printf("unifrog media ffmpeg video swvideo abort failures=%lu frame=%lu %dx%d path=%s\n",
+                     (unsigned long)swvideo_failures,
+                     (unsigned long)sw_video.frames, frame->width,
+                     frame->height, path ? path : "");
+                  abort_video = 1;
+                  av_frame_unref(frame);
+                  break;
+               }
+            }
             av_frame_unref(frame);
          }
       } else if (audio_enabled && packet->stream_index == audio_stream) {
@@ -3969,6 +4219,8 @@ static int media_play_ffmpeg_video(const char *path,
          }
       }
       av_packet_unref(packet);
+      if (abort_video)
+         break;
       if ((++loop_polls % 240u) == 0)
          printf("unifrog media ffmpeg video monitor video=%lu audio=%lu ms=%lu path=%s\n",
             (unsigned long)video_frames, (unsigned long)audio_frames,
@@ -3976,25 +4228,42 @@ static int media_play_ffmpeg_video(const char *path,
             path ? path : "");
    }
 
-   (void)avcodec_send_packet(video_ctx, NULL);
-   for (;;) {
-      int recv_ret = avcodec_receive_frame(video_ctx, frame);
+   if (!abort_video) {
+      (void)avcodec_send_packet(video_ctx, NULL);
+      for (;;) {
+         int recv_ret = avcodec_receive_frame(video_ctx, frame);
 
-      if (recv_ret == AVERROR(EAGAIN) || recv_ret == AVERROR_EOF)
-         break;
-      if (recv_ret < 0)
-         break;
-      if ((frame->format == AV_PIX_FMT_YUV420P ||
-           frame->format == AV_PIX_FMT_YUVJ420P) &&
-          media_swvideo_present(&sw_video, frame) == 0)
-         video_frames = sw_video.frames;
-      av_frame_unref(frame);
+         if (recv_ret == AVERROR(EAGAIN) || recv_ret == AVERROR_EOF)
+            break;
+         if (recv_ret < 0)
+            break;
+         if (frame->format == AV_PIX_FMT_YUV420P ||
+             frame->format == AV_PIX_FMT_YUVJ420P) {
+            if (media_swvideo_present(&sw_video, frame) == 0) {
+               video_frames = sw_video.frames;
+               swvideo_failures = 0;
+            } else {
+               swvideo_failures++;
+               if (swvideo_failures >= MEDIA_SWVIDEO_DISPLAY_FAIL_LIMIT) {
+                  printf("unifrog media ffmpeg video swvideo flush abort failures=%lu frame=%lu %dx%d path=%s\n",
+                     (unsigned long)swvideo_failures,
+                     (unsigned long)sw_video.frames, frame->width,
+                     frame->height, path ? path : "");
+                  abort_video = 1;
+                  av_frame_unref(frame);
+                  break;
+               }
+            }
+         }
+         av_frame_unref(frame);
+      }
    }
-   ret = video_frames ? 0 : -1;
+   ret = video_frames && !abort_video ? 0 : -1;
 
 out:
-   printf("unifrog media ffmpeg video end ret=%d video_frames=%lu audio_frames=%lu ms=%lu path=%s\n",
-      ret, (unsigned long)video_frames, (unsigned long)audio_frames,
+   printf("unifrog media ffmpeg video end ret=%d abort=%d video_frames=%lu audio_frames=%lu ms=%lu path=%s\n",
+      ret, abort_video, (unsigned long)video_frames,
+      (unsigned long)audio_frames,
       (unsigned long)(unifrog_perf_time_ms() - start_ms), path ? path : "");
    unifrog_exception_activity_clear();
    if (audio.fd >= 0)

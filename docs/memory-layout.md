@@ -1,9 +1,9 @@
 # UniFrog Memory Layout
 
-UniFrog uses two memory ownership classes with different lifetimes: persistent
-runtime memory and a reclaimable application arena. Media playback now uses the
-same normal allocation path as the rest of the runtime; there is no separately
-reserved MMZ pool in the default layout.
+UniFrog uses three memory ownership classes with different lifetimes:
+persistent runtime memory, a reclaimable application arena, and a deterministic
+media MMZ pool. The SF2000 media-specific split is documented in
+`docs/sf2000-memory-model.md`.
 
 Fixed runtime reservations such as JIT caches and DMA buffers are part of the
 same ownership story. See `docs/link-layout-diagnostics.md` for the linker
@@ -40,27 +40,33 @@ On the current SF2000/GB300 DTS the arena is backed by
 `/hcrtos/memory-mapping/appmem`. The default policy is:
 
 - keep 48 MiB of `sysmem` for UniFrog/HCRTOS
-- give the rest of RAM to one reclaimable application arena
-- keep `mmz0` at size zero
+- keep a fixed `mmz0` media pool sized for 1080p H.264 decode/display surfaces
+- give the remaining middle RAM to one reclaimable application arena
 
-This currently targets about 80 MiB of contiguous application arena on the
-128 MiB layout. Devices with less RAM can expose a smaller arena or no arena;
-loaders must reject cores that do not fit.
+This currently targets about 44 MiB of contiguous application arena on the
+128 MiB media-capable layout. Devices with less RAM can expose a smaller arena
+or no arena; loaders must reject cores that do not fit.
 
 ## Media Memory
 
-The SF2000 DTS keeps `mmz0` at size zero. HCRTOS KSHM falls back to normal
-aligned heap allocation when no `kshm` MMZ pool exists, so native media buffers
-are allocated from the application arena while playback is active and released
-when `VIDDEC_RLS`/`AUDDEC_RLS` runs. The current media DTS advertises a 16 MiB
-`viddec.kshm_size` and 2 MiB `auddec.kshm_size`; native playback should match
-those sizes when opening the drivers.
+The SF2000 DTS reserves `mmz0` for hardware decoded frame/display surfaces.
+HCRTOS media drivers allocate those surfaces internally during `VIDDEC_INIT`,
+so this pool must be physically contiguous and must not depend on ordinary heap
+fragmentation. The current 1080p pool is about 34.93 MiB.
+
+HCRTOS KSHM is separate from decoded frame memory. Because the DTS does not
+define a named `kshm` MMZ pool, KSHM falls back to normal aligned heap
+allocation for compressed packet rings while playback is active and releases
+them when `VIDDEC_RLS`/`AUDDEC_RLS` runs. The current media DTS advertises a
+16 MiB `viddec.kshm_size` and 2 MiB `auddec.kshm_size`; native playback should
+match those sizes when opening the drivers.
 
 UniFrog media playback uses streaming buffers instead of loading the whole file
 into memory. The native FFmpeg custom AVIO buffer is intentionally a small
 64 KiB read chunk, with a 16 KiB allocation fallback if memory is fragmented.
-Larger AVIO chunks caused MP4 probing and seeks to over-read tens of MiB before
-playback started.
+A separate post-probe read-ahead cache can allocate up to 2 MiB, with a 512 KiB
+fallback, to reduce SD transactions during playback without letting MP4 probing
+over-read tens of MiB before playback starts.
 
 ## Compatibility Rule
 
