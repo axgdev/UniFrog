@@ -57,16 +57,19 @@ fragmentation. The current 1080p pool is about 34.93 MiB.
 HCRTOS KSHM is separate from decoded frame memory. Because the DTS does not
 define a named `kshm` MMZ pool, KSHM falls back to normal aligned heap
 allocation for compressed packet rings while playback is active and releases
-them when `VIDDEC_RLS`/`AUDDEC_RLS` runs. The current media DTS advertises a
-16 MiB `viddec.kshm_size`; native audio currently opens `/dev/auddec` with the
-stock-style `0xa0000` compressed ring used by HCRTOS cast examples. These rings
-are dynamic playback allocations, not permanent DTS reservations.
+them when `VIDDEC_RLS`/`AUDDEC_RLS` runs. The media DTS advertises a 16 MiB
+`viddec.kshm_size`; native video keeps that size for high-resolution streams
+and requests an 8 MiB compressed ring for streams at or below 640x360. Native
+audio currently opens `/dev/auddec` with the stock-style `0xa0000` compressed
+ring used by HCRTOS cast examples. These rings are dynamic playback
+allocations, not permanent DTS reservations.
 
 UniFrog media playback uses streaming buffers instead of loading the whole file
 into memory. The native FFmpeg custom AVIO buffer is intentionally a small
 64 KiB read chunk, with a 16 KiB allocation fallback if memory is fragmented.
-A separate post-probe read-ahead cache can allocate up to 2 MiB, with a 512 KiB
-fallback, to reduce SD transactions during playback without letting MP4 probing
+A separate post-probe read-ahead cache can allocate `16 x 512 KiB = 8 MiB` for
+video, with smaller fallback windows if the decoder rings have consumed normal
+heap, to reduce SD transactions during playback without letting MP4 probing
 over-read tens of MiB before playback starts.
 
 ## Compatibility Rule

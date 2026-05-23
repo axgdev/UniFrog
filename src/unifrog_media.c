@@ -85,6 +85,12 @@
 #ifndef UNIFROG_MEDIA_AUDIO_FEED_LEAD_MS
 #define UNIFROG_MEDIA_AUDIO_FEED_LEAD_MS 1000
 #endif
+#ifndef UNIFROG_MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS
+#define UNIFROG_MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS 1500
+#endif
+#ifndef UNIFROG_MEDIA_VIDEO_LOWRES_KSHM_SIZE
+#define UNIFROG_MEDIA_VIDEO_LOWRES_KSHM_SIZE 0x00800000u
+#endif
 #ifndef UNIFROG_MEDIA_FILE_BUFFER_SIZE
 #define UNIFROG_MEDIA_FILE_BUFFER_SIZE 65536
 #endif
@@ -145,6 +151,8 @@
 /* Decoder rings are live after START; large leads play as startup bursts. */
 #define MEDIA_VIDEO_FEED_LEAD_MS ((unsigned)UNIFROG_MEDIA_VIDEO_FEED_LEAD_MS)
 #define MEDIA_AUDIO_FEED_LEAD_MS ((unsigned)UNIFROG_MEDIA_AUDIO_FEED_LEAD_MS)
+#define MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS \
+   ((unsigned)UNIFROG_MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS)
 #define MEDIA_VIDEO_MAX_HW_AHEAD_MS \
    ((unsigned)UNIFROG_MEDIA_VIDEO_MAX_HW_AHEAD_MS)
 #define MEDIA_AUDIO_MAX_HW_AHEAD_MS \
@@ -159,6 +167,9 @@
 #define MEDIA_VIDEO_AUDIO_PERIODS 16u
 #define MEDIA_AUDIO_KSHM_SIZE 0x000a0000u
 #define MEDIA_VIDEO_KSHM_SIZE 0x01000000u
+#define MEDIA_VIDEO_LOWRES_KSHM_SIZE \
+   ((unsigned)UNIFROG_MEDIA_VIDEO_LOWRES_KSHM_SIZE)
+#define MEDIA_VIDEO_LOWRES_MAX_PIXELS (640u * 360u)
 #define MEDIA_FILE_BUFFER_SIZE ((size_t)UNIFROG_MEDIA_FILE_BUFFER_SIZE)
 #define MEDIA_FILE_BUFFER_MIN_SIZE \
    ((size_t)UNIFROG_MEDIA_FILE_BUFFER_MIN_SIZE)
@@ -245,6 +256,8 @@ struct media_audio_pacer {
 
 static void media_audio_pacer_wait(struct media_audio_pacer *pacer,
    const AVPacket *packet, AVRational time_base);
+static void media_audio_pacer_wait_lead(struct media_audio_pacer *pacer,
+   const AVPacket *packet, AVRational time_base, unsigned feed_lead_ms);
 static void media_wait_hardware_ahead(const char *kind, int fd, int video,
    const struct media_audio_pacer *pacer, unsigned max_ahead_ms,
    const char *path);
@@ -2729,8 +2742,8 @@ static void media_audio_pacer_wait_ms(struct media_audio_pacer *pacer,
    }
 }
 
-static void media_audio_pacer_wait(struct media_audio_pacer *pacer,
-   const AVPacket *packet, AVRational time_base)
+static void media_audio_pacer_wait_lead(struct media_audio_pacer *pacer,
+   const AVPacket *packet, AVRational time_base, unsigned feed_lead_ms)
 {
    int32_t pts_ms;
    int32_t dur_ms;
@@ -2739,7 +2752,13 @@ static void media_audio_pacer_wait(struct media_audio_pacer *pacer,
       return;
    pts_ms = media_packet_pts_ms(packet, time_base);
    dur_ms = media_packet_duration_ms(packet, time_base);
-   media_audio_pacer_wait_ms(pacer, pts_ms, dur_ms,
+   media_audio_pacer_wait_ms(pacer, pts_ms, dur_ms, feed_lead_ms);
+}
+
+static void media_audio_pacer_wait(struct media_audio_pacer *pacer,
+   const AVPacket *packet, AVRational time_base)
+{
+   media_audio_pacer_wait_lead(pacer, packet, time_base,
       MEDIA_AUDIO_FEED_LEAD_MS);
 }
 
@@ -3962,6 +3981,51 @@ static unsigned media_video_frame_rate_milli(const AVStream *stream)
    return (unsigned)value;
 }
 
+static int media_video_is_lowres_stream(const AVCodecParameters *par)
+{
+   unsigned pixels;
+
+   if (!par || par->width <= 0 || par->height <= 0)
+      return 0;
+   if (par->width > INT_MAX / par->height)
+      return 0;
+   pixels = (unsigned)(par->width * par->height);
+   return pixels <= MEDIA_VIDEO_LOWRES_MAX_PIXELS;
+}
+
+static unsigned media_video_kshm_size_for_stream(
+   const AVCodecParameters *par, const char **policy_out)
+{
+   unsigned lowres_size = MEDIA_VIDEO_LOWRES_KSHM_SIZE;
+
+   if (policy_out)
+      *policy_out = "default";
+   if (!media_video_is_lowres_stream(par))
+      return MEDIA_VIDEO_KSHM_SIZE;
+   if (lowres_size == 0 || lowres_size > MEDIA_VIDEO_KSHM_SIZE)
+      lowres_size = MEDIA_VIDEO_KSHM_SIZE;
+   if (policy_out)
+      *policy_out = lowres_size < MEDIA_VIDEO_KSHM_SIZE ?
+         "lowres" : "default";
+   return lowres_size;
+}
+
+static unsigned media_video_audio_feed_lead_for_stream(
+   const AVCodecParameters *par, const char **profile_out)
+{
+   unsigned lead_ms = MEDIA_AUDIO_FEED_LEAD_MS;
+
+   if (profile_out)
+      *profile_out = "default";
+   if (media_video_is_lowres_stream(par) &&
+       MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS > lead_ms) {
+      lead_ms = MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS;
+      if (profile_out)
+         *profile_out = "lowres";
+   }
+   return lead_ms;
+}
+
 static int media_h264_extradata_annexb(const uint8_t *src, int src_size,
    uint8_t *dst, size_t dst_size, size_t *out_size)
 {
@@ -4049,6 +4113,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    int pre_extra_size = 0;
    int write_extra_before_init = 0;
    const uint8_t *pre_extra_data = NULL;
+   const char *kshm_policy = "default";
    uint8_t post_extra[1024];
    size_t post_extra_used = 0;
    int win_ret = -1;
@@ -4112,7 +4177,8 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    cfg.rotate_type = ROTATE_TYPE_0;
    cfg.bit_rate = par->bit_rate > 0 && par->bit_rate < INT32_MAX ?
       (int)par->bit_rate : 0;
-   cfg.kshm_size = MEDIA_VIDEO_KSHM_SIZE;
+   cfg.kshm_size = (int)media_video_kshm_size_for_stream(par,
+      &kshm_policy);
    cfg.buffering_start = MEDIA_VIDEO_BUFFERING_START_MS;
    cfg.buffering_end = MEDIA_VIDEO_BUFFERING_END_MS;
    cfg.scan_type = YUV420_YH1V2;
@@ -4188,14 +4254,15 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
          extra && extra_size > 6 ? extra[6] : 0,
          extra && extra_size > 7 ? extra[7] : 0);
    }
-   printf("unifrog media native video open_viddec begin codec=%u av=%d tag=0x%lx cfg_tag=0x%lx ind=%d %dx%d fps_milli=%u frame=%d kshm=%lu mmz0_total=%lu extra=%d extra_mode=%d write_pre=%d pre_extra=%d post_extra=%d decode=%d quick=%d sync=%d buffering=%d/%d\n",
+   printf("unifrog media native video open_viddec begin codec=%u av=%d tag=0x%lx cfg_tag=0x%lx ind=%d %dx%d fps_milli=%u frame=%d kshm=%lu kshm_policy=%s mmz0_total=%lu extra=%d extra_mode=%d write_pre=%d pre_extra=%d post_extra=%d decode=%d quick=%d sync=%d buffering=%d/%d\n",
       cfg.codec_id, par->codec_id, (unsigned long)par->codec_tag,
       (unsigned long)cfg.codec_tag, cfg.independent_url,
       cfg.pic_width, cfg.pic_height, cfg.frame_rate, cfg.codec_frame_size,
-      (unsigned long)cfg.kshm_size, (unsigned long)media_mmz_total0(),
-      cfg.extradata_size, cfg.extradata_mode, write_extra_before_init,
-      pre_extra_size, post_extra_size, cfg.decode_mode, cfg.quick_mode,
-      cfg.sync_mode, cfg.buffering_start, cfg.buffering_end);
+      (unsigned long)cfg.kshm_size, kshm_policy ? kshm_policy : "",
+      (unsigned long)media_mmz_total0(), cfg.extradata_size,
+      cfg.extradata_mode, write_extra_before_init, pre_extra_size,
+      post_extra_size, cfg.decode_mode, cfg.quick_mode, cfg.sync_mode,
+      cfg.buffering_start, cfg.buffering_end);
    media_video_activity_stage(1u,
       (((uint32_t)stream_index & 0xffu) << 16) |
       ((uint32_t)par->codec_id & 0xffffu),
@@ -4563,6 +4630,8 @@ static int media_play_native_video(const char *path,
    int video_layer_revealed = 0;
    int sd_read_active = 0;
    int auddec_write_failed = 0;
+   unsigned audio_feed_lead_ms = MEDIA_AUDIO_FEED_LEAD_MS;
+   const char *audio_feed_profile = "default";
 
    memset(&audio, 0, sizeof(audio));
    audio.fd = -1;
@@ -4620,6 +4689,9 @@ static int media_play_native_video(const char *path,
          ret = media_play_native_audio_compressed(path);
       goto out;
    }
+   if (fmt->streams[video_stream] && fmt->streams[video_stream]->codecpar)
+      audio_feed_lead_ms = media_video_audio_feed_lead_for_stream(
+         fmt->streams[video_stream]->codecpar, &audio_feed_profile);
    printf("unifrog media native init_drivers begin\n");
    media_video_progress(options, "drivers", 80, 100);
    (void)unifrog_log_flush();
@@ -4697,9 +4769,10 @@ static int media_play_native_video(const char *path,
    video_freerun = video_sync_mode == AVSYNC_TYPE_FREERUN;
    if (video_freerun && audio_enabled)
       printf("unifrog media native video forcing freerun due to software audio path\n");
-   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d video_feed_lead_ms=%u audio_feed_lead_ms=%u video_max_hw_ahead_ms=%u audio_max_hw_ahead_ms=%u\n",
+   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d video_feed_lead_ms=%u audio_feed_lead_ms=%u audio_feed_profile=%s video_max_hw_ahead_ms=%u audio_max_hw_ahead_ms=%u\n",
       video_freerun, disable_audio, auddec.fd >= 0, auddec.freerun,
-      audio_enabled, MEDIA_VIDEO_FEED_LEAD_MS, MEDIA_AUDIO_FEED_LEAD_MS,
+      audio_enabled, MEDIA_VIDEO_FEED_LEAD_MS, audio_feed_lead_ms,
+      audio_feed_profile ? audio_feed_profile : "",
       MEDIA_VIDEO_MAX_HW_AHEAD_MS, MEDIA_AUDIO_MAX_HW_AHEAD_MS);
    packet = av_packet_alloc();
    frame = av_frame_alloc();
@@ -4746,8 +4819,8 @@ static int media_play_native_video(const char *path,
          if (!auddec_write_failed) {
             media_video_activity_stage(21u, auddec.packets & 0x00ffffffu,
                video_packets);
-            media_audio_pacer_wait(&hw_audio_pacer, packet,
-               fmt->streams[audio_stream]->time_base);
+            media_audio_pacer_wait_lead(&hw_audio_pacer, packet,
+               fmt->streams[audio_stream]->time_base, audio_feed_lead_ms);
             media_wait_hardware_ahead("native_auddec", auddec.fd, 0,
                &hw_audio_pacer, MEDIA_AUDIO_MAX_HW_AHEAD_MS, path);
             if (media_auddec_send_packet(&auddec, packet) != 0) {

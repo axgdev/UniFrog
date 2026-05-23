@@ -67,8 +67,10 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
   - `/dev/vidsink` opens.
   - `/dev/dis` opens.
   - MP4/H.264 decode and audio decode both work.
-- Native video uses a 2 MiB FFmpeg AVIO read buffer for MP4 demuxing and asks
-  `/dev/viddec` for a 16 MiB KSHM buffer to match the SF2000 DTS.
+- Native video uses a small FFmpeg AVIO chunk plus a post-probe multi-window SD
+  cache for MP4 demuxing. It asks `/dev/viddec` for a 16 MiB KSHM buffer for
+  high-resolution streams and an 8 MiB KSHM buffer for streams at or below
+  640x360 so low-resolution playback can keep the full SD cache in normal heap.
 - Best video playback behavior observed so far:
   - Quick mode off improved smoothness.
   - Audio-master, STC sync, freerun, and audio-quick modes all produced usable audio/video.

@@ -38,6 +38,15 @@ The 0117 logs validated the direction but exposed the next limit:
 The current defaults therefore spend more RAM on retained windows while making
 each physical read smaller.
 
+The 0119 logs added a low-resolution-specific finding:
+
+- 240p and 360p had clean SD counters, but hardware audio `ahead_a` dropped to
+  `0-32 ms` at monitor points, which is too close to audible underrun.
+- All resolutions still requested a 16 MiB video KSHM ring, so after decoder
+  init the opportunistic video read cache fell back to `16 x 256 KiB = 4 MiB`.
+- 16 MiB is useful for 720p/1080p, but it is oversized for 426x240 and 640x360
+  compressed packets. HCRTOS example decoders use 8 MiB KSHM successfully.
+
 ## Current Algorithm
 
 Native media uses a small LRU read-window cache in front of FFmpeg's AVIO
@@ -56,6 +65,10 @@ callbacks.
 - Native video allocates and pre-fills its cache only after `/dev/auddec` and
   `/dev/viddec` have reserved their KSHM buffers. This keeps the cache
   opportunistic: it can shrink or fail without preventing hardware decode.
+- For video streams at or below 640x360, native video asks `/dev/viddec` for an
+  8 MiB compressed KSHM ring by default instead of the 16 MiB high-resolution
+  ring. This leaves normal heap available for the full 8 MiB SD cache without
+  changing the fixed `mmz0` decoded-surface pool.
 - Before packet feeding starts, native video pre-fills a bounded startup
   cushion. The default target is 5 seconds of file bitrate, clamped between
   512 KiB and 2 MiB. This moves the first SD stall into the loading screen
@@ -86,6 +99,11 @@ The default uses several medium windows:
   containers have higher byte density per second and more seek pressure.
 - Hardware decoder ahead is still bounded so a long SD stall cannot be followed
   by a many-second packet dump into `/dev/auddec` or `/dev/viddec`.
+- Low-resolution video gets a slightly deeper audio feed lead by default
+  (`MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS=1500`). These streams have the same
+  packet cadence as higher resolutions but much less SD work per packet, so the
+  demux loop can run audio too close to the hardware clock unless the audio
+  side gets extra cushion.
 
 The linked HCRTOS examples and `ffplayer` headers also point to decoder-side
 buffer thresholds. UniFrog now uses `500/3000 ms` audio/video decoder buffering
@@ -99,6 +117,12 @@ Set these in `config.mk` or on the `make` command line:
 - `MEDIA_VIDEO_READAHEAD_SIZE`: bytes per physical video read window.
 - `MEDIA_VIDEO_READAHEAD_SLOTS`: number of retained video windows, capped in
   code at `16`.
+- `MEDIA_VIDEO_LOWRES_KSHM_SIZE`: video decoder compressed KSHM ring size used
+  for streams at or below 640x360. The default is 8 MiB; high-resolution streams
+  still use the 16 MiB ring.
+- `MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS`: hardware-audio feed lead used only
+  for low-resolution video. The default is 1500 ms and is clamped so it never
+  reduces the normal `MEDIA_AUDIO_FEED_LEAD_MS` value.
 - `MEDIA_VIDEO_PREFILL_TARGET_MS`: target media time for startup prefill.
 - `MEDIA_VIDEO_PREFILL_MIN_BYTES` and `MEDIA_VIDEO_PREFILL_MAX_BYTES`: clamp the
   startup prefill size so low-bitrate clips do not under-buffer and slow cards
@@ -125,6 +149,9 @@ Practical tuning rules:
   to keep the same total cache with shorter individual SD reads.
 - If startup stutter remains but mid-play is smooth, increase
   `MEDIA_VIDEO_PREFILL_MAX_BYTES` first.
+- If low-resolution video has clean `slow=0` cache close stats but monitor
+  lines show `ahead_a` approaching zero, increase
+  `MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS` before increasing SD cache sizes.
 - If a card is fast and users prefer stutter-free small videos over fast start,
   set `MEDIA_VIDEO_PRELOAD_MAX_BYTES` to a safe cap such as `16777216`.
 - If `VIDDEC_INIT` returns `errno=12`, do not increase the startup cache before
@@ -146,6 +173,14 @@ For a default build, native video should log something like:
 
 ```text
 unifrog media buffered_io readahead enabled tag=native_video mode=video preload=0 slot=524288 total=8388608 slots=16 ...
+```
+
+Low-resolution H.264 should also show the selected dynamic decoder and audio
+feed profile:
+
+```text
+unifrog media native video open_viddec begin ... 426x240 ... kshm=8388608 kshm_policy=lowres ...
+unifrog media native video clock ... audio_feed_lead_ms=1500 audio_feed_profile=lowres ...
 ```
 
 The close line now includes cache-efficiency counters:

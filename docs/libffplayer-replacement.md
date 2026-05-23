@@ -119,13 +119,16 @@ For source-level SDK behavior clues, inspect:
   The larger SD readahead buffer is the intended jitter absorber for local file
   reads.
 - The current local-file tuning knobs are `MEDIA_AUDIO_FEED_LEAD_MS`,
-  `MEDIA_VIDEO_FEED_LEAD_MS`, `MEDIA_FILE_BUFFER_SIZE`, and
-  `MEDIA_FILE_READAHEAD_SIZE`. Video has its own multi-window cache controlled
-  by `MEDIA_VIDEO_READAHEAD_SIZE` and `MEDIA_VIDEO_READAHEAD_SLOTS` because
-  seek-heavy MP4 demuxing alternates between active audio/video file regions.
+  `MEDIA_VIDEO_FEED_LEAD_MS`, `MEDIA_VIDEO_LOWRES_AUDIO_FEED_LEAD_MS`,
+  `MEDIA_FILE_BUFFER_SIZE`, and `MEDIA_FILE_READAHEAD_SIZE`. Video has its own
+  multi-window cache controlled by `MEDIA_VIDEO_READAHEAD_SIZE` and
+  `MEDIA_VIDEO_READAHEAD_SLOTS` because seek-heavy MP4 demuxing alternates
+  between active audio/video file regions.
   Startup buffering is controlled by `MEDIA_VIDEO_PREFILL_*`, and optional
   full-file preload for small videos is controlled by
-  `MEDIA_VIDEO_PRELOAD_MAX_BYTES`. Set these in `config.mk` for device
+  `MEDIA_VIDEO_PRELOAD_MAX_BYTES`. Low-resolution video can also tune
+  `MEDIA_VIDEO_LOWRES_KSHM_SIZE` to trade viddec compressed-ring depth for more
+  normal heap available to the SD cache. Set these in `config.mk` for device
   experiments instead of editing `src/unifrog_media.c` directly. Native video
   creates these caches after the hardware decoder KSHM allocations, so cache
   size changes should not prevent `/dev/viddec` from opening. The algorithm and

@@ -65,13 +65,14 @@
   native `VIDDEC_SET_DISPLAY_RECT` and `DIS_SET_ZOOM` use `1920x1080` source
   and destination rectangles.
 - The test MP4 total bitrates are about 229 kbps, 304 kbps, 391 kbps,
-  605 kbps, and 2.19 Mbps. A 2 MiB demux read buffer therefore covers about
-  73 s, 55 s, 43 s, 28 s, and 7.7 s respectively, with a 512 KiB allocation
-  fallback if memory is fragmented.
+  605 kbps, and 2.19 Mbps. Playback now uses a small AVIO chunk plus a
+  post-probe multi-window read cache instead of treating the AVIO chunk as the
+  playback prebuffer.
 - Native FFmpeg demux now opens video files through a custom `AVIOContext`
-  backed by that read buffer and logs read/seek statistics on close.
-- Native viddec now requests a 16 MiB KSHM buffer, matching the SF2000 DTS
-  `viddec.kshm_size = <0x1000000>`, instead of the older 8 MiB request.
+  and logs read/seek statistics on close.
+- Native viddec requests a 16 MiB KSHM buffer for high-resolution streams,
+  matching the SF2000 DTS `viddec.kshm_size = <0x1000000>`. Streams at or below
+  640x360 request 8 MiB so the SD read cache can keep its full window set.
 - The same logs still show `decoded=0 displayed=0` for 720p and 1080p native
   attempts. If that persists with the larger buffers, investigate quick-mode
   behavior and 1080p/profile/MMZ requirements separately from SD refill.
@@ -108,5 +109,5 @@
   `/dev/viddec`. Converted SPS/PPS post-extra delivery is kept only for
   Annex-B extradata.
 - FFmpeg file IO now separates probe and playback buffering. The AVIO callback
-  chunk remains 64 KiB to keep MP4 probing bounded, then a post-probe read-ahead
-  cache up to 2 MiB reduces SD read frequency during playback.
+  chunk remains 64 KiB to keep MP4 probing bounded, then a post-probe
+  multi-window read-ahead cache reduces SD read frequency during playback.

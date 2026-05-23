@@ -76,9 +76,12 @@ This preserves the useful part of the old behavior: playback does not reserve a
 large compressed-stream ring forever. The part that must be reserved is only the
 media hardware's decoded-surface pool.
 
-Current native playback sizes are 16 MiB for the video compressed ring and
-`0xa0000` bytes for the audio compressed ring. File IO buffering is separate
-from these driver rings.
+Current native playback sizes are 16 MiB for the high-resolution video
+compressed ring, 8 MiB for streams at or below 640x360, and `0xa0000` bytes for
+the audio compressed ring. File IO buffering is separate from these driver
+rings. The low-resolution video ring is intentionally smaller because those
+compressed packets do not need a 16 MiB ring, and the saved normal heap lets the
+post-probe SD cache keep its full retained window set.
 
 ## Application Arena Contract
 
@@ -96,7 +99,10 @@ surface memory.
 Media file IO has two separate buffers:
 
 - FFmpeg AVIO chunk: 64 KiB, with a 16 KiB fallback.
-- Post-probe read-ahead cache: up to 2 MiB, with a 512 KiB fallback.
+- Post-probe video read-ahead cache: normally `16 x 512 KiB = 8 MiB`, with
+  smaller slot/count fallbacks if normal heap is tight after decoder init.
+- Post-probe audio/file read-ahead cache: normally one 2 MiB window, with a
+  512 KiB fallback.
 
 The AVIO chunk stays small because MP4 probing and seeking can over-read whatever
 chunk size the callback exposes. The larger read-ahead cache is enabled only
