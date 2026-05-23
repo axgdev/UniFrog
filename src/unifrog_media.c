@@ -1662,6 +1662,8 @@ static int media_write_all(int fd, const void *data, size_t size)
 {
    const uint8_t *p = (const uint8_t *)data;
    size_t written = 0;
+   uint32_t start_ms = unifrog_perf_time_ms();
+   unsigned retries = 0;
 
    while (written < size) {
       ssize_t ret = write(fd, p + written, size - written);
@@ -1669,10 +1671,38 @@ static int media_write_all(int fd, const void *data, size_t size)
       if (ret < 0) {
          if (errno == EINTR)
             continue;
+         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EBUSY) {
+            uint32_t elapsed = unifrog_perf_time_ms() - start_ms;
+
+            if (elapsed >= VIDEO_WRITE_SPACE_TIMEOUT_MS) {
+               printf("unifrog media write timeout fd=%d size=%lu written=%lu errno=%d retries=%u waited=%lu\n",
+                  fd, (unsigned long)size, (unsigned long)written, errno,
+                  retries, (unsigned long)elapsed);
+               return -1;
+            }
+            if (retries == 0 || (retries % 200u) == 0)
+               printf("unifrog media write retry fd=%d size=%lu written=%lu errno=%d retries=%u waited=%lu\n",
+                  fd, (unsigned long)size, (unsigned long)written, errno,
+                  retries, (unsigned long)elapsed);
+            retries++;
+            usleep(VIDEO_WRITE_SPACE_POLL_US);
+            continue;
+         }
          return -1;
       }
-      if (ret == 0)
-         return -1;
+      if (ret == 0) {
+         uint32_t elapsed = unifrog_perf_time_ms() - start_ms;
+
+         if (elapsed >= VIDEO_WRITE_SPACE_TIMEOUT_MS) {
+            printf("unifrog media write zero timeout fd=%d size=%lu written=%lu retries=%u waited=%lu\n",
+               fd, (unsigned long)size, (unsigned long)written, retries,
+               (unsigned long)elapsed);
+            return -1;
+         }
+         retries++;
+         usleep(VIDEO_WRITE_SPACE_POLL_US);
+         continue;
+      }
       written += (size_t)ret;
    }
    return 0;
@@ -2434,7 +2464,9 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    int pre_extra_ret = 0;
    int post_extra_ret = 0;
    int post_extra_size = 0;
+   int pre_extra_size = 0;
    int write_extra_before_init = 0;
+   const uint8_t *pre_extra_data = NULL;
    uint8_t post_extra[512];
    size_t post_extra_used = 0;
    int win_ret = -1;
@@ -2443,7 +2475,6 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
 
    if (!fmt || stream_index < 0 || stream_index >= (int)fmt->nb_streams)
       return -1;
-   (void)disable_audio;
    stream = fmt->streams[stream_index];
    par = stream->codecpar;
    hc_codec = media_hc_codec_from_av(par->codec_id);
@@ -2464,7 +2495,8 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    cfg.codec_tag = par->codec_tag;
    cfg.independent_url = par->codec_id == AV_CODEC_ID_H264 ? 1 : 0;
    cfg.combine_enable = 0;
-   cfg.sync_mode = 0;
+   cfg.sync_mode = disable_audio ? AVSYNC_TYPE_FREERUN :
+      AVSYNC_TYPE_UPDATESTC;
    cfg.decode_mode = VDEC_WORK_MODE_KSHM;
    cfg.decoder_flag = 0;
    cfg.rotate_by_cfg = 1;
@@ -2488,7 +2520,7 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
    cfg.dst_area.y = 0;
    cfg.dst_area.w = VIDEO_OUTPUT_W;
    cfg.dst_area.h = VIDEO_OUTPUT_H;
-   cfg.quick_mode = 3;
+   cfg.quick_mode = 0;
    cfg.img_dis_mode = IMG_DIS_FULLSCREEN;
    cfg.mirror_type = MIRROR_TYPE_NONE;
    cfg.rotate_type = ROTATE_TYPE_0;
@@ -2507,7 +2539,9 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
           media_h264_extradata_annexb(par->extradata, par->extradata_size,
              post_extra, sizeof(post_extra), &post_extra_used) == 0 &&
           post_extra_used > 0) {
-         post_extra_size = (int)post_extra_used;
+         pre_extra_data = post_extra;
+         pre_extra_size = (int)post_extra_used;
+         write_extra_before_init = 1;
       } else if (par->extradata && par->extradata_size > 0) {
          if (par->extradata_size <= (int)sizeof(cfg.extra_data)) {
             cfg.extradata_size = par->extradata_size;
@@ -2518,6 +2552,8 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
             cfg.extradata_size = par->extradata_size;
             cfg.extradata_mode = 1;
             cfg.extradata = par->extradata;
+            pre_extra_data = par->extradata;
+            pre_extra_size = par->extradata_size;
             write_extra_before_init = 1;
          }
       }
@@ -2530,17 +2566,19 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
       } else {
          cfg.extradata_mode = 1;
          cfg.extradata = par->extradata;
+         pre_extra_data = par->extradata;
+         pre_extra_size = par->extradata_size;
          write_extra_before_init = 1;
       }
    }
 
-   printf("unifrog media native video open_viddec begin codec=%u av=%d tag=0x%lx cfg_tag=0x%lx %dx%d fps_milli=%u frame=%d kshm=%lu extra=%d extra_mode=%d write_pre=%d post_extra=%d decode=%d quick=%d\n",
+   printf("unifrog media native video open_viddec begin codec=%u av=%d tag=0x%lx cfg_tag=0x%lx %dx%d fps_milli=%u frame=%d kshm=%lu extra=%d extra_mode=%d write_pre=%d pre_extra=%d post_extra=%d decode=%d quick=%d sync=%d\n",
       cfg.codec_id, par->codec_id, (unsigned long)par->codec_tag,
       (unsigned long)cfg.codec_tag,
       cfg.pic_width, cfg.pic_height, cfg.frame_rate, cfg.codec_frame_size,
       (unsigned long)cfg.kshm_size, cfg.extradata_size, cfg.extradata_mode,
-      write_extra_before_init, post_extra_size,
-      cfg.decode_mode, cfg.quick_mode);
+      write_extra_before_init, pre_extra_size, post_extra_size,
+      cfg.decode_mode, cfg.quick_mode, cfg.sync_mode);
    media_video_activity_stage(1u,
       (((uint32_t)stream_index & 0xffu) << 16) |
       ((uint32_t)par->codec_id & 0xffffu),
@@ -2565,15 +2603,16 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
       ((uint32_t)cfg.extradata_mode & 0xffffu));
    if (write_extra_before_init)
       pre_extra_ret = media_write_extra_before_init(fd, "viddec",
-         par->extradata, par->extradata_size);
+         pre_extra_data, pre_extra_size);
    media_video_activity_stage(9u,
       ((uint32_t)(pre_extra_ret & 0xffffu) << 16) |
       ((uint32_t)(errno & 0xffffu)),
-      (uint32_t)(par->extradata_size & 0xffffu));
-   printf("unifrog media native video init begin fd=%d req=0x%lx dis=%d vidsink=%d mode=%d kshm=%d extra=%d extra_mode=%d write_pre=%d pre_ret=%d post_extra=%d\n",
+      (uint32_t)(pre_extra_size & 0xffffu));
+   printf("unifrog media native video init begin fd=%d req=0x%lx dis=%d vidsink=%d mode=%d kshm=%d extra=%d extra_mode=%d write_pre=%d pre_extra=%d pre_ret=%d post_extra=%d sync=%d\n",
       fd, (unsigned long)VIDDEC_INIT, dis_fd, vidsink_fd, cfg.decode_mode,
       cfg.kshm_size, cfg.extradata_size, cfg.extradata_mode,
-      write_extra_before_init, pre_extra_ret, post_extra_size);
+      write_extra_before_init, pre_extra_size, pre_extra_ret, post_extra_size,
+      cfg.sync_mode);
    (void)unifrog_log_flush();
    media_video_activity_stage(6u,
       (((uint32_t)cfg.decode_mode & 0xffu) << 16) |
@@ -2593,7 +2632,6 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
       printf("unifrog media native video post_extra begin fd=%d size=%d\n",
          fd, post_extra_size);
       post_extra_ret = media_send_packet_blob(fd, post_extra, post_extra_size,
-         par->codec_id == AV_CODEC_ID_H264 ? AV_PACKET_ES_DATA :
          AV_PACKET_EXTRA_DATA);
       media_video_activity_stage(11u,
          ((uint32_t)(post_extra_ret & 0xffffu) << 16) |
@@ -2655,14 +2693,15 @@ static int media_video_open_decoder(AVFormatContext *fmt, int stream_index,
 
       (void)ioctl(fd, VIDDEC_SET_SHOW_MASAIC_ON_ERR, mosaic);
    }
-   printf("unifrog media native video open fd=%d init=%d init_errno=%d pre_ret=%d post_ret=%d rect=%d win=%d win_errno=%d mirror=%d start=%d start_errno=%d codec=%u av=%d tag=0x%lx cfg_tag=0x%lx %dx%d fps_milli=%u frame=%d kshm=%lu extra=%d extra_mode=%d write_pre=%d post_extra=%d decode=%d quick=%d\n",
+   printf("unifrog media native video open fd=%d init=%d init_errno=%d pre_ret=%d post_ret=%d rect=%d win=%d win_errno=%d mirror=%d start=%d start_errno=%d codec=%u av=%d tag=0x%lx cfg_tag=0x%lx %dx%d fps_milli=%u frame=%d kshm=%lu extra=%d extra_mode=%d write_pre=%d pre_extra=%d post_extra=%d decode=%d quick=%d sync=%d\n",
       fd, init_ret, init_errno, pre_extra_ret, post_extra_ret, rect_ret, win_ret,
       win_errno, mirror_ret, start_ret, start_errno,
       cfg.codec_id, par->codec_id, (unsigned long)par->codec_tag,
       (unsigned long)cfg.codec_tag,
       cfg.pic_width, cfg.pic_height, cfg.frame_rate, cfg.codec_frame_size,
       (unsigned long)cfg.kshm_size, cfg.extradata_size, cfg.extradata_mode,
-      write_extra_before_init, post_extra_size, cfg.decode_mode, cfg.quick_mode);
+      write_extra_before_init, pre_extra_size, post_extra_size, cfg.decode_mode,
+      cfg.quick_mode, cfg.sync_mode);
    if (init_ret != 0 || pre_extra_ret != 0 || post_extra_ret != 0 ||
        start_ret != 0) {
       close(fd);
@@ -2837,11 +2876,18 @@ static int media_play_native_video(const char *path,
    printf("unifrog media native init_drivers done\n");
    (void)unifrog_log_flush();
    if (!disable_audio && audio_stream >= 0) {
+      int auddec_ret;
+
       printf("unifrog media native auddec_open begin stream=%d\n",
          audio_stream);
       (void)unifrog_log_flush();
-      (void)media_auddec_open(fmt, audio_stream, 2, &auddec);
-      printf("unifrog media native auddec_open done fd=%d\n", auddec.fd);
+      auddec_ret = media_auddec_open(fmt, audio_stream, AVSYNC_TYPE_UPDATESTC,
+         &auddec);
+      if (auddec_ret != 0)
+         auddec_ret = media_auddec_open(fmt, audio_stream,
+            AVSYNC_TYPE_FREERUN, &auddec);
+      printf("unifrog media native auddec_open done ret=%d fd=%d freerun=%d\n",
+         auddec_ret, auddec.fd, auddec.freerun);
       (void)unifrog_log_flush();
    }
    media_video_debug_packets = 0;
@@ -2849,7 +2895,7 @@ static int media_play_native_video(const char *path,
       video_stream, auddec.fd);
    (void)unifrog_log_flush();
    video_fd = media_video_open_decoder(fmt, video_stream, disable_audio ||
-      auddec.fd < 0);
+      auddec.fd < 0 || auddec.freerun);
    printf("unifrog media native video_open done fd=%d\n", video_fd);
    (void)unifrog_log_flush();
    if (video_fd < 0)
@@ -2886,11 +2932,12 @@ static int media_play_native_video(const char *path,
          }
       }
    }
-   video_freerun = disable_audio || (auddec.fd < 0);
-   if (auddec.fd < 0 && audio_enabled)
+   video_freerun = disable_audio || (auddec.fd < 0) || auddec.freerun;
+   if (video_freerun && audio_enabled)
       printf("unifrog media native video forcing freerun due to software audio path\n");
-   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d audio_enabled=%d\n",
-      video_freerun, disable_audio, auddec.fd >= 0, audio_enabled);
+   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d\n",
+      video_freerun, disable_audio, auddec.fd >= 0, auddec.freerun,
+      audio_enabled);
    packet = av_packet_alloc();
    frame = av_frame_alloc();
    if (!packet || !frame)
@@ -4269,6 +4316,13 @@ static void media_init_drivers_once(void)
       (unsigned long)((uintptr_t)&_pvdec_end - (uintptr_t)&_pvdec_start),
       (unsigned long)((uintptr_t)&_deca_audio_stream_struct_end -
          (uintptr_t)&_deca_audio_stream_struct_start));
+   printf("unifrog media abi audio_cfg=%lu audio_status=%lu video_cfg=%lu pkt=%lu cmd_auddec_init=0x%lx cmd_viddec_init=0x%lx\n",
+      (unsigned long)sizeof(struct audio_config),
+      (unsigned long)sizeof(struct audio_decore_status),
+      (unsigned long)sizeof(struct video_config),
+      (unsigned long)sizeof(AvPktHd),
+      (unsigned long)AUDDEC_INIT,
+      (unsigned long)VIDDEC_INIT);
    (void)unifrog_log_flush();
    initialized = 1;
 }
