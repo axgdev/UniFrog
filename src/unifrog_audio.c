@@ -12,6 +12,7 @@
 #include <hcuapi/audsink.h>
 #include <hcuapi/gpio.h>
 #include <hcuapi/pinpad.h>
+#include <hcuapi/pinmux.h>
 #include <hcuapi/snd.h>
 #include <kernel/module.h>
 
@@ -52,6 +53,8 @@ enum audio_gate {
 };
 
 static int stock_audio_output_gate_enabled;
+
+static unsigned read_pinmux(pinpad_e pin);
 
 static void clear_audio(struct unifrog_audio *audio)
 {
@@ -100,10 +103,12 @@ static void apply_stock_audio_output_gate(int enabled)
    enum audio_gate gate = current_audio_gate();
 
    if (gate == AUDIO_GATE_GB300_L15) {
+      pinmux_configure(PINPAD_L15, PINMUX_L15_GPIO);
       gpio_configure(PINPAD_L15, GPIO_DIR_OUTPUT);
       gpio_set_output(PINPAD_L15, enabled ? false : true);
       set_reg_gate(GPIO_L_DIR, GPIO_L_OUTPUT, GPIO_L15_MASK, enabled);
    } else {
+      pinmux_configure(PINPAD_R07, PINMUX_R07_GPIO);
       gpio_configure(PINPAD_R07, GPIO_DIR_OUTPUT);
       gpio_set_output(PINPAD_R07, enabled ? false : true);
       set_reg_gate(GPIO_R_DIR, GPIO_R_OUTPUT, GPIO_R07_MASK, enabled);
@@ -112,15 +117,26 @@ static void apply_stock_audio_output_gate(int enabled)
 
 static void set_stock_audio_output_gate(int enabled)
 {
+   enum audio_gate gate = current_audio_gate();
+   int old_enabled = stock_audio_output_gate_enabled;
+   uint32_t l_dir;
+   uint32_t l_out;
+   uint32_t r_dir;
+   uint32_t r_out;
+
    stock_audio_output_gate_enabled = enabled ? 1 : 0;
    apply_stock_audio_output_gate(enabled);
+   unifrog_audio_debug_gate(&l_dir, &l_out, &r_dir, &r_out);
+   printf("unifrog audio output_gate enabled=%d old=%d preferred=%s l=0x%08lx/0x%08lx r=0x%08lx/0x%08lx mux_l15=%u mux_r07=%u\n",
+      stock_audio_output_gate_enabled, old_enabled, audio_gate_name(gate),
+      (unsigned long)l_dir, (unsigned long)l_out,
+      (unsigned long)r_dir, (unsigned long)r_out,
+      read_pinmux(PINPAD_L15), read_pinmux(PINPAD_R07));
 }
 
 void unifrog_audio_set_output_gate_enabled(int enabled)
 {
    set_stock_audio_output_gate(enabled);
-   printf("unifrog audio output_gate enabled=%d preferred=%s\n",
-      enabled ? 1 : 0, audio_gate_name(current_audio_gate()));
 }
 
 void unifrog_audio_restore_output_gate(void)
@@ -640,8 +656,9 @@ void unifrog_audio_debug_dump(struct unifrog_audio *audio, const char *tag)
       audio_gate_name(current_audio_gate()), stock_audio_output_gate_enabled,
       (unsigned long)l_dir, (unsigned long)l_out,
       (unsigned long)r_dir, (unsigned long)r_out);
-   printf("unifrog audio mux tag=%s l22=%u l23=%u l24=%u l25=%u l26=%u l27=%u l28=%u l29=%u r07=%u\n",
+   printf("unifrog audio mux tag=%s l15=%u l22=%u l23=%u l24=%u l25=%u l26=%u l27=%u l28=%u l29=%u r07=%u\n",
       tag ? tag : "?",
+      read_pinmux(PINPAD_L15),
       read_pinmux(PINPAD_L22), read_pinmux(PINPAD_L23),
       read_pinmux(PINPAD_L24), read_pinmux(PINPAD_L25),
       read_pinmux(PINPAD_L26), read_pinmux(PINPAD_L27),

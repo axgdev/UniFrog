@@ -16,6 +16,12 @@ or `src/unifrog_media.c`.
   firmware uses GPIO L15 for the same active-low amp-enable role. The muted/off
   state is visible in diagnostics as the selected gate output bit set; the
   enabled state clears it.
+- Reverse engineering `bisrv_gb300_v2.asd` confirms the GB300 stock helper at
+  `0x801b8b74` sets `0xb8800058` bit 15 as output and writes
+  `(level << 15)` to `0xb8800054`. The stock emulation path calls this helper
+  with `level=0` after `run_sound_init(0, sample_rate, channels)`, so UniFrog
+  keeps L15 active-low and explicitly restores the L15 pinmux to GPIO when the
+  audio gate is enabled.
 - The LCD panel ID is only a default board hint. Some GB300 units can have an
   SF2000 panel, so UniFrog also switches to the GB300/L15 audio gate when the
   local input scanner proves that the GB300 stock-bit keypad bus is present.
@@ -120,6 +126,10 @@ or `src/unifrog_media.c`.
   `MEDIA_SEEK_WARMUP_PACKETS` window lets those packets through before
   re-enabling hardware-ahead caps; without it, seeks can stall forever with
   `clock=0` and a large absolute packet PTS.
+- Hardware-ahead waits are also bounded by `MEDIA_HW_AHEAD_MAX_WAIT_MS`. If the
+  decoder clock remains stuck after a seek, UniFrog logs `hw_ahead timeout`,
+  caps its internal feed timestamp, and continues instead of waiting until the
+  watchdog resets the device.
 - MP4/M4A AAC must be passed like HCPlayer does: AudioSpecificConfig in
   `audio_config.extra_data`, then raw demuxed AAC access units as ES packets.
   Wrapping those raw MP4 packets in synthetic ADTS headers initialized the

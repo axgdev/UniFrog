@@ -141,6 +141,15 @@ Set these in `config.mk` or on the `make` command line:
   demux seek before hardware-ahead caps resume. This is separate from steady
   playback buffering; it only gives the flushed HCRTOS decoder clocks enough
   data to advance from zero again.
+- `MEDIA_HW_AHEAD_MAX_WAIT_MS`: maximum time to wait for `/dev/auddec` or
+  `/dev/viddec` clocks to reduce an over-ahead condition. If the hardware clock
+  stalls after repeated seeks, UniFrog caps its internal feed timestamp and
+  resumes instead of risking a watchdog reset.
+- `MEDIA_SEEK_ACCELERATE_FRAMES`: set to `1` to show the older visible
+  fast-forward catch-up after seeks. The default `0` keeps the video plane
+  hidden until the decoder reaches the requested timestamp. Compressed reference
+  packets are still fed, because dropping H.264 reference packets can corrupt
+  later frames.
 - `MEDIA_VIDEO_BUFFERING_START_MS` and `MEDIA_VIDEO_BUFFERING_END_MS`: decoder
   buffering thresholds passed to `/dev/viddec`.
 - `MEDIA_AUDIO_BUFFERING_START_MS` and `MEDIA_AUDIO_BUFFERING_END_MS`: decoder
@@ -222,6 +231,14 @@ Hardware feed caps are logged as:
 ```text
 unifrog media hw_ahead wait kind=... ahead=... max=... clock=... feed=...
 unifrog media hw_ahead done kind=... clock=... feed=... ahead=...
+unifrog media hw_ahead timeout kind=... ahead=... capped_feed=... limit=...
+```
+
+Post-seek catch-up is logged as:
+
+```text
+unifrog media seek video catchup mode=skip until=... hidden=1 ...
+unifrog media seek video catchup_done mode=skip packet_ms=... until=...
 ```
 
 Occasional `hw_ahead` waits are normal. Constant waits plus audio/video stutter

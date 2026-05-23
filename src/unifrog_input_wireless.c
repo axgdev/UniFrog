@@ -505,6 +505,7 @@ void unifrog_input_wireless_init(void)
       rf_stock_ready_pin_state();
       rf_force_stock_board_shadow();
       rf_force_stock_rx_idle_regs();
+      unifrog_audio_restore_output_gate();
       wireless_rf_bus_ok = 1;
       wireless_initialized = 1;
       printf("unifrog wireless rf init ok variant=stock_full_init\n");
@@ -515,6 +516,7 @@ void unifrog_input_wireless_init(void)
       printf("unifrog wireless rf init selftest_fail last=0x%02x\n", (unsigned)test);
       (void)unifrog_log_flush();
       unifrog_input_restore_local_bus();
+      unifrog_audio_restore_output_gate();
    }
 }
 
