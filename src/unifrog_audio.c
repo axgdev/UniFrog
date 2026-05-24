@@ -129,10 +129,11 @@ int unifrog_audio_prefers_stereo_output(void)
 unsigned unifrog_audio_output_channels(void)
 {
    /*
-    * GB300 needs a distinct L15 gate and SND policy, but 0138 diagnostics
-    * showed the audible speaker route is the mono /dev/sndC0i2so setup.
+    * GB300 is a physical mono-speaker device, but the I2SO/DAC route behaves
+    * like a stereo frame sink. Keep media mono-mixed above this layer and feed
+    * duplicated stereo frames to the hardware route.
     */
-   return 1u;
+   return unifrog_audio_prefers_stereo_output() ? 2u : 1u;
 }
 
 static uint32_t current_audio_snd_devs(void)

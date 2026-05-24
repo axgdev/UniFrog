@@ -24,6 +24,8 @@ struct unifrog_media_video_options {
 int unifrog_media_play_video_ex(const char *path,
    const struct unifrog_media_video_options *options);
 int unifrog_media_play_video(const char *path);
+int unifrog_media_run_audio_diagnostics_ex(char *summary, size_t summary_size,
+   unifrog_media_progress_cb progress, void *userdata);
 int unifrog_media_run_audio_diagnostics(char *summary, size_t summary_size);
 
 #ifdef __cplusplus

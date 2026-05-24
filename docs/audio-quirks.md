@@ -54,10 +54,11 @@ or `src/unifrog_media.c`.
 - UniFrog-owned UI/theme playback prefers the SND backend because the silence
   gate can inspect PCM buffers before transfer. The audsink backend remains a
   fallback for those short sounds.
-- Libretro core playback uses mono output on SF2000 and GB300. GB300 or a
-  stock-bit GB300 input bus still gets the GB300 L15 gate and larger direct-SND
-  ring, but UniFrog mixes core stereo samples down before writing to the
-  single-speaker `/dev/sndC0i2so` route confirmed by 0138 diagnostics.
+- Libretro core playback uses mono output on SF2000. GB300 or a stock-bit
+  GB300 input bus still gets the GB300 L15 gate and larger direct-SND ring, but
+  UniFrog mixes content to mono and duplicates it into stereo I2S frames before
+  writing to `/dev/sndC0i2so`. The GB300 has one speaker, but the I2SO/DAC path
+  should be treated as a stereo frame sink.
 - On GB300, UniFrog's AUTO PCM opener tries direct `/dev/sndC0i2so` before
   AUDSINK. The direct SND open uses the vendor-style HCRTOS parameters from the
   cast/sound-test examples: `O_RDWR`, AUDPAD source, `start_threshold=2`, and a
@@ -71,6 +72,10 @@ or `src/unifrog_media.c`.
   Developer -> Audio test. 0134 through 0136 showed all production auddec routes
   stayed at `decoded=0`/`first_header_*=0`; use the runtime probe to collect
   auddec route labels instead of compiling separate one-off probe builds.
+- GB300 AAC containers are fed to `/dev/auddec` as ADTS-wrapped ES data. The
+  raw MP4 AAC + AudioSpecificConfig setup initializes on GB300 but 0139 showed
+  it never parsed a header, while SF2000 keeps the raw-ASC path that previously
+  produced working hardware audio.
 - Audio-only and native video-container audio playback prefer compressed
   packets through `/dev/auddec` when the linked HCRTOS plugin supports the
   codec. Unsupported or failed software-only routes still fall back to
@@ -197,8 +202,8 @@ there, but the important behavioral clues are:
 - keep output muted until real PCM exists;
 - avoid software gain as a noise mask;
 - prefer the left-speaker/duplicate-left route over differential or fake
-  stereo output on SF2000 hardware, and mix GB300 content to mono unless a
-  tested hardware path proves a second output channel is actually audible;
+  stereo output on SF2000 hardware, and mix GB300 content to mono while still
+  feeding duplicated stereo frames into its I2S hardware path;
 - compare HCRTOS SND/AUDSINK settings against the stock duplicate and volume
   behavior whenever libretro audio quality regresses.
 

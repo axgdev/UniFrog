@@ -7115,6 +7115,7 @@ static void activate(struct native_frontend *fe)
       set_status(fe, "fast SD probe %d  %s", ret, summary);
    } else if (strcmp(item.path, "audio_test") == 0) {
       char summary[96];
+      struct frontend_media_progress progress;
       int ret;
 
       frontend_loading_show(fe, "Audio", "GB300 diagnostics",
@@ -7122,7 +7123,12 @@ static void activate(struct native_frontend *fe)
       frontend_sound_shutdown();
       (void)unifrog_log_flush();
       summary[0] = '\0';
-      ret = unifrog_media_run_audio_diagnostics(summary, sizeof(summary));
+      memset(&progress, 0, sizeof(progress));
+      progress.fe = fe;
+      unifrog_text_copy(progress.name, sizeof(progress.name),
+         "GB300 diagnostics");
+      ret = unifrog_media_run_audio_diagnostics_ex(summary, sizeof(summary),
+         frontend_media_progress_update, &progress);
       unifrog_input_clear();
       set_status(fe, "audio diag %d %s", ret, summary);
    } else if (strcmp(item.path, "battery_refresh") == 0) {

@@ -204,10 +204,12 @@
 #define MEDIA_VIDEO_AUDIO_PERIODS 16u
 #define MEDIA_AUDIO_KSHM_SIZE 0x000a0000u
 #define MEDIA_GB300_AUDDEC_PROBE_RATE 44100u
-#define MEDIA_GB300_AUDDEC_PROBE_CHANNELS 1u
+#define MEDIA_GB300_AUDDEC_PROBE_CHANNELS 2u
 #define MEDIA_GB300_AUDDEC_PROBE_CHUNK_FRAMES 2048u
 #define MEDIA_GB300_AUDDEC_PROBE_PACKETS 4u
 #define MEDIA_GB300_AUDDEC_PROBE_PAUSE_US 280000u
+#define MEDIA_GB300_PRODUCTION_TONE_FRAMES 2048u
+#define MEDIA_GB300_PRODUCTION_TONE_PACKETS 12u
 #define MEDIA_GB300_I2SO_PRIME_PERIOD_BYTES 3072u
 #define MEDIA_GB300_I2SO_PRIME_PERIODS 40u
 #define MEDIA_GB300_I2SO_PRIME_START_THRESHOLD 2u
@@ -604,6 +606,13 @@ static unsigned media_audio_output_channels(void)
    return unifrog_audio_output_channels();
 }
 
+static unsigned media_audio_mix_channels(unsigned output_channels)
+{
+   if (unifrog_audio_prefers_stereo_output() && output_channels > 1u)
+      return 1u;
+   return output_channels;
+}
+
 static uint64_t media_audio_output_layout(unsigned channels)
 {
    return channels > 1u ? AV_CH_LAYOUT_STEREO : AV_CH_LAYOUT_MONO;
@@ -615,6 +624,12 @@ static audio_channel_select_t media_audio_channel_select(void)
       AUDIO_MONO_LEFT;
 }
 
+static uint8_t media_audio_runtime_volume(void)
+{
+   return unifrog_audio_prefers_stereo_output() ? 90u :
+      (uint8_t)MEDIA_AUDIO_VOLUME;
+}
+
 static int media_gb300_i2so_prime_open(const char *tag,
    unsigned sample_rate, unsigned channels, unsigned bits, int sync_mode,
    uint32_t pcm_dest, uint32_t extra_path)
@@ -622,7 +637,7 @@ static int media_gb300_i2so_prime_open(const char *tag,
    struct snd_pcm_params params;
    struct snd_hw_info hw;
    snd_pcm_uframes_t avail_min = MEDIA_GB300_I2SO_PRIME_PERIOD_BYTES;
-   uint8_t volume = MEDIA_AUDIO_VOLUME;
+   uint8_t volume = media_audio_runtime_volume();
    int fd;
    int hw_ret;
    int hw_errno;
@@ -792,6 +807,21 @@ static void media_expand_mono_to_output(const int16_t *mono, int16_t *output,
    }
 }
 
+static void media_expand_mono_to_output_inplace(int16_t *buffer,
+   unsigned frames, unsigned channels)
+{
+   if (!buffer || frames == 0 || channels <= 1u)
+      return;
+   for (unsigned i = frames; i > 0; i--) {
+      int16_t sample = buffer[i - 1u];
+      unsigned out = (i - 1u) * channels;
+
+      buffer[out] = sample;
+      for (unsigned ch = 1; ch < channels; ch++)
+         buffer[out + ch] = sample;
+   }
+}
+
 static int media_audio_write_mono_output(struct unifrog_audio *audio,
    const int16_t *mono, int16_t *scratch, unsigned frames,
    unsigned channels)
@@ -804,6 +834,45 @@ static int media_audio_write_mono_output(struct unifrog_audio *audio,
       return -1;
    media_expand_mono_to_output(mono, scratch, frames, channels);
    return unifrog_audio_write(audio, scratch, frames);
+}
+
+static void media_log_pcm_stats(const char *scope,
+   const struct unifrog_audio *audio, const int16_t *pcm, unsigned frames,
+   const char *path)
+{
+   static unsigned log_count;
+   unsigned channels;
+   unsigned samples;
+   unsigned nonzero = 0;
+   unsigned abs_max = 0;
+   int min = 0;
+   int max = 0;
+   uint64_t abs_sum = 0;
+
+   if (!audio || !pcm || frames == 0 || log_count >= 24u)
+      return;
+   channels = audio->channels ? audio->channels : 1u;
+   samples = frames * channels;
+   for (unsigned i = 0; i < samples; i++) {
+      int sample = pcm[i];
+      unsigned abs_value;
+
+      if (i == 0 || sample < min)
+         min = sample;
+      if (i == 0 || sample > max)
+         max = sample;
+      abs_value = sample < 0 ? (unsigned)-sample : (unsigned)sample;
+      if (abs_value > 4u)
+         nonzero++;
+      if (abs_value > abs_max)
+         abs_max = abs_value;
+      abs_sum += abs_value;
+   }
+   log_count++;
+   printf("unifrog media pcm_stats scope=%s idx=%u backend=%d fd=%d frames=%u ch=%u nonzero=%u/%u min=%d max=%d abs_max=%u abs_avg=%lu path=%s\n",
+      scope ? scope : "?", log_count, audio->backend, audio->fd, frames,
+      channels, nonzero, samples, min, max, abs_max,
+      samples ? (unsigned long)(abs_sum / samples) : 0ul, path ? path : "");
 }
 
 static size_t media_mmz_total0(void)
@@ -2773,7 +2842,8 @@ static int media_ffmpeg_open_audio(const char *path, unsigned output_channels,
    int stream;
    int ret;
    int sd_read_active = 0;
-   uint64_t output_layout = media_audio_output_layout(output_channels);
+   uint64_t output_layout = media_audio_output_layout(
+      media_audio_mix_channels(output_channels));
 
    media_ffmpeg_register_once();
    media_sd_read_begin("ffmpeg_audio_open", path);
@@ -2873,11 +2943,13 @@ static int media_ffmpeg_write_frame(struct unifrog_audio *audio,
    uint32_t *played, const char *path)
 {
    unsigned offset = 0;
+   unsigned mix_channels;
 
    if (!audio || !converter || !frame || !pcm || pcm_capacity == 0)
       return -1;
+   mix_channels = media_audio_mix_channels(audio->channels);
    if (media_ffmpeg_converter_configure(converter, codec_ctx, frame,
-       (int)audio->rate, (int)audio->channels, path) != 0)
+       (int)audio->rate, (int)mix_channels, path) != 0)
       return -1;
    while (offset < (unsigned)frame->nb_samples) {
       unsigned chunk = (unsigned)frame->nb_samples - offset;
@@ -2906,6 +2978,10 @@ static int media_ffmpeg_write_frame(struct unifrog_audio *audio,
          src_data, (int)chunk);
       if (got <= 0)
          return -1;
+      if (mix_channels == 1u && audio->channels > 1u)
+         media_expand_mono_to_output_inplace(pcm, (unsigned)got,
+            audio->channels);
+      media_log_pcm_stats("ffmpeg", audio, pcm, (unsigned)got, path);
       if (media_ffmpeg_write_pcm(audio, pcm, (unsigned)got, played,
           path) != 0)
          return -1;
@@ -2966,7 +3042,7 @@ static int media_play_ffmpeg_audio(const char *path)
          codec_ctx->sample_rate, output_channels, path);
       goto out;
    }
-   (void)unifrog_audio_set_volume(&audio, MEDIA_AUDIO_VOLUME);
+   (void)unifrog_audio_set_volume(&audio, media_audio_runtime_volume());
    (void)unifrog_audio_set_mute(&audio, 1);
    (void)unifrog_audio_start(&audio);
    (void)unifrog_audio_set_output_enabled(&audio, 1);
@@ -4449,6 +4525,7 @@ static int media_auddec_send_packet(struct media_auddec *auddec,
 {
    AvPktHd header;
    uint8_t adts[7];
+   const uint8_t *log_data;
    uint32_t payload_size;
    uint32_t packet_index;
 
@@ -4459,6 +4536,7 @@ static int media_auddec_send_packet(struct media_auddec *auddec,
    packet_index = auddec->packets;
    if (auddec->aac_adts)
       payload_size += (uint32_t)sizeof(adts);
+   log_data = packet->data;
    memset(&header, 0, sizeof(header));
    header.pts = media_packet_pts_ms(packet, auddec->time_base);
    header.dur = media_packet_duration_ms(packet, auddec->time_base);
@@ -4470,6 +4548,7 @@ static int media_auddec_send_packet(struct media_auddec *auddec,
       media_aac_make_adts(adts, (unsigned)packet->size,
          auddec->aac_profile, auddec->aac_sample_rate_index,
          auddec->aac_channels);
+      log_data = adts;
       if (media_auddec_write_all(auddec, adts, sizeof(adts)) != 0)
          return -1;
    }
@@ -4479,7 +4558,7 @@ static int media_auddec_send_packet(struct media_auddec *auddec,
    auddec->packets++;
    media_auddec_log_packet_status(auddec,
       auddec->aac_adts ? "compressed_adts" : "compressed", packet_index,
-      packet->data, (size_t)packet->size, header.pts, header.dur);
+      log_data, (size_t)payload_size, header.pts, header.dur);
    return 0;
 }
 
@@ -4677,6 +4756,80 @@ struct media_gb300_auddec_probe_variant {
 static int16_t
    media_gb300_auddec_probe_pcm[MEDIA_GB300_AUDDEC_PROBE_CHUNK_FRAMES *
       MEDIA_GB300_AUDDEC_PROBE_CHANNELS];
+static int16_t
+   media_gb300_production_tone_pcm[MEDIA_GB300_PRODUCTION_TONE_FRAMES * 2u];
+
+static void media_audio_diag_progress(unifrog_media_progress_cb progress,
+   void *userdata, const char *stage, unsigned done, unsigned total)
+{
+   if (progress)
+      progress(userdata, stage ? stage : "", done, total);
+}
+
+static void media_fill_gb300_production_tone(unsigned packet,
+   unsigned channels)
+{
+   unsigned half_period = 22u + (packet % 4u) * 11u;
+   int amplitude = 9000;
+
+   if (channels == 0 || channels > 2u)
+      channels = 2u;
+   for (unsigned i = 0; i < MEDIA_GB300_PRODUCTION_TONE_FRAMES; i++) {
+      int16_t sample = (((packet * MEDIA_GB300_PRODUCTION_TONE_FRAMES + i) /
+         half_period) & 1u) ? (int16_t)amplitude : (int16_t)-amplitude;
+
+      media_gb300_production_tone_pcm[i * channels] = sample;
+      if (channels > 1u)
+         media_gb300_production_tone_pcm[i * channels + 1u] = sample;
+   }
+}
+
+static int media_run_gb300_production_tone_probe(const char *tag)
+{
+   struct unifrog_audio audio;
+   unsigned channels = media_audio_output_channels();
+   int ret = -1;
+   unsigned writes = 0;
+
+   if (!unifrog_audio_prefers_stereo_output())
+      return -1;
+   if (channels == 0 || channels > 2u)
+      channels = 2u;
+   memset(&audio, 0, sizeof(audio));
+   audio.fd = -1;
+   printf("unifrog media gb300_prod_tone begin tag=%s rate=%u ch=%u packets=%u frames=%u\n",
+      tag ? tag : "?", MEDIA_GB300_AUDDEC_PROBE_RATE, channels,
+      MEDIA_GB300_PRODUCTION_TONE_PACKETS, MEDIA_GB300_PRODUCTION_TONE_FRAMES);
+   if (unifrog_audio_open(&audio, MEDIA_GB300_AUDDEC_PROBE_RATE, channels,
+       512, 8) != 0) {
+      printf("unifrog media gb300_prod_tone open_failed tag=%s ch=%u\n",
+         tag ? tag : "?", channels);
+      return -1;
+   }
+   (void)unifrog_audio_set_volume(&audio, media_audio_runtime_volume());
+   (void)unifrog_audio_set_mute(&audio, 1);
+   (void)unifrog_audio_start(&audio);
+   (void)unifrog_audio_set_output_enabled(&audio, 1);
+   unifrog_audio_debug_dump(&audio, "gb300_prod_tone_after_start");
+   for (unsigned packet = 0; packet < MEDIA_GB300_PRODUCTION_TONE_PACKETS;
+        packet++) {
+      media_fill_gb300_production_tone(packet, channels);
+      media_log_pcm_stats("gb300_prod_tone", &audio,
+         media_gb300_production_tone_pcm, MEDIA_GB300_PRODUCTION_TONE_FRAMES,
+         tag);
+      if (unifrog_audio_write(&audio, media_gb300_production_tone_pcm,
+          MEDIA_GB300_PRODUCTION_TONE_FRAMES) != 0)
+         break;
+      writes++;
+      usleep(10000);
+   }
+   ret = writes == MEDIA_GB300_PRODUCTION_TONE_PACKETS ? 0 : -1;
+   printf("unifrog media gb300_prod_tone end tag=%s ret=%d writes=%u/%u\n",
+      tag ? tag : "?", ret, writes, MEDIA_GB300_PRODUCTION_TONE_PACKETS);
+   usleep(250000);
+   unifrog_audio_close(&audio);
+   return ret;
+}
 
 static void media_fill_gb300_auddec_probe_pcm(unsigned variant,
    unsigned packet)
@@ -4982,31 +5135,44 @@ static void media_run_gb300_auddec_probe_once(const char *tag)
    (void)media_run_gb300_auddec_probe(tag);
 }
 
-int unifrog_media_run_audio_diagnostics(char *summary, size_t summary_size)
+int unifrog_media_run_audio_diagnostics_ex(char *summary, size_t summary_size,
+   unifrog_media_progress_cb progress, void *userdata)
 {
    uint32_t start_ms = unifrog_perf_time_ms();
+   int prod_ret;
    int direct_ret;
    int auddec_ret;
    int ret;
 
    printf("unifrog media audio_diag begin gb300=%d\n",
       unifrog_audio_prefers_stereo_output() ? 1 : 0);
+   media_audio_diag_progress(progress, userdata, "production tone", 8, 100);
    unifrog_audio_debug_dump(NULL, "audio_diag_begin");
+   prod_ret = media_run_gb300_production_tone_probe("audio_diag");
+   media_audio_diag_progress(progress, userdata, "direct routes", 30, 100);
    direct_ret = unifrog_audio_run_gb300_route_probe("audio_diag");
+   media_audio_diag_progress(progress, userdata, "auddec routes", 62, 100);
    auddec_ret = media_run_gb300_auddec_probe("audio_diag");
    unifrog_audio_set_system_output_enabled(0);
    unifrog_audio_debug_dump(NULL, "audio_diag_end");
-   ret = direct_ret == 0 || auddec_ret == 0 ? 0 : -1;
+   ret = prod_ret == 0 || direct_ret == 0 || auddec_ret == 0 ? 0 : -1;
    if (summary && summary_size > 0) {
-      snprintf(summary, summary_size, "direct=%d auddec=%d %lums",
-         direct_ret, auddec_ret,
+      snprintf(summary, summary_size, "prod=%d direct=%d auddec=%d %lums",
+         prod_ret, direct_ret, auddec_ret,
          (unsigned long)(unifrog_perf_time_ms() - start_ms));
    }
-   printf("unifrog media audio_diag end ret=%d direct=%d auddec=%d ms=%lu summary=%s\n",
-      ret, direct_ret, auddec_ret,
+   media_audio_diag_progress(progress, userdata, "done", 100, 100);
+   printf("unifrog media audio_diag end ret=%d prod=%d direct=%d auddec=%d ms=%lu summary=%s\n",
+      ret, prod_ret, direct_ret, auddec_ret,
       (unsigned long)(unifrog_perf_time_ms() - start_ms),
       summary ? summary : "");
    return ret;
+}
+
+int unifrog_media_run_audio_diagnostics(char *summary, size_t summary_size)
+{
+   return unifrog_media_run_audio_diagnostics_ex(summary, summary_size, NULL,
+      NULL);
 }
 
 static int media_auddec_open_raw(const char *label, uint32_t codec_id,
@@ -5077,7 +5243,7 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
    };
    int fd;
    audio_channel_select_t channel = media_audio_channel_select();
-   uint8_t volume = MEDIA_AUDIO_VOLUME;
+   uint8_t volume = media_audio_runtime_volume();
    int caps_logged = 0;
    unsigned gb300_route_offset = 0;
 
@@ -5296,7 +5462,7 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
    };
    int hc_codec;
    audio_channel_select_t channel = media_audio_channel_select();
-   uint8_t volume = MEDIA_AUDIO_VOLUME;
+   uint8_t volume = media_audio_runtime_volume();
    unsigned bits;
    uint32_t last_stage = 0;
    int caps_logged = 0;
@@ -5374,13 +5540,15 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       (uint32_t)par->sample_rate : 44100u;
    if (par->codec_id == AV_CODEC_ID_AAC) {
       /*
-       * HCPlayer passes MP4/M4A AAC as raw frames with AudioSpecificConfig in
-       * audio_config. Synthesizing ADTS around those raw packets initialized
-       * cleanly on SF2000 but produced no audible audio.
+       * SF2000 accepts MP4/M4A AAC as raw frames with AudioSpecificConfig in
+       * audio_config. GB300 accepted that setup but never parsed a header in
+       * 0139, so feed GB300 AAC as ADTS-framed ES data instead.
        */
       media_aac_parse_asc(par, &auddec->aac_profile,
          &auddec->aac_sample_rate_index, &auddec->aac_channels);
-      if (par->extradata && par->extradata_size > 0) {
+      if (unifrog_audio_prefers_stereo_output()) {
+         auddec->aac_adts = 1;
+      } else if (par->extradata && par->extradata_size > 0) {
          base_cfg.extradata_size = (uint32_t)par->extradata_size;
          if (par->extradata_size <= (int)sizeof(base_cfg.extra_data)) {
             base_cfg.extradata_mode = 0;
@@ -6253,7 +6421,8 @@ static int media_native_open_sw_audio(AVFormatContext *fmt, int audio_stream,
        fmt->streams[audio_stream]->codecpar) != 0)
       goto fail;
    audio_ctx->request_sample_fmt = AV_SAMPLE_FMT_S16;
-   audio_ctx->request_channel_layout = media_audio_output_layout(output_channels);
+   audio_ctx->request_channel_layout = media_audio_output_layout(
+      media_audio_mix_channels(output_channels));
    if (avcodec_open2(audio_ctx, audio_decoder, NULL) != 0)
       goto fail;
    if (audio_ctx->sample_rate < 8000 || audio_ctx->sample_rate > 48000)
@@ -6269,7 +6438,7 @@ static int media_native_open_sw_audio(AVFormatContext *fmt, int audio_stream,
    if (!pcm)
       goto fail;
 
-   (void)unifrog_audio_set_volume(audio, MEDIA_AUDIO_VOLUME);
+   (void)unifrog_audio_set_volume(audio, media_audio_runtime_volume());
    (void)unifrog_audio_set_mute(audio, 1);
    (void)unifrog_audio_start(audio);
    (void)unifrog_audio_set_output_enabled(audio, 1);
@@ -6971,8 +7140,8 @@ static int media_play_ffmpeg_video(const char *path,
              avcodec_parameters_to_context(audio_ctx,
                 fmt->streams[audio_stream]->codecpar) == 0) {
             audio_ctx->request_sample_fmt = AV_SAMPLE_FMT_S16;
-            audio_ctx->request_channel_layout =
-               media_audio_output_layout(audio_output_channels);
+            audio_ctx->request_channel_layout = media_audio_output_layout(
+               media_audio_mix_channels(audio_output_channels));
             if (avcodec_open2(audio_ctx, audio_decoder, NULL) == 0 &&
                 audio_ctx->sample_rate >= 8000 &&
                 audio_ctx->sample_rate <= 48000 &&
@@ -6982,7 +7151,8 @@ static int media_play_ffmpeg_video(const char *path,
                pcm = malloc(sizeof(*pcm) * MEDIA_FFMPEG_CHUNK_FRAMES *
                   audio_output_channels);
                if (pcm) {
-                  (void)unifrog_audio_set_volume(&audio, MEDIA_AUDIO_VOLUME);
+                  (void)unifrog_audio_set_volume(&audio,
+                     media_audio_runtime_volume());
                   (void)unifrog_audio_set_mute(&audio, 1);
                   (void)unifrog_audio_start(&audio);
                   (void)unifrog_audio_set_output_enabled(&audio, 1);
@@ -8060,7 +8230,7 @@ static int media_play_wav_pcm(const char *path)
          rate, output_channels, path);
       goto out;
    }
-   (void)unifrog_audio_set_volume(&audio, MEDIA_AUDIO_VOLUME);
+   (void)unifrog_audio_set_volume(&audio, media_audio_runtime_volume());
    (void)unifrog_audio_set_mute(&audio, 0);
    (void)unifrog_audio_start(&audio);
    (void)unifrog_audio_set_output_enabled(&audio, 1);
@@ -8464,7 +8634,7 @@ int unifrog_media_play_video_ex(const char *path,
    printf("unifrog media hcplayer_init done\n");
    (void)unifrog_log_flush();
    unifrog_audio_set_system_output_enabled(0);
-   (void)unifrog_audio_set_system_volume(MEDIA_AUDIO_VOLUME);
+   (void)unifrog_audio_set_system_volume(media_audio_runtime_volume());
    (void)unifrog_audio_set_system_mute(1);
    unifrog_audio_debug_dump(NULL, "media_before_create");
    printf("unifrog media hcplayer_create begin\n");
@@ -8591,7 +8761,7 @@ int unifrog_media_play_video_ex(const char *path,
    }
    if (audio_output_enabled) {
       (void)hcplayer_set_audio_output_dev(player, AUDDEV_I2SO);
-      (void)unifrog_audio_set_system_volume(MEDIA_AUDIO_VOLUME);
+      (void)unifrog_audio_set_system_volume(media_audio_runtime_volume());
       msleep(60);
       if (force_audio || audio_only || !force_no_audio) {
          unifrog_audio_set_system_output_enabled(1);
