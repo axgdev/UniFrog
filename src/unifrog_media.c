@@ -580,6 +580,8 @@ static const char *media_avcodec_name(enum AVCodecID codec_id);
 static int media_exit_down(void);
 static int media_auddec_send_packet(struct media_auddec *auddec,
    const AVPacket *packet);
+static int media_auddec_status_decode_stalled(
+   const struct audio_decore_status *status);
 static void media_auddec_log_packet_status(struct media_auddec *auddec,
    const char *scope, uint32_t packet_index, const uint8_t *data, size_t size,
    int32_t pts, int32_t dur);
@@ -3087,10 +3089,12 @@ static int media_play_native_audio_compressed(const char *path)
    unsigned finish_timeout_ms = 600000u;
    uint32_t loop_polls = 0;
    uint32_t last_progress_poll_ms = 0;
+   uint32_t last_stall_poll_ms = 0;
    uint32_t start_ms = unifrog_perf_time_ms();
    int64_t duration_ms = -1;
    int sd_read_active = 0;
    int write_failed = 0;
+   int decode_stalled = 0;
    int eof_seen = 0;
    unsigned long last_decoded = 0;
    unsigned last_header_seen = 0;
@@ -3214,6 +3218,44 @@ static int media_play_native_audio_compressed(const char *path)
          }
       }
       av_packet_unref(packet);
+      if (unifrog_audio_prefers_stereo_output() &&
+          auddec.packets >= MEDIA_GB300_AUDDEC_STALL_PACKETS &&
+          !decode_stalled) {
+         uint32_t now_ms = unifrog_perf_time_ms();
+         uint32_t elapsed_ms = now_ms - start_ms;
+
+         if (elapsed_ms >= MEDIA_GB300_AUDDEC_STALL_MS &&
+             now_ms - last_stall_poll_ms >= MEDIA_AUDIO_PROGRESS_POLL_MS) {
+            struct audio_decore_status status;
+            int64_t cur_time = -1;
+            int status_ok;
+            int time_ok;
+
+            last_stall_poll_ms = now_ms;
+            memset(&status, 0, sizeof(status));
+            status_ok = ioctl(auddec.fd, AUDDEC_GET_STATUS, &status) == 0;
+            time_ok = ioctl(auddec.fd, AUDDEC_GET_CUR_TIME, &cur_time) == 0;
+            last_status_ok = status_ok;
+            last_time_ok = time_ok;
+            if (status_ok) {
+               last_decoded = (unsigned long)status.frames_decoded;
+               last_header_seen = status.first_header_got ||
+                  status.first_header_parsed;
+            }
+            if (time_ok)
+               last_audio_time = cur_time;
+            if (status_ok &&
+                media_auddec_status_decode_stalled(&status)) {
+               printf("unifrog media auddec fallback trigger reason=decode_stall packets=%lu ms=%lu decoded=%lu hdr=%u/%u time_ok=%d atime=%lld path=%s\n",
+                  (unsigned long)auddec.packets, (unsigned long)elapsed_ms,
+                  (unsigned long)status.frames_decoded,
+                  status.first_header_got, status.first_header_parsed,
+                  time_ok, (long long)cur_time, path ? path : "");
+               decode_stalled = 1;
+               break;
+            }
+         }
+      }
       loop_polls++;
       if (unifrog_perf_time_ms() - last_progress_poll_ms >=
           MEDIA_AUDIO_PROGRESS_POLL_MS) {
@@ -3254,7 +3296,7 @@ static int media_play_native_audio_compressed(const char *path)
             cur_time >= 0 ? cur_time : pacer.next_ms, duration_ms, 0, path);
       }
    }
-   ret = auddec.packets && !write_failed ? 0 : -1;
+   ret = auddec.packets && !write_failed && !decode_stalled ? 0 : -1;
    if (auddec.fd >= 0) {
       struct audio_decore_status status;
       int64_t cur_time = -1;
@@ -3279,13 +3321,11 @@ static int media_play_native_audio_compressed(const char *path)
        unifrog_audio_prefers_stereo_output() &&
        auddec.packets >= MEDIA_GB300_AUDDEC_STALL_PACKETS &&
        last_status_ok &&
-       last_time_ok &&
        last_decoded == 0 &&
-       !last_header_seen &&
-       last_audio_time <= 0) {
-      printf("unifrog media auddec fallback trigger reason=decode_stall packets=%lu decoded=%lu hdr=%u atime=%lld path=%s\n",
+       !last_header_seen) {
+      printf("unifrog media auddec fallback trigger reason=decode_stall packets=%lu decoded=%lu hdr=%u time_ok=%d atime=%lld path=%s\n",
          (unsigned long)auddec.packets, last_decoded, last_header_seen,
-         (long long)last_audio_time, path ? path : "");
+         last_time_ok, (long long)last_audio_time, path ? path : "");
       ret = -1;
    }
 
@@ -4500,6 +4540,15 @@ static void media_auddec_log_caps(int fd, const char *scope,
    printf("unifrog media auddec caps_optional scope=%s label=%s fd=%d ret=%d errno=%d caps=0x%lx codec=%lu sync=%d\n",
       scope ? scope : "?", label ? label : "?", fd, caps_ret, caps_errno,
       (unsigned long)caps, (unsigned long)codec_id, sync_mode);
+}
+
+static int media_auddec_status_decode_stalled(
+   const struct audio_decore_status *status)
+{
+   return status &&
+      status->frames_decoded == 0 &&
+      !status->first_header_got &&
+      !status->first_header_parsed;
 }
 
 static void media_auddec_log_packet_status(struct media_auddec *auddec,
@@ -6616,10 +6665,7 @@ static int media_play_native_video(const char *path,
              elapsed_ms >= MEDIA_GB300_AUDDEC_STALL_MS &&
              auddec.packets >= MEDIA_GB300_AUDDEC_STALL_PACKETS &&
              ioctl(auddec.fd, AUDDEC_GET_STATUS, &aud_status) == 0 &&
-             audio_time <= 0 &&
-             aud_status.frames_decoded == 0 &&
-             !aud_status.first_header_got &&
-             !aud_status.first_header_parsed) {
+             media_auddec_status_decode_stalled(&aud_status)) {
             printf("unifrog media native auddec fallback trigger reason=decode_stall packets=%lu ms=%lu decoded=%lu hdr=%u/%u atime=%lld path=%s\n",
                (unsigned long)auddec.packets, (unsigned long)elapsed_ms,
                (unsigned long)aud_status.frames_decoded,

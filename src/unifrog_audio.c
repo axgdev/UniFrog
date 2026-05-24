@@ -264,7 +264,11 @@ static int ensure_audio_drivers(void)
 
 static int open_system_snd(void)
 {
-   return open("/dev/sndC0i2so", O_RDWR);
+   /*
+    * System volume/mute only need control ioctls. Keep bidirectional DMA
+    * ownership on the playback paths that intentionally open the SND node.
+    */
+   return open("/dev/sndC0i2so", O_WRONLY);
 }
 
 static void configure_neutral_audio_controls_fd(int fd, const char *tag)
