@@ -29,9 +29,11 @@ or `src/unifrog_media.c`.
   configured L15 as an input. UniFrog reasserts the enabled audio gate after RF
   polling so GB300 audio is not silently disabled by controller polling.
 - `SND_IOCTL_SET_MUTE` controls the low-level HCRTOS sound output path. For
-  UniFrog-owned SND playback, this is the reliable way to keep the DAC quiet
-  until non-silent PCM is available; the board-specific GPIO gate is still
-  handled separately.
+  SF2000 UniFrog-owned SND playback, this is the reliable way to keep the DAC
+  quiet until non-silent PCM is available. On GB300, direct SND playback keeps
+  SND unmuted and gates the L15 amplifier path until PCM contains real signal;
+  0134 showed the SF2000-style post-start SND mute can look successful while
+  leaving GB300 playback effectively silent.
 - Digital zero samples are not enough by themselves. If the amplifier path is
   unmuted and enabled, zero PCM can still produce audible board noise.
 
@@ -39,10 +41,13 @@ or `src/unifrog_media.c`.
 
 - SND playback starts muted.
 - `unifrog_audio_write_timeout()` scans SND PCM buffers:
-  - all-silent buffers keep SND muted;
-  - buffers with real signal unmute before transfer.
-- `unifrog_audio_set_output_enabled(audio, 1)` enables the physical gate but
-  leaves direct SND playback muted until a non-silent buffer is written.
+  - SF2000 all-silent buffers keep SND muted, and real-signal buffers unmute
+    before transfer;
+  - GB300 all-silent buffers keep the L15 physical gate closed, and
+    real-signal buffers open the gate before transfer while SND stays unmuted.
+- `unifrog_audio_set_output_enabled(audio, 1)` enables the SF2000 physical gate
+  immediately, but on GB300 direct SND it arms the gate and waits for the first
+  non-silent PCM buffer.
 - Closing audio mutes SND and disables the physical output gate.
 - Native media playback keeps audio inside UniFrog where possible, so silence
   gating is based on decoded PCM instead of supervising an external player.
@@ -62,13 +67,11 @@ or `src/unifrog_media.c`.
 - On GB300, the broad direct-PCM route probe is now disabled by default. The
   0128 logs proved that `/dev/sndC0i2so` can drive the speaker through the L15
   gate; that beep proves only PCM DMA output, not compressed hardware decode.
-- On GB300, the first hardware-auddec open runs a focused `/dev/auddec` PCM
-  probe before normal playback. It feeds a generated `PCM_S16LE` tone through
-  `/dev/auddec` using several route/control orders and logs
-  `unifrog media gb300_auddec_probe`. If one of these tones is audible, the
-  auddec-to-speaker route is known and remaining silence is in compressed
-  packet/config handling. If all are silent while direct SND remains audible,
-  the missing piece is the auddec render path or mute/gate initialization.
+- The focused GB300 `/dev/auddec` PCM route probe is now opt-in because 0134
+  showed all probe routes stayed at `decoded=0`/`first_header_*=0` and only
+  added startup delay and speaker pops in normal playback. Enable
+  `UNIFROG_MEDIA_GB300_AUDDEC_PROBE_ONCE=1` only when intentionally collecting
+  auddec route diagnostics.
 - Audio-only and native video-container audio playback prefer compressed
   packets through `/dev/auddec` when the linked HCRTOS plugin supports the
   codec. Unsupported or failed software-only routes still fall back to
@@ -104,6 +107,9 @@ or `src/unifrog_media.c`.
   `MEDIA_GB300_I2SO_EXTRA_ROUTE=1` (which defines
   `UNIFROG_MEDIA_GB300_I2SO_EXTRA_ROUTE`) while default builds use the
   established I2SO prime routes first.
+- GB300 hardware-auddec attempts keep the speaker gate closed until auddec
+  status reports header or frame progress. Init/start success and a moving
+  `AUDDEC_GET_CUR_TIME` clock are not enough to unmute the physical output.
 - System volume/mute opens keep `/dev/sndC0i2so` write-only. Only UniFrog-owned
   PCM and I2SO-prime playback paths use bidirectional SND opens for DMA.
 - GB300 builds now treat "auddec init/start success but no decode progress" as
@@ -227,22 +233,19 @@ Use Developer or Storage -> Audio Probe. The important stages are:
 When the loud buzz is fixed, only the faint hardware noise floor should remain
 during silence stages.
 
-GB300 auddec diagnostics run once per boot on the first hardware-auddec open.
-The audible/logged order is:
+GB300 auddec diagnostics are opt-in via
+`UNIFROG_MEDIA_GB300_AUDDEC_PROBE_ONCE=1`. The logged route order is:
 
-- `0 i2so_current_after`: current production route, I2SO, internal audsink,
-  gate/control after `AUDDEC_START`.
-- `1 i2so_gate_before`: same route, but system output is unmuted and L15 is
-  opened before `AUDDEC_INIT`.
-- `2 i2so_controls_before`: same route, but auddec channel/volume/mute ioctls
-  run before `AUDDEC_START`.
-- `3 i2so_audsink_after`: I2SO with `enable_audsink=1`.
-- `4 default_current_after`: `snd_devs=0`, relying on the driver default.
-- `5 i2so_flush200_after`: I2SO with the live-capture-style
-  `audio_flush_thres=200`.
-- `6 i2so_48k_after`: I2SO at 48 kHz, matching several HCRTOS cast PCM
-  examples.
-- `7 i2so_spo_after`: I2SO plus SPO mask for comparison only.
+- `i2so_prime_after_dma`, `i2so_prime_before_dma`, and
+  `default_prime_after_dma`: I2SO-prime variants around the auddec init/start
+  order.
+- `i2so_prime_after_bypass` and `i2so_audsink_prime_after`: prime comparison
+  routes for bypass destination and `enable_audsink=1`.
+- `i2so_current_after`, `i2so_gate_before`, `i2so_controls_before`,
+  `i2so_audsink_after`, and `default_current_after`: non-prime control-order
+  and default-device diagnostics.
+- `i2so_flush200_after`, `i2so_48k_after`, and `i2so_spo_after`: comparison
+  routes for live-capture flush threshold, 48 kHz, and I2SO plus SPO mask.
 
 If direct `/dev/sndC0i2so` beeps are audible but all
 `gb300_auddec_probe` tones are silent, the PCM speaker path is healthy and the

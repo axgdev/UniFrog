@@ -81,6 +81,8 @@ static void clear_audio(struct unifrog_audio *audio)
       audio->fd = -1;
       audio->backend = UNIFROG_AUDIO_BACKEND_AUTO;
       audio->muted = 1;
+      audio->output_gate_enabled = 0;
+      audio->output_gate_pending_signal = 0;
    }
 }
 
@@ -563,6 +565,12 @@ int unifrog_audio_start(struct unifrog_audio *audio)
    apply_stock_audio_silence_policy("start");
    if (audio->backend == UNIFROG_AUDIO_BACKEND_AUDSINK)
       return ioctl(audio->fd, AUDSINK_IOCTL_START, 0);
+   if (unifrog_audio_prefers_stereo_output() && audio->muted) {
+      int mute_ret = unifrog_audio_set_mute(audio, 0);
+
+      printf("unifrog audio start_unmute backend=snd fd=%d ret=%d\n",
+         audio->fd, mute_ret);
+   }
    return ioctl(audio->fd, SND_IOCTL_START, 0);
 }
 
@@ -610,11 +618,35 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
             break;
          }
       }
-      if (has_signal && audio->muted) {
+      if (unifrog_audio_prefers_stereo_output()) {
+         if (has_signal) {
+            int mute_ret = audio->muted ?
+               unifrog_audio_set_mute(audio, 0) : 0;
+
+            if (!audio->output_gate_enabled) {
+               set_stock_audio_output_gate(1);
+               audio->output_gate_enabled = 1;
+               audio->output_gate_pending_signal = 0;
+               if (mute_transition_log_count < 12) {
+                  mute_transition_log_count++;
+                  printf("unifrog audio signal_gate backend=snd fd=%d action=gate_on mute_ret=%d frames=%u ch=%u\n",
+                     audio->fd, mute_ret, frames, channels);
+               }
+            }
+         } else if (!has_signal && audio->output_gate_enabled) {
+            set_stock_audio_output_gate(0);
+            audio->output_gate_enabled = 0;
+            audio->output_gate_pending_signal = 1;
+            if (mute_transition_log_count < 12) {
+               mute_transition_log_count++;
+               printf("unifrog audio signal_gate backend=snd fd=%d action=gate_off frames=%u ch=%u\n",
+                  audio->fd, frames, channels);
+            }
+         }
+      } else if (has_signal && audio->muted) {
          int mute_ret = unifrog_audio_set_mute(audio, 0);
 
-         if (unifrog_audio_prefers_stereo_output() &&
-             mute_transition_log_count < 12) {
+         if (mute_transition_log_count < 12) {
             mute_transition_log_count++;
             printf("unifrog audio signal_gate backend=snd fd=%d action=unmute ret=%d frames=%u ch=%u\n",
                audio->fd, mute_ret, frames, channels);
@@ -622,8 +654,7 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
       } else if (!has_signal && !audio->muted) {
          int mute_ret = unifrog_audio_set_mute(audio, 1);
 
-         if (unifrog_audio_prefers_stereo_output() &&
-             mute_transition_log_count < 12) {
+         if (mute_transition_log_count < 12) {
             mute_transition_log_count++;
             printf("unifrog audio signal_gate backend=snd fd=%d action=mute ret=%d frames=%u ch=%u\n",
                audio->fd, mute_ret, frames, channels);
@@ -662,9 +693,11 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
             int delay_ret = ioctl(audio->fd, SND_IOCTL_DELAY, &delay);
 
             success_log_count++;
-            printf("unifrog audio write ok backend=snd fd=%d frames=%u tries=%u attempts=%u delay_ret=%d delay=%lu muted=%d\n",
+            printf("unifrog audio write ok backend=snd fd=%d frames=%u tries=%u attempts=%u delay_ret=%d delay=%lu muted=%d gate=%d pending=%d\n",
                audio->fd, frames, tries + 1, attempts, delay_ret,
-               (unsigned long)delay, audio->muted);
+               (unsigned long)delay, audio->muted,
+               audio->output_gate_enabled,
+               audio->output_gate_pending_signal);
          }
          return 0;
       }
@@ -682,10 +715,11 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
          delay_ret = ioctl(audio->fd, AUDSINK_IOCTL_DELAY, &delay);
       else
          delay_ret = ioctl(audio->fd, SND_IOCTL_DELAY, &delay);
-      printf("unifrog audio write fail backend=%s fd=%d ret=%d errno=%d frames=%u tries=%u attempts=%u poll_ms=%u rate=%u ch=%u muted=%d delay_ret=%d delay=%lu\n",
+      printf("unifrog audio write fail backend=%s fd=%d ret=%d errno=%d frames=%u tries=%u attempts=%u poll_ms=%u rate=%u ch=%u muted=%d gate=%d pending=%d delay_ret=%d delay=%lu\n",
          audio_backend_name(audio->backend), audio->fd, ret, last_errno,
          frames, tries + 1, attempts, poll_timeout_ms, audio->rate,
-         audio->channels, audio->muted, delay_ret, (unsigned long)delay);
+         audio->channels, audio->muted, audio->output_gate_enabled,
+         audio->output_gate_pending_signal, delay_ret, (unsigned long)delay);
    }
    return ret;
 }
@@ -749,13 +783,27 @@ int unifrog_audio_set_output_enabled(struct unifrog_audio *audio, int enabled)
    if (enabled) {
       apply_stock_audio_silence_policy("enable");
       (void)unifrog_audio_set_volume(audio, system_audio_volume());
-      set_stock_audio_output_gate(1);
-      if (audio->backend == UNIFROG_AUDIO_BACKEND_SND)
-         (void)unifrog_audio_set_mute(audio, 1);
-      else
+      if (audio->backend == UNIFROG_AUDIO_BACKEND_SND &&
+          unifrog_audio_prefers_stereo_output()) {
          (void)unifrog_audio_set_mute(audio, 0);
+         set_stock_audio_output_gate(0);
+         audio->output_gate_enabled = 0;
+         audio->output_gate_pending_signal = 1;
+         printf("unifrog audio signal_gate backend=snd fd=%d action=arm_gate\n",
+            audio->fd);
+      } else {
+         set_stock_audio_output_gate(1);
+         audio->output_gate_enabled = 1;
+         audio->output_gate_pending_signal = 0;
+         if (audio->backend == UNIFROG_AUDIO_BACKEND_SND)
+            (void)unifrog_audio_set_mute(audio, 1);
+         else
+            (void)unifrog_audio_set_mute(audio, 0);
+      }
    } else {
       set_stock_audio_output_gate(0);
+      audio->output_gate_enabled = 0;
+      audio->output_gate_pending_signal = 0;
       (void)unifrog_audio_set_mute(audio, 1);
    }
    return 0;
@@ -1210,11 +1258,13 @@ void unifrog_audio_debug_dump(struct unifrog_audio *audio, const char *tag)
       hw_ret = ioctl(audio->fd, SND_IOCTL_GET_HW_INFO, &hw);
 
    unifrog_audio_debug_gate(&l_dir, &l_out, &r_dir, &r_out);
-   printf("unifrog audio diag tag=%s lcd=0x%06lx stock_bits=%d preferred_gate=%s pref_ch=%u gate_enabled=%d l=0x%08lx/0x%08lx r=0x%08lx/0x%08lx\n",
+   printf("unifrog audio diag tag=%s lcd=0x%06lx stock_bits=%d preferred_gate=%s pref_ch=%u gate_enabled=%d audio_muted=%d audio_gate=%d audio_pending=%d l=0x%08lx/0x%08lx r=0x%08lx/0x%08lx\n",
       tag ? tag : "?",
       lcd_id, stock_bits, audio_gate_name(current_audio_gate()),
       unifrog_audio_prefers_stereo_output() ? 2u : 1u,
-      stock_audio_output_gate_enabled,
+      stock_audio_output_gate_enabled, audio ? audio->muted : -1,
+      audio ? audio->output_gate_enabled : -1,
+      audio ? audio->output_gate_pending_signal : -1,
       (unsigned long)l_dir, (unsigned long)l_out,
       (unsigned long)r_dir, (unsigned long)r_out);
    printf("unifrog audio mux tag=%s l15=%u l22=%u l23=%u l24=%u l25=%u l26=%u l27=%u l28=%u l29=%u r07=%u\n",

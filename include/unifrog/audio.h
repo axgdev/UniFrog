@@ -22,6 +22,8 @@ struct unifrog_audio {
    unsigned periods;
    unsigned frame_bytes;
    int muted;
+   int output_gate_enabled;
+   int output_gate_pending_signal;
 };
 
 int unifrog_audio_open(struct unifrog_audio *audio,
