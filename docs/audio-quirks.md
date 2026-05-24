@@ -98,12 +98,11 @@ or `src/unifrog_media.c`.
   successful `AUDDEC_INIT`/`AUDDEC_START` while leaving the decoder clock stuck
   and the speaker silent. The combined I2SO+SPO, SPO, and PCMO profiles remain
   as fallback diagnostics if I2SO-only init fails.
-- The GB300 hardware-auddec route now opens a persistent `/dev/sndC0i2so`
-  handle and first tries the newer vendor `SND_IOCTL_SET_EXTRA_DATA_PATH`
-  loopthrough to `AUDDEV_I2SO` with `enable_audsink=1`. HCLinux documents that
-  ioctl as the audsink-to-SND loop path, while the bundled SDK header predates
-  it. If the runtime rejects it, UniFrog logs the errno and falls back to the
-  previous I2SO prime routes.
+- The GB300 hardware-auddec route opens a persistent `/dev/sndC0i2so` handle.
+  The newer vendor `SND_IOCTL_SET_EXTRA_DATA_PATH` loopthrough to `AUDDEV_I2SO`
+  remains available, but it is now opt-in via
+  `UNIFROG_MEDIA_GB300_I2SO_EXTRA_ROUTE=1` while default builds use the
+  established I2SO prime routes first.
 - Audio-only compressed playback should open `/dev/auddec` in freerun mode
   first. STC update/sync modes are reserved for audio plus video, where the
   video decoder can synchronize to the audio-owned clock.

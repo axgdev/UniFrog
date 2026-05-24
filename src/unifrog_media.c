@@ -176,6 +176,9 @@
 #ifndef UNIFROG_MEDIA_GB300_AUDDEC_PROBE_ONCE
 #define UNIFROG_MEDIA_GB300_AUDDEC_PROBE_ONCE 1
 #endif
+#ifndef UNIFROG_MEDIA_GB300_I2SO_EXTRA_ROUTE
+#define UNIFROG_MEDIA_GB300_I2SO_EXTRA_ROUTE 0
+#endif
 /* Decoder rings are live after START; large leads play as startup bursts. */
 #define MEDIA_VIDEO_FEED_LEAD_MS ((unsigned)UNIFROG_MEDIA_VIDEO_FEED_LEAD_MS)
 #define MEDIA_AUDIO_FEED_LEAD_MS ((unsigned)UNIFROG_MEDIA_AUDIO_FEED_LEAD_MS)
@@ -709,7 +712,7 @@ static int media_gb300_i2so_prime_open(const char *tag,
       (unsigned long)hw.dma_size,
       (unsigned long)hw.pcm_params.period_size,
       (unsigned long)hw.pcm_params.periods);
-   if (extra_path && extra_ret != 0) {
+   if (extra_path && (extra_ret != 0 || extra_on_ret != 0)) {
       (void)ioctl(fd, SND_IOCTL_DROP, 0);
       (void)ioctl(fd, SND_IOCTL_HW_FREE, 0);
       close(fd);
@@ -4741,6 +4744,7 @@ static void media_run_gb300_auddec_probe_once(const char *tag)
    static int done;
    static int running;
    static const struct media_gb300_auddec_probe_variant variants[] = {
+#if UNIFROG_MEDIA_GB300_I2SO_EXTRA_ROUTE
       { "i2so_extra_audsink_bypass_after", 44100u, AUDDEV_I2SO, 1, 0,
          MEDIA_AUDIO_KSHM_SIZE, 0, 0, MEDIA_GB300_I2SO_PRIME_AFTER_START,
          SND_PCM_DEST_BYPASS, MEDIA_GB300_I2SO_EXTRA_I2SO },
@@ -4750,6 +4754,7 @@ static void media_run_gb300_auddec_probe_once(const char *tag)
       { "i2so_extra_audsink_dma_after", 44100u, AUDDEV_I2SO, 1, 0,
          MEDIA_AUDIO_KSHM_SIZE, 0, 0, MEDIA_GB300_I2SO_PRIME_AFTER_START,
          SND_PCM_DEST_DMA, MEDIA_GB300_I2SO_EXTRA_I2SO },
+#endif
       { "i2so_prime_after_dma", 44100u, AUDDEV_I2SO, 0, 0,
          MEDIA_AUDIO_KSHM_SIZE, 0, 0, MEDIA_GB300_I2SO_PRIME_AFTER_START,
          SND_PCM_DEST_DMA, MEDIA_GB300_I2SO_EXTRA_NONE },
@@ -4798,7 +4803,7 @@ static void media_run_gb300_auddec_probe_once(const char *tag)
    done = 1;
    running = 1;
    media_init_drivers_once();
-   printf("unifrog media gb300_auddec_probe begin tag=%s variants=%lu rate=%u chunk_frames=%u packets=%u note=auddec_pcm_plus_i2so_prime_extra_path\n",
+   printf("unifrog media gb300_auddec_probe begin tag=%s variants=%lu rate=%u chunk_frames=%u packets=%u note=auddec_pcm_plus_i2so_prime\n",
       tag ? tag : "?", (unsigned long)ARRAY_SIZE(variants),
       MEDIA_GB300_AUDDEC_PROBE_RATE,
       MEDIA_GB300_AUDDEC_PROBE_CHUNK_FRAMES,
@@ -4830,6 +4835,7 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
        * first and non-rotated; SPO/PCMO routes can init successfully while
        * still producing no audible output on that board.
        */
+#if UNIFROG_MEDIA_GB300_I2SO_EXTRA_ROUTE
       { "gb300_raw_i2so_extra_audsink_kshm", AUDDEV_I2SO, 1, 0,
          MEDIA_AUDIO_KSHM_SIZE, 1, SND_PCM_DEST_BYPASS,
          MEDIA_GB300_I2SO_EXTRA_I2SO },
@@ -4839,6 +4845,7 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
       { "gb300_raw_i2so_audsink_prime_kshm", AUDDEV_I2SO, 1, 0,
          MEDIA_AUDIO_KSHM_SIZE, 1, SND_PCM_DEST_DMA,
          MEDIA_GB300_I2SO_EXTRA_NONE },
+#endif
       { "gb300_raw_i2so_prime_kshm", AUDDEV_I2SO, 0, 0,
          MEDIA_AUDIO_KSHM_SIZE, 1, SND_PCM_DEST_DMA,
          MEDIA_GB300_I2SO_EXTRA_NONE },
@@ -5032,6 +5039,7 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
        * rotate into SPO/PCMO as the first route: those masks can initialize
        * while leaving the decoder clock stuck and the speaker silent.
        */
+#if UNIFROG_MEDIA_GB300_I2SO_EXTRA_ROUTE
       { "gb300_i2so_extra_audsink_kshm", 0, AUDDEV_I2SO, 1, 1, 0,
          MEDIA_AUDIO_KSHM_SIZE, 1, SND_PCM_DEST_BYPASS,
          MEDIA_GB300_I2SO_EXTRA_I2SO },
@@ -5041,6 +5049,7 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       { "gb300_i2so_audsink_prime_kshm", 0, AUDDEV_I2SO, 1, 1, 0,
          MEDIA_AUDIO_KSHM_SIZE, 1, SND_PCM_DEST_DMA,
          MEDIA_GB300_I2SO_EXTRA_NONE },
+#endif
       { "gb300_i2so_prime_kshm", 0, AUDDEV_I2SO, 0, 1, 0,
          MEDIA_AUDIO_KSHM_SIZE, 1, SND_PCM_DEST_DMA,
          MEDIA_GB300_I2SO_EXTRA_NONE },

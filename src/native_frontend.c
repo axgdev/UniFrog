@@ -6529,7 +6529,6 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
       options.disable_audio = 1;
    }
    frontend_sound_shutdown();
-   (void)unifrog_log_flush();
 #if UNIFROG_HCRTOS_MEDIA_FIRMWARE
    ret = unifrog_media_play_video_ex(item->path, &options);
 #else
