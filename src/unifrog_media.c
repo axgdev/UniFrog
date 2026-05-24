@@ -204,7 +204,7 @@
 #define MEDIA_VIDEO_AUDIO_PERIODS 16u
 #define MEDIA_AUDIO_KSHM_SIZE 0x000a0000u
 #define MEDIA_GB300_AUDDEC_PROBE_RATE 44100u
-#define MEDIA_GB300_AUDDEC_PROBE_CHANNELS 2u
+#define MEDIA_GB300_AUDDEC_PROBE_CHANNELS 1u
 #define MEDIA_GB300_AUDDEC_PROBE_CHUNK_FRAMES 2048u
 #define MEDIA_GB300_AUDDEC_PROBE_PACKETS 4u
 #define MEDIA_GB300_AUDDEC_PROBE_PAUSE_US 280000u
@@ -601,7 +601,7 @@ static int media_video_wait_write_space(int fd, uint32_t need,
 
 static unsigned media_audio_output_channels(void)
 {
-   return unifrog_audio_prefers_stereo_output() ? 2u : 1u;
+   return unifrog_audio_output_channels();
 }
 
 static uint64_t media_audio_output_layout(unsigned channels)
@@ -4689,15 +4689,16 @@ static void media_fill_gb300_auddec_probe_pcm(unsigned variant,
       int16_t sample = (((base + i) / half_period) & 1u) ?
          (int16_t)amplitude : (int16_t)-amplitude;
 
-      media_gb300_auddec_probe_pcm[i * 2u] = sample;
-      media_gb300_auddec_probe_pcm[i * 2u + 1u] = sample;
+      for (unsigned ch = 0; ch < MEDIA_GB300_AUDDEC_PROBE_CHANNELS; ch++)
+         media_gb300_auddec_probe_pcm[
+            i * MEDIA_GB300_AUDDEC_PROBE_CHANNELS + ch] = sample;
    }
 }
 
 static void media_gb300_auddec_probe_controls(int fd, const char *label,
    const char *stage)
 {
-   audio_channel_select_t channel = AUDIO_STEREO;
+   audio_channel_select_t channel = media_audio_channel_select();
    uint8_t volume = 90u;
    unsigned int mute = 0;
    int channel_ret;
@@ -4722,7 +4723,7 @@ static void media_gb300_auddec_probe_controls(int fd, const char *label,
       mute, mute_ret, mute_errno);
 }
 
-static void media_gb300_auddec_probe_status(int fd, const char *label,
+static int media_gb300_auddec_probe_status(int fd, const char *label,
    const char *stage)
 {
    struct audio_decore_status dec_status;
@@ -4763,6 +4764,7 @@ static void media_gb300_auddec_probe_status(int fd, const char *label,
       (unsigned)audio_status.AV_sync_state,
       (unsigned)audio_status.bypass_mode, (long long)cur_time, time_ret,
       time_errno, (unsigned long)underruns, underrun_ret, underrun_errno);
+   return dec_ret == 0 && media_auddec_status_has_progress(&dec_status);
 }
 
 static int media_gb300_auddec_probe_variant(unsigned index,
@@ -4776,6 +4778,7 @@ static int media_gb300_auddec_probe_variant(unsigned index,
    int start_ret = -1;
    int start_errno = 0;
    int send_failed = 0;
+   int decode_progress = 0;
    int prime_fd = -1;
    int prime_attempted = 0;
    unsigned sample_rate = variant && variant->sample_rate ?
@@ -4810,7 +4813,8 @@ static int media_gb300_auddec_probe_variant(unsigned index,
       MEDIA_GB300_AUDDEC_PROBE_CHANNELS * 16u;
    cfg.block_align = MEDIA_GB300_AUDDEC_PROBE_CHANNELS *
       (16u / 8u);
-   cfg.channel_layout = AV_CH_LAYOUT_STEREO;
+   cfg.channel_layout =
+      media_audio_output_layout(MEDIA_GB300_AUDDEC_PROBE_CHANNELS);
    cfg.snd_devs = variant->snd_devs;
    cfg.enable_audsink = variant->enable_audsink;
    cfg.audio_flush_thres = variant->audio_flush_thres;
@@ -4848,7 +4852,8 @@ static int media_gb300_auddec_probe_variant(unsigned index,
    if (!variant->gate_before_init && (!prime_attempted || prime_fd < 0))
       unifrog_audio_set_system_output_enabled(1);
    unifrog_audio_debug_dump(NULL, "gb300_auddec_probe");
-   media_gb300_auddec_probe_status(fd, variant->label, "after_start");
+   decode_progress |= media_gb300_auddec_probe_status(fd, variant->label,
+      "after_start");
 
    memset(&auddec, 0, sizeof(auddec));
    auddec.fd = fd;
@@ -4871,9 +4876,11 @@ static int media_gb300_auddec_probe_variant(unsigned index,
          }
          usleep(12000);
       }
-      media_gb300_auddec_probe_status(fd, variant->label, "after_feed");
+      decode_progress |= media_gb300_auddec_probe_status(fd, variant->label,
+         "after_feed");
       usleep(MEDIA_GB300_AUDDEC_PROBE_PAUSE_US);
-      media_gb300_auddec_probe_status(fd, variant->label, "after_pause");
+      decode_progress |= media_gb300_auddec_probe_status(fd, variant->label,
+         "after_pause");
       media_auddec_send_eos(&auddec);
    }
 
@@ -4882,10 +4889,11 @@ static int media_gb300_auddec_probe_variant(unsigned index,
       variant->label);
    unifrog_audio_set_system_output_enabled(0);
    usleep(80000);
-   printf("unifrog media gb300_auddec_probe done label=%s idx=%u fd=%d packets=%lu send_failed=%d\n",
+   printf("unifrog media gb300_auddec_probe done label=%s idx=%u fd=%d packets=%lu send_failed=%d progress=%d\n",
       variant->label, index, fd, (unsigned long)auddec.packets,
-      send_failed);
-   return init_ret == 0 && start_ret == 0 && !send_failed ? 0 : -1;
+      send_failed, decode_progress);
+   return init_ret == 0 && start_ret == 0 && !send_failed &&
+      decode_progress ? 0 : -1;
 }
 
 static int media_run_gb300_auddec_probe(const char *tag)

@@ -2591,14 +2591,15 @@ static unsigned host_audio_output_rate(unsigned input_rate)
 
 static unsigned host_audio_output_channels(void)
 {
-   return unifrog_audio_prefers_stereo_output() ?
-      LIBRETRO_AUDIO_MAX_CHANNELS : LIBRETRO_AUDIO_CHANNELS;
+   return unifrog_audio_output_channels();
 }
 
 static const char *host_audio_route_name(void)
 {
-   return host.audio_channels > 1u ? "gb300_auto_snd_stereo" :
-      LIBRETRO_AUDIO_ROUTE;
+   if (unifrog_audio_prefers_stereo_output())
+      return host.audio_channels > 1u ? "gb300_auto_snd_stereo" :
+         "gb300_auto_snd_mono";
+   return LIBRETRO_AUDIO_ROUTE;
 }
 
 static int host_audio_backend(void)

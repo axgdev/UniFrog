@@ -54,11 +54,10 @@ or `src/unifrog_media.c`.
 - UniFrog-owned UI/theme playback prefers the SND backend because the silence
   gate can inspect PCM buffers before transfer. The audsink backend remains a
   fallback for those short sounds.
-- Libretro core playback uses the HCRTOS AUDSINK path explicitly on SF2000 to
-  keep the lower-cost mono-left route. GB300 or a stock-bit GB300 input bus
-  requests stereo frames but lets UniFrog's AUTO PCM opener choose the backend;
-  current GB300 logs show AUDSINK accepts init but fails PCM transfer, while
-  direct `/dev/sndC0i2so` accepts DMA writes.
+- Libretro core playback uses mono output on SF2000 and GB300. GB300 or a
+  stock-bit GB300 input bus still gets the GB300 L15 gate and larger direct-SND
+  ring, but UniFrog mixes core stereo samples down before writing to the
+  single-speaker `/dev/sndC0i2so` route confirmed by 0138 diagnostics.
 - On GB300, UniFrog's AUTO PCM opener tries direct `/dev/sndC0i2so` before
   AUDSINK. The direct SND open uses the vendor-style HCRTOS parameters from the
   cast/sound-test examples: `O_RDWR`, AUDPAD source, `start_threshold=2`, and a
@@ -198,8 +197,8 @@ there, but the important behavioral clues are:
 - keep output muted until real PCM exists;
 - avoid software gain as a noise mask;
 - prefer the left-speaker/duplicate-left route over differential or fake
-  stereo output on SF2000 hardware, but keep real stereo frame delivery on
-  GB300 because its stock libretro ring path wrote stereo frames;
+  stereo output on SF2000 hardware, and mix GB300 content to mono unless a
+  tested hardware path proves a second output channel is actually audible;
 - compare HCRTOS SND/AUDSINK settings against the stock duplicate and volume
   behavior whenever libretro audio quality regresses.
 

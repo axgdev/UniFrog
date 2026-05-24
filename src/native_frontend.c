@@ -7121,10 +7121,8 @@ static void activate(struct native_frontend *fe)
          "listen for route tones", 8);
       frontend_sound_shutdown();
       (void)unifrog_log_flush();
-      unifrog_ui_close(&fe->ui);
       summary[0] = '\0';
       ret = unifrog_media_run_audio_diagnostics(summary, sizeof(summary));
-      (void)unifrog_ui_open(&fe->ui, 0);
       unifrog_input_clear();
       set_status(fe, "audio diag %d %s", ret, summary);
    } else if (strcmp(item.path, "battery_refresh") == 0) {

@@ -126,6 +126,15 @@ int unifrog_audio_prefers_stereo_output(void)
    return current_audio_gate() == AUDIO_GATE_GB300_L15;
 }
 
+unsigned unifrog_audio_output_channels(void)
+{
+   /*
+    * GB300 needs a distinct L15 gate and SND policy, but 0138 diagnostics
+    * showed the audible speaker route is the mono /dev/sndC0i2so setup.
+    */
+   return 1u;
+}
+
 static uint32_t current_audio_snd_devs(void)
 {
    if (current_audio_gate() == AUDIO_GATE_GB300_L15)
@@ -382,7 +391,7 @@ static int open_audsink(struct unifrog_audio *audio,
    if (ioctl(fd, AUDSINK_IOCTL_INIT, &params) != 0)
       goto fail;
 
-   duplicate = unifrog_audio_prefers_stereo_output() && channels > 1 ?
+   duplicate = unifrog_audio_output_channels() > 1u && channels > 1 ?
       AUDSINK_PCM_DUPLICATE_STEREO : AUDSINK_PCM_DUPLICATE_LEFT;
    ioctl(fd, AUDSINK_IOCTL_SETDUPLICATE, duplicate);
 
@@ -394,10 +403,10 @@ static int open_audsink(struct unifrog_audio *audio,
    audio->periods = periods;
    audio->frame_bytes = channels * sizeof(int16_t);
    audio->muted = 1;
-   printf("unifrog audio open backend=audsink fd=%d rate=%u ch=%u period=%u periods=%u route=%s pref_ch=%u snd=0x%lx duplicate=%d\n",
+   printf("unifrog audio open backend=audsink fd=%d rate=%u ch=%u period=%u periods=%u route=%s output_ch=%u snd=0x%lx duplicate=%d\n",
       fd, rate, channels, period_bytes, periods,
       audio_gate_name(current_audio_gate()),
-      unifrog_audio_prefers_stereo_output() ? 2u : 1u,
+      unifrog_audio_output_channels(),
       (unsigned long)params.snd_devs, duplicate);
    return 0;
 
@@ -465,12 +474,12 @@ static int open_snd(struct unifrog_audio *audio,
    audio->muted = 1;
    memset(&hw, 0, sizeof(hw));
    (void)ioctl(fd, SND_IOCTL_GET_HW_INFO, &hw);
-   printf("unifrog audio open backend=snd fd=%d rate=%u ch=%u req_period=%u req_periods=%u period=%u periods=%u start_threshold=%u avail_min=%lu avail_ret=%d route=%s pref_ch=%u dma=0x%08lx/%lu hw_period=%lu hw_periods=%lu\n",
+   printf("unifrog audio open backend=snd fd=%d rate=%u ch=%u req_period=%u req_periods=%u period=%u periods=%u start_threshold=%u avail_min=%lu avail_ret=%d route=%s output_ch=%u dma=0x%08lx/%lu hw_period=%lu hw_periods=%lu\n",
       fd, rate, channels, requested_period, requested_periods,
       period_bytes, periods, start_threshold, (unsigned long)avail_min,
       avail_ret,
       audio_gate_name(current_audio_gate()),
-      unifrog_audio_prefers_stereo_output() ? 2u : 1u,
+      unifrog_audio_output_channels(),
       (unsigned long)hw.dma_addr, (unsigned long)hw.dma_size,
       (unsigned long)hw.pcm_params.period_size,
       (unsigned long)hw.pcm_params.periods);
@@ -1335,10 +1344,10 @@ void unifrog_audio_debug_dump(struct unifrog_audio *audio, const char *tag)
       hw_ret = ioctl(audio->fd, SND_IOCTL_GET_HW_INFO, &hw);
 
    unifrog_audio_debug_gate(&l_dir, &l_out, &r_dir, &r_out);
-   printf("unifrog audio diag tag=%s lcd=0x%06lx stock_bits=%d preferred_gate=%s pref_ch=%u gate_enabled=%d audio_muted=%d audio_gate=%d audio_pending=%d l=0x%08lx/0x%08lx r=0x%08lx/0x%08lx\n",
+   printf("unifrog audio diag tag=%s lcd=0x%06lx stock_bits=%d preferred_gate=%s output_ch=%u gate_enabled=%d audio_muted=%d audio_gate=%d audio_pending=%d l=0x%08lx/0x%08lx r=0x%08lx/0x%08lx\n",
       tag ? tag : "?",
       lcd_id, stock_bits, audio_gate_name(current_audio_gate()),
-      unifrog_audio_prefers_stereo_output() ? 2u : 1u,
+      unifrog_audio_output_channels(),
       stock_audio_output_gate_enabled, audio ? audio->muted : -1,
       audio ? audio->output_gate_enabled : -1,
       audio ? audio->output_gate_pending_signal : -1,
