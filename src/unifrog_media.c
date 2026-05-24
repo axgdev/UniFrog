@@ -265,6 +265,8 @@
 #define MEDIA_SEEK_STEP_MS 10000
 #define MEDIA_SWVIDEO_MMZ_ID 0
 #define MEDIA_TIME_UNSET INT32_MIN
+#define MEDIA_GB300_AUDDEC_STALL_PACKETS 32u
+#define MEDIA_GB300_AUDDEC_STALL_MS 2000u
 
 #if UNIFROG_ENABLE_HCPLAYER
 struct playback_preset {
@@ -3090,6 +3092,11 @@ static int media_play_native_audio_compressed(const char *path)
    int sd_read_active = 0;
    int write_failed = 0;
    int eof_seen = 0;
+   unsigned long last_decoded = 0;
+   unsigned last_header_seen = 0;
+   int64_t last_audio_time = -1;
+   int last_status_ok = 0;
+   int last_time_ok = 0;
 
    memset(&auddec, 0, sizeof(auddec));
    memset(&pacer, 0, sizeof(pacer));
@@ -3223,8 +3230,16 @@ static int media_play_native_audio_compressed(const char *path)
          uint32_t elapsed_ms = unifrog_perf_time_ms() - start_ms;
 
          memset(&status, 0, sizeof(status));
-         (void)ioctl(auddec.fd, AUDDEC_GET_CUR_TIME, &cur_time);
-         if (ioctl(auddec.fd, AUDDEC_GET_STATUS, &status) == 0)
+         last_time_ok = ioctl(auddec.fd, AUDDEC_GET_CUR_TIME, &cur_time) == 0;
+         last_status_ok = ioctl(auddec.fd, AUDDEC_GET_STATUS, &status) == 0;
+         if (last_status_ok) {
+            last_decoded = (unsigned long)status.frames_decoded;
+            last_header_seen = status.first_header_got ||
+               status.first_header_parsed;
+         }
+         if (last_time_ok)
+            last_audio_time = cur_time;
+         if (last_status_ok)
             printf("unifrog media auddec monitor packets=%lu decoded=%lu rate=%lu ch=%u bits=%u ms=%lu atime=%lld feed_ms=%lld feed_lead=%lld ahead_ms=%lld\n",
                (unsigned long)auddec.packets,
                (unsigned long)status.frames_decoded,
@@ -3240,6 +3255,39 @@ static int media_play_native_audio_compressed(const char *path)
       }
    }
    ret = auddec.packets && !write_failed ? 0 : -1;
+   if (auddec.fd >= 0) {
+      struct audio_decore_status status;
+      int64_t cur_time = -1;
+      int status_ok;
+      int time_ok;
+
+      memset(&status, 0, sizeof(status));
+      status_ok = ioctl(auddec.fd, AUDDEC_GET_STATUS, &status) == 0;
+      time_ok = ioctl(auddec.fd, AUDDEC_GET_CUR_TIME, &cur_time) == 0;
+      if (status_ok) {
+         last_status_ok = 1;
+         last_decoded = (unsigned long)status.frames_decoded;
+         last_header_seen = status.first_header_got ||
+            status.first_header_parsed;
+      }
+      if (time_ok) {
+         last_time_ok = 1;
+         last_audio_time = cur_time;
+      }
+   }
+   if (ret == 0 &&
+       unifrog_audio_prefers_stereo_output() &&
+       auddec.packets >= MEDIA_GB300_AUDDEC_STALL_PACKETS &&
+       last_status_ok &&
+       last_time_ok &&
+       last_decoded == 0 &&
+       !last_header_seen &&
+       last_audio_time <= 0) {
+      printf("unifrog media auddec fallback trigger reason=decode_stall packets=%lu decoded=%lu hdr=%u atime=%lld path=%s\n",
+         (unsigned long)auddec.packets, last_decoded, last_header_seen,
+         (long long)last_audio_time, path ? path : "");
+      ret = -1;
+   }
 
 out:
    printf("unifrog media auddec end ret=%d packets=%lu write_failed=%d eof=%d ms=%lu path=%s\n",
@@ -6019,6 +6067,91 @@ static int media_video_send_filtered(int fd, AVBSFContext *bsf,
    }
 }
 
+static int media_native_open_sw_audio(AVFormatContext *fmt, int audio_stream,
+   unsigned output_channels, AVCodec **audio_decoder_out,
+   AVCodecContext **audio_ctx_out, struct unifrog_audio *audio,
+   struct media_ffmpeg_audio_converter *audio_converter, int16_t **pcm_out,
+   int *audio_enabled_out, const char *reason, const char *path)
+{
+   AVCodec *audio_decoder;
+   AVCodecContext *audio_ctx;
+   int16_t *pcm;
+   int open_ret;
+
+   if (!fmt || audio_stream < 0 || !audio_ctx_out || !audio || !pcm_out ||
+       !audio_enabled_out || audio_stream >= (int)fmt->nb_streams ||
+       !fmt->streams[audio_stream] || !fmt->streams[audio_stream]->codecpar) {
+      printf("unifrog media native software_audio invalid reason=%s stream=%d fmt=0x%08lx\n",
+         reason ? reason : "?", audio_stream,
+         (unsigned long)(uintptr_t)fmt);
+      return -1;
+   }
+   if (*audio_enabled_out && *audio_ctx_out && *pcm_out && audio->fd >= 0)
+      return 0;
+
+   audio_decoder = audio_decoder_out && *audio_decoder_out ? *audio_decoder_out :
+      avcodec_find_decoder(fmt->streams[audio_stream]->codecpar->codec_id);
+   if (!audio_decoder) {
+      printf("unifrog media native software_audio decoder missing reason=%s stream=%d codec=%d path=%s\n",
+         reason ? reason : "?", audio_stream,
+         fmt->streams[audio_stream]->codecpar->codec_id, path ? path : "");
+      return -1;
+   }
+
+   audio_ctx = avcodec_alloc_context3(audio_decoder);
+   if (!audio_ctx)
+      return -1;
+   if (avcodec_parameters_to_context(audio_ctx,
+       fmt->streams[audio_stream]->codecpar) != 0)
+      goto fail;
+   audio_ctx->request_sample_fmt = AV_SAMPLE_FMT_S16;
+   audio_ctx->request_channel_layout = media_audio_output_layout(output_channels);
+   if (avcodec_open2(audio_ctx, audio_decoder, NULL) != 0)
+      goto fail;
+   if (audio_ctx->sample_rate < 8000 || audio_ctx->sample_rate > 48000)
+      goto fail;
+
+   open_ret = unifrog_audio_open(audio, (unsigned)audio_ctx->sample_rate,
+      output_channels, MEDIA_VIDEO_AUDIO_PERIOD_BYTES,
+      MEDIA_VIDEO_AUDIO_PERIODS);
+   if (open_ret != 0)
+      goto fail;
+
+   pcm = malloc(sizeof(*pcm) * MEDIA_FFMPEG_CHUNK_FRAMES * output_channels);
+   if (!pcm)
+      goto fail;
+
+   (void)unifrog_audio_set_volume(audio, MEDIA_AUDIO_VOLUME);
+   (void)unifrog_audio_set_mute(audio, 1);
+   (void)unifrog_audio_start(audio);
+   (void)unifrog_audio_set_output_enabled(audio, 1);
+   if (audio_decoder_out)
+      *audio_decoder_out = audio_decoder;
+   *audio_ctx_out = audio_ctx;
+   *pcm_out = pcm;
+   *audio_enabled_out = 1;
+   if (audio_converter)
+      memset(audio_converter, 0, sizeof(*audio_converter));
+   printf("unifrog media native software_audio open reason=%s rate=%d ch=%u period_bytes=%u periods=%u buffer_ms=%lu\n",
+      reason ? reason : "?", audio_ctx->sample_rate, output_channels,
+      MEDIA_VIDEO_AUDIO_PERIOD_BYTES, MEDIA_VIDEO_AUDIO_PERIODS,
+      (unsigned long)(((uint64_t)MEDIA_VIDEO_AUDIO_PERIOD_BYTES *
+      (uint64_t)MEDIA_VIDEO_AUDIO_PERIODS * 1000ull) /
+      ((uint64_t)audio_ctx->sample_rate * sizeof(int16_t) *
+      (uint64_t)output_channels)));
+   unifrog_audio_debug_dump(audio, "native_video_after_start");
+   return 0;
+
+fail:
+   if (audio->fd >= 0)
+      unifrog_audio_close(audio);
+   if (audio_ctx)
+      avcodec_free_context(&audio_ctx);
+   printf("unifrog media native software_audio open failed reason=%s stream=%d path=%s\n",
+      reason ? reason : "?", audio_stream, path ? path : "");
+   return -1;
+}
+
 static int media_play_native_video(const char *path,
    const struct unifrog_media_video_options *options)
 {
@@ -6056,6 +6189,7 @@ static int media_play_native_video(const char *path,
    int seek_video_catchup_hidden = 0;
    int sd_read_active = 0;
    int auddec_write_failed = 0;
+   int auddec_sw_fallback_attempted = 0;
    int native_video_failed = 0;
    uint32_t seek_video_dropped_packets = 0;
    uint32_t seek_video_drop_last_log_ms = 0;
@@ -6164,46 +6298,10 @@ static int media_play_native_video(const char *path,
    (void)media_video_bsf_init(fmt->streams[video_stream], &video_bsf);
    printf("unifrog media native bsf done enabled=%d\n", video_bsf ? 1 : 0);
    (void)unifrog_log_flush();
-   if (audio_stream >= 0 && auddec.fd < 0 &&
-       fmt->streams[audio_stream] && fmt->streams[audio_stream]->codecpar)
-      audio_decoder = avcodec_find_decoder(
-         fmt->streams[audio_stream]->codecpar->codec_id);
-   if (audio_stream >= 0 && auddec.fd < 0 && audio_decoder) {
-      audio_ctx = avcodec_alloc_context3(audio_decoder);
-      if (audio_ctx &&
-         avcodec_parameters_to_context(audio_ctx,
-             fmt->streams[audio_stream]->codecpar) == 0) {
-         audio_ctx->request_sample_fmt = AV_SAMPLE_FMT_S16;
-         audio_ctx->request_channel_layout =
-            media_audio_output_layout(audio_output_channels);
-         if (avcodec_open2(audio_ctx, audio_decoder, NULL) == 0 &&
-             audio_ctx->sample_rate >= 8000 &&
-             audio_ctx->sample_rate <= 48000 &&
-             unifrog_audio_open(&audio, (unsigned)audio_ctx->sample_rate,
-                audio_output_channels,
-                MEDIA_VIDEO_AUDIO_PERIOD_BYTES,
-                MEDIA_VIDEO_AUDIO_PERIODS) == 0) {
-            pcm = malloc(sizeof(*pcm) * MEDIA_FFMPEG_CHUNK_FRAMES *
-               audio_output_channels);
-            if (pcm) {
-               (void)unifrog_audio_set_volume(&audio, MEDIA_AUDIO_VOLUME);
-               (void)unifrog_audio_set_mute(&audio, 1);
-               (void)unifrog_audio_start(&audio);
-               (void)unifrog_audio_set_output_enabled(&audio, 1);
-               audio_enabled = 1;
-               printf("unifrog media native software_audio open rate=%d ch=%u period_bytes=%u periods=%u buffer_ms=%lu\n",
-                  audio_ctx->sample_rate, audio_output_channels,
-                  MEDIA_VIDEO_AUDIO_PERIOD_BYTES,
-                  MEDIA_VIDEO_AUDIO_PERIODS,
-                  (unsigned long)(((uint64_t)MEDIA_VIDEO_AUDIO_PERIOD_BYTES *
-                  (uint64_t)MEDIA_VIDEO_AUDIO_PERIODS * 1000ull) /
-                  ((uint64_t)audio_ctx->sample_rate * sizeof(int16_t) *
-                  (uint64_t)audio_output_channels)));
-               unifrog_audio_debug_dump(&audio, "native_video_after_start");
-            }
-         }
-      }
-   }
+   if (audio_stream >= 0 && auddec.fd < 0)
+      (void)media_native_open_sw_audio(fmt, audio_stream,
+         audio_output_channels, &audio_decoder, &audio_ctx, &audio,
+         &audio_converter, &pcm, &audio_enabled, "auddec_open_failed", path);
    video_freerun = video_sync_mode == AVSYNC_TYPE_FREERUN;
    if (auddec.fd >= 0 && audio_feed_lead_ms > video_feed_lead_ms)
       video_feed_lead_ms = audio_feed_lead_ms;
@@ -6427,6 +6525,19 @@ static int media_play_native_video(const char *path,
                   (unsigned long)status.sample_rate, status.channels,
                   status.bits_per_sample, (long long)audio_time, path);
                auddec_write_failed = 1;
+               media_auddec_close(&auddec);
+               if (!auddec_sw_fallback_attempted && audio_stream >= 0) {
+                  auddec_sw_fallback_attempted = 1;
+                  if (media_native_open_sw_audio(fmt, audio_stream,
+                      audio_output_channels, &audio_decoder, &audio_ctx,
+                      &audio, &audio_converter, &pcm, &audio_enabled,
+                      "auddec_write_failed", path) == 0) {
+                     auddec_write_failed = 0;
+                     sw_audio_start_ms = unifrog_perf_time_ms();
+                     printf("unifrog media native auddec fallback active reason=write_failed stream=%d path=%s\n",
+                        audio_stream, path ? path : "");
+                  }
+               }
             }
          }
       } else if (audio_enabled && packet->stream_index == audio_stream) {
@@ -6458,6 +6569,7 @@ static int media_play_native_video(const char *path,
       av_packet_unref(packet);
       if ((++loop_polls % 180u) == 0) {
          struct vdec_decore_status status;
+         struct audio_decore_status aud_status;
          int64_t video_time = -1;
          int64_t audio_time = -1;
          uint32_t elapsed_ms = unifrog_perf_time_ms() - start_ms;
@@ -6466,6 +6578,7 @@ static int media_play_native_video(const char *path,
             audio_ctx ? audio_ctx->sample_rate : 0, sw_audio_start_ms);
 
          memset(&status, 0, sizeof(status));
+         memset(&aud_status, 0, sizeof(aud_status));
          if (video_fd >= 0)
             (void)ioctl(video_fd, VIDDEC_GET_CUR_TIME, &video_time);
          if (auddec.fd >= 0)
@@ -6495,6 +6608,34 @@ static int media_play_native_video(const char *path,
                (long long)(hw_video_pacer.next_ms - video_time) : -1ll,
                audio_time >= 0 ?
                (long long)(hw_audio_pacer.next_ms - audio_time) : -1ll);
+         if (auddec.fd >= 0 &&
+             unifrog_audio_prefers_stereo_output() &&
+             !audio_enabled &&
+             !auddec_sw_fallback_attempted &&
+             audio_stream >= 0 &&
+             elapsed_ms >= MEDIA_GB300_AUDDEC_STALL_MS &&
+             auddec.packets >= MEDIA_GB300_AUDDEC_STALL_PACKETS &&
+             ioctl(auddec.fd, AUDDEC_GET_STATUS, &aud_status) == 0 &&
+             audio_time <= 0 &&
+             aud_status.frames_decoded == 0 &&
+             !aud_status.first_header_got &&
+             !aud_status.first_header_parsed) {
+            printf("unifrog media native auddec fallback trigger reason=decode_stall packets=%lu ms=%lu decoded=%lu hdr=%u/%u atime=%lld path=%s\n",
+               (unsigned long)auddec.packets, (unsigned long)elapsed_ms,
+               (unsigned long)aud_status.frames_decoded,
+               aud_status.first_header_got, aud_status.first_header_parsed,
+               (long long)audio_time, path ? path : "");
+            media_auddec_close(&auddec);
+            auddec_sw_fallback_attempted = 1;
+            if (media_native_open_sw_audio(fmt, audio_stream,
+                audio_output_channels, &audio_decoder, &audio_ctx, &audio,
+                &audio_converter, &pcm, &audio_enabled,
+                "auddec_decode_stall", path) == 0) {
+               sw_audio_start_ms = unifrog_perf_time_ms();
+               printf("unifrog media native auddec fallback active reason=decode_stall stream=%d path=%s\n",
+                  audio_stream, path ? path : "");
+            }
+         }
          media_draw_progress_overlay(&overlay, "video",
             audio_time >= 0 ? audio_time : video_time, duration_ms, 0, path);
       }

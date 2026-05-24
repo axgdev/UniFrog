@@ -101,8 +101,14 @@ or `src/unifrog_media.c`.
 - The GB300 hardware-auddec route opens a persistent `/dev/sndC0i2so` handle.
   The newer vendor `SND_IOCTL_SET_EXTRA_DATA_PATH` loopthrough to `AUDDEV_I2SO`
   remains available, but it is now opt-in via
-  `UNIFROG_MEDIA_GB300_I2SO_EXTRA_ROUTE=1` while default builds use the
+  `MEDIA_GB300_I2SO_EXTRA_ROUTE=1` (which defines
+  `UNIFROG_MEDIA_GB300_I2SO_EXTRA_ROUTE`) while default builds use the
   established I2SO prime routes first.
+- GB300 builds now treat "auddec init/start success but no decode progress" as
+  a runtime fault. If packets advance while `frames_decoded=0`,
+  `first_header_*==0`, and `AUDDEC_GET_CUR_TIME<=0`, native playback logs
+  `reason=decode_stall` and falls back to FFmpeg software audio instead of
+  reporting a false-success silent run.
 - Audio-only compressed playback should open `/dev/auddec` in freerun mode
   first. STC update/sync modes are reserved for audio plus video, where the
   video decoder can synchronize to the audio-owned clock.
