@@ -2609,6 +2609,11 @@ static int host_audio_backend(void)
    return LIBRETRO_AUDIO_BACKEND;
 }
 
+static unsigned host_audio_runtime_volume(void)
+{
+   return unifrog_audio_prefers_stereo_output() ? 90u : LIBRETRO_AUDIO_VOLUME;
+}
+
 static void host_audio_store_mono(int16_t *buffer, unsigned frame,
    int16_t sample)
 {
@@ -7260,9 +7265,11 @@ out_content_prepare:
       int unmute_ret;
       int output_ret;
       unsigned silence_frames;
+      unsigned audio_volume;
 
       host.audio_open = 1;
-      volume_ret = unifrog_audio_set_volume(&host.audio, LIBRETRO_AUDIO_VOLUME);
+      audio_volume = host_audio_runtime_volume();
+      volume_ret = unifrog_audio_set_volume(&host.audio, audio_volume);
       mute_ret = unifrog_audio_set_mute(&host.audio, 1);
       silence_frames = LIBRETRO_AUDIO_WRITE_CHUNK_FRAMES;
       if (host.audio.frame_bytes && host.audio.period_bytes < silence_frames)
@@ -7280,7 +7287,7 @@ out_content_prepare:
       printf("unifrog libretro audio_open ok rate=%u/%u channels=%u period=%u periods=%u volume=%u gain=%u route=%s volume_ret=%d mute_ret=%d silence_ret=%d start_ret=%d unmute_ret=%d output_ret=%d\n",
          host.audio_input_rate, host.audio_output_rate,
          host.audio.channels, host.audio.period_bytes, host.audio.periods,
-         LIBRETRO_AUDIO_VOLUME, host.audio_gain, host_audio_route_name(),
+         audio_volume, host.audio_gain, host_audio_route_name(),
          volume_ret, mute_ret, silence_ret, start_ret, unmute_ret,
          output_ret);
       unifrog_diag_memory_snapshot("libretro.after_audio_open");

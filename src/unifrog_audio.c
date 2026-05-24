@@ -48,6 +48,12 @@
 #define GB300_SND_PERIODS 40u
 #define GB300_SND_START_THRESHOLD 2u
 #define GB300_SND_MIN_WRITE_ATTEMPTS 16u
+/* GB300 diagnostics produce audible output with multi-period bursts, while
+ * media and cores feed 512-frame chunks. Coalesce small runtime writes to the
+ * burst size that the direct SND path is known to accept. */
+#define GB300_SND_COALESCE_FLUSH_FRAMES 2048u
+#define GB300_SND_COALESCE_CAP_FRAMES 8192u
+#define GB300_SND_COALESCE_MAX_CHANNELS 2u
 #define GB300_GATE_PROBE_VOLUME 100u
 #define GB300_GATE_PROBE_STAGE_XFERS 4u
 #define GB300_GATE_PROBE_STAGE_PAUSE_US 450000u
@@ -96,6 +102,14 @@ enum audio_gate {
 };
 
 static int stock_audio_output_gate_enabled;
+static int gb300_snd_coalesce_fd = -1;
+static unsigned gb300_snd_coalesce_channels;
+static unsigned gb300_snd_coalesce_frames;
+static int gb300_snd_coalesce_seen_signal;
+static int gb300_snd_coalesce_has_signal;
+static int16_t gb300_snd_coalesce_pcm[
+   GB300_SND_COALESCE_CAP_FRAMES * GB300_SND_COALESCE_MAX_CHANNELS];
+static unsigned gb300_snd_coalesce_log_count;
 
 static int current_audio_uses_gb300_gate(void);
 static unsigned read_pinmux(pinpad_e pin);
@@ -213,6 +227,69 @@ static unsigned system_audio_volume(void)
 {
    return current_audio_uses_gb300_gate() ?
       GB300_SYSTEM_AUDIO_VOLUME : SYSTEM_AUDIO_VOLUME;
+}
+
+static void gb300_snd_coalesce_begin(int fd, unsigned channels)
+{
+   gb300_snd_coalesce_fd = fd;
+   gb300_snd_coalesce_channels = channels;
+   gb300_snd_coalesce_frames = 0;
+   gb300_snd_coalesce_seen_signal = 0;
+   gb300_snd_coalesce_has_signal = 0;
+}
+
+static void gb300_snd_coalesce_reset_fd(int fd)
+{
+   if (fd >= 0 && fd != gb300_snd_coalesce_fd)
+      return;
+   gb300_snd_coalesce_fd = -1;
+   gb300_snd_coalesce_channels = 0;
+   gb300_snd_coalesce_frames = 0;
+   gb300_snd_coalesce_seen_signal = 0;
+   gb300_snd_coalesce_has_signal = 0;
+}
+
+static void audio_scan_signal(const int16_t *samples, unsigned frames,
+   unsigned channels, int *has_signal, unsigned *signal_nonzero,
+   unsigned *signal_abs_max, int *first_sample, int *last_sample)
+{
+   unsigned total;
+
+   if (has_signal)
+      *has_signal = 0;
+   if (signal_nonzero)
+      *signal_nonzero = 0;
+   if (signal_abs_max)
+      *signal_abs_max = 0;
+   if (first_sample)
+      *first_sample = 0;
+   if (last_sample)
+      *last_sample = 0;
+   if (!samples || frames == 0 || channels == 0 ||
+       frames > UINT32_MAX / channels)
+      return;
+
+   total = frames * channels;
+   if (first_sample)
+      *first_sample = samples[0];
+   if (last_sample)
+      *last_sample = samples[total - 1u];
+   for (unsigned i = 0; i < total; i++) {
+      int sample = samples[i];
+      unsigned abs_value;
+
+      if (sample < 0)
+         sample = -sample;
+      abs_value = (unsigned)sample;
+      if (abs_value > 4u) {
+         if (has_signal)
+            *has_signal = 1;
+         if (signal_nonzero)
+            (*signal_nonzero)++;
+      }
+      if (signal_abs_max && abs_value > *signal_abs_max)
+         *signal_abs_max = abs_value;
+   }
 }
 
 static void set_reg_gate(volatile uint32_t *dir, volatile uint32_t *out,
@@ -589,6 +666,8 @@ static int open_snd(struct unifrog_audio *audio,
    audio->periods = periods;
    audio->frame_bytes = channels * sizeof(int16_t);
    audio->muted = 1;
+   if (gb300_route)
+      gb300_snd_coalesce_begin(fd, channels);
    memset(&hw, 0, sizeof(hw));
    (void)ioctl(fd, SND_IOCTL_GET_HW_INFO, &hw);
    printf("unifrog audio open backend=snd fd=%d rate=%u ch=%u req_period=%u req_periods=%u period=%u periods=%u start_threshold=%u avail_min=%lu avail_ret=%d neutral=%d route=%s output_ch=%u mode=%s dma=0x%08lx/%lu hw_period=%lu hw_periods=%lu\n",
@@ -677,6 +756,7 @@ void unifrog_audio_close(struct unifrog_audio *audio)
 
       printf("unifrog audio close backend=%d fd=%d mute_ret=%d drop_ret=%d free_ret=%d\n",
          audio->backend, audio->fd, mute_ret, drop_ret, free_ret);
+      gb300_snd_coalesce_reset_fd(audio->fd);
       close(audio->fd);
       (void)unifrog_audio_set_system_mute(1);
       set_stock_audio_output_gate(0);
@@ -698,6 +778,7 @@ int unifrog_audio_drop(struct unifrog_audio *audio)
 {
    if (!audio || audio->fd < 0)
       return -1;
+   gb300_snd_coalesce_reset_fd(audio->fd);
    if (audio->backend == UNIFROG_AUDIO_BACKEND_AUDSINK)
       return ioctl(audio->fd, AUDSINK_IOCTL_DROP, 0);
    return ioctl(audio->fd, SND_IOCTL_DROP, 0);
@@ -717,6 +798,7 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
    static unsigned signal_log_count;
    int gb300_snd = audio && audio->backend == UNIFROG_AUDIO_BACKEND_SND &&
       unifrog_audio_prefers_stereo_output();
+   int gb300_coalesced_flush = 0;
    int has_signal = 0;
    unsigned signal_nonzero = 0;
    unsigned signal_abs_max = 0;
@@ -731,39 +813,85 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
       attempts = GB300_SND_MIN_WRITE_ATTEMPTS;
    if (audio->backend == UNIFROG_AUDIO_BACKEND_SND) {
       unsigned channels = audio->channels ? audio->channels : 1u;
-      unsigned total = frames * channels;
+      unsigned input_frames = frames;
 
-      if (total > 0) {
-         first_sample = samples[0];
-         last_sample = samples[total - 1u];
-      }
-      for (unsigned i = 0; i < total; i++) {
-         int sample = samples[i];
-         unsigned abs_value;
-
-         if (sample < 0)
-            sample = -sample;
-         abs_value = (unsigned)sample;
-         if (abs_value > 4u) {
-            has_signal = 1;
-            signal_nonzero++;
-         }
-         if (abs_value > signal_abs_max)
-            signal_abs_max = abs_value;
-      }
+      audio_scan_signal(samples, frames, channels, &has_signal,
+         &signal_nonzero, &signal_abs_max, &first_sample, &last_sample);
       if (gb300_snd) {
-         int mute_ret = audio->muted ?
-            unifrog_audio_set_mute(audio, 0) : 0;
+         if (channels <= GB300_SND_COALESCE_MAX_CHANNELS) {
+            if (gb300_snd_coalesce_fd != audio->fd ||
+                gb300_snd_coalesce_channels != channels)
+               gb300_snd_coalesce_begin(audio->fd, channels);
+            if (!has_signal && !gb300_snd_coalesce_seen_signal) {
+               if (gb300_snd_coalesce_log_count < 16) {
+                  gb300_snd_coalesce_log_count++;
+                  printf("unifrog audio gb300_coalesce action=skip_initial_silence fd=%d frames=%u ch=%u abs_max=%u buffered=%u\n",
+                     audio->fd, frames, channels, signal_abs_max,
+                     gb300_snd_coalesce_frames);
+               }
+               return 0;
+            }
+            if (has_signal)
+               gb300_snd_coalesce_seen_signal = 1;
+            if (gb300_snd_coalesce_seen_signal &&
+                (frames < GB300_SND_COALESCE_FLUSH_FRAMES ||
+                 gb300_snd_coalesce_frames > 0)) {
+               unsigned total_frames = gb300_snd_coalesce_frames + frames;
 
-         if (!audio->output_gate_enabled) {
-            set_stock_audio_output_gate(1);
-            audio->output_gate_enabled = 1;
-            audio->output_gate_pending_signal = 0;
+               if (frames <= GB300_SND_COALESCE_CAP_FRAMES &&
+                   total_frames <= GB300_SND_COALESCE_CAP_FRAMES) {
+                  unsigned copy_samples = frames * channels;
+
+                  memcpy(gb300_snd_coalesce_pcm +
+                        gb300_snd_coalesce_frames * channels,
+                     samples, copy_samples * sizeof(samples[0]));
+                  gb300_snd_coalesce_frames = total_frames;
+                  if (has_signal)
+                     gb300_snd_coalesce_has_signal = 1;
+                  if (gb300_snd_coalesce_frames <
+                      GB300_SND_COALESCE_FLUSH_FRAMES) {
+                     if (gb300_snd_coalesce_log_count < 16) {
+                        gb300_snd_coalesce_log_count++;
+                        printf("unifrog audio gb300_coalesce action=buffer fd=%d in_frames=%u buffered=%u ch=%u signal=%d nonzero=%u abs_max=%u\n",
+                           audio->fd, input_frames,
+                           gb300_snd_coalesce_frames, channels, has_signal,
+                           signal_nonzero, signal_abs_max);
+                     }
+                     return 0;
+                  }
+                  samples = gb300_snd_coalesce_pcm;
+                  frames = gb300_snd_coalesce_frames;
+                  has_signal = gb300_snd_coalesce_has_signal;
+                  audio_scan_signal(samples, frames, channels, &has_signal,
+                     &signal_nonzero, &signal_abs_max, &first_sample,
+                     &last_sample);
+                  gb300_coalesced_flush = 1;
+                  if (gb300_snd_coalesce_log_count < 16) {
+                     gb300_snd_coalesce_log_count++;
+                     printf("unifrog audio gb300_coalesce action=flush fd=%d in_frames=%u out_frames=%u ch=%u signal=%d nonzero=%u abs_max=%u\n",
+                        audio->fd, input_frames, frames, channels,
+                        has_signal, signal_nonzero, signal_abs_max);
+                  }
+               } else {
+                  if (gb300_snd_coalesce_log_count < 16) {
+                     gb300_snd_coalesce_log_count++;
+                     printf("unifrog audio gb300_coalesce action=overflow_reset fd=%d in_frames=%u buffered=%u ch=%u\n",
+                        audio->fd, input_frames, gb300_snd_coalesce_frames,
+                        channels);
+                  }
+                  gb300_snd_coalesce_frames = 0;
+                  gb300_snd_coalesce_has_signal = 0;
+               }
+            }
+         }
+         if (has_signal && (!audio->output_gate_enabled || audio->muted)) {
+            int enable_ret = unifrog_audio_set_output_enabled(audio, 1);
+
             if (mute_transition_log_count < 12) {
                mute_transition_log_count++;
-               printf("unifrog audio signal_gate backend=snd fd=%d action=gb300_gate_on_write signal=%d nonzero=%u abs_max=%u mute_ret=%d frames=%u ch=%u\n",
-                  audio->fd, has_signal, signal_nonzero, signal_abs_max,
-                  mute_ret, frames, channels);
+               printf("unifrog audio signal_gate backend=snd fd=%d action=gb300_enable_on_signal ret=%d nonzero=%u abs_max=%u frames=%u ch=%u\n",
+                  audio->fd, enable_ret, signal_nonzero, signal_abs_max,
+                  frames, channels);
             }
          }
       } else if (has_signal && audio->muted) {
@@ -832,6 +960,10 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
                audio->output_gate_enabled,
                audio->output_gate_pending_signal);
          }
+         if (gb300_coalesced_flush) {
+            gb300_snd_coalesce_frames = 0;
+            gb300_snd_coalesce_has_signal = 0;
+         }
          return 0;
       }
       if (tries + 1 >= attempts)
@@ -853,6 +985,10 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
          frames, tries + 1, attempts, poll_timeout_ms, audio->rate,
          audio->channels, audio->muted, audio->output_gate_enabled,
          audio->output_gate_pending_signal, delay_ret, (unsigned long)delay);
+   }
+   if (gb300_coalesced_flush) {
+      gb300_snd_coalesce_frames = 0;
+      gb300_snd_coalesce_has_signal = 0;
    }
    return ret;
 }
