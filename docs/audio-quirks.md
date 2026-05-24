@@ -54,11 +54,11 @@ or `src/unifrog_media.c`.
 - UniFrog-owned UI/theme playback prefers the SND backend because the silence
   gate can inspect PCM buffers before transfer. The audsink backend remains a
   fallback for those short sounds.
-- Libretro core playback uses mono output on SF2000. GB300 or a stock-bit
-  GB300 input bus still gets the GB300 L15 gate and larger direct-SND ring, but
-  UniFrog mixes content to mono and duplicates it into stereo I2S frames before
-  writing to `/dev/sndC0i2so`. The GB300 has one speaker, but the I2SO/DAC path
-  should be treated as a stereo frame sink.
+- Libretro core playback uses mono output on SF2000 and GB300. GB300 or a
+  stock-bit GB300 input bus still gets the GB300 L15 gate and larger direct-SND
+  ring, but release playback writes single-channel PCM through the runtime
+  `/dev/sndC0i2so` profile because 0140 diagnostics showed that route was the
+  only direct SND profile with clean transfers.
 - On GB300, UniFrog's AUTO PCM opener tries direct `/dev/sndC0i2so` before
   AUDSINK. The direct SND open uses the vendor-style HCRTOS parameters from the
   cast/sound-test examples: `O_RDWR`, AUDPAD source, `start_threshold=2`, and a
@@ -72,14 +72,11 @@ or `src/unifrog_media.c`.
   Developer -> Audio test. 0134 through 0136 showed all production auddec routes
   stayed at `decoded=0`/`first_header_*=0`; use the runtime probe to collect
   auddec route labels instead of compiling separate one-off probe builds.
-- GB300 AAC containers are fed to `/dev/auddec` as ADTS-wrapped ES data. The
-  raw MP4 AAC + AudioSpecificConfig setup initializes on GB300 but 0139 showed
-  it never parsed a header, while SF2000 keeps the raw-ASC path that previously
-  produced working hardware audio.
-- Audio-only and native video-container audio playback prefer compressed
-  packets through `/dev/auddec` when the linked HCRTOS plugin supports the
-  codec. Unsupported or failed software-only routes still fall back to
-  FFmpeg-decoded PCM through the UniFrog SND silence gate.
+- GB300 normal playback bypasses `/dev/auddec` for release builds. 0140 showed
+  valid ADTS AAC packets being fed to auddec, but every production and probe
+  route stayed at `frames_decoded=0` and `first_header_*=0`. Audio-only files
+  and native video-container audio therefore use FFmpeg-decoded PCM through the
+  UniFrog SND path on GB300. SF2000 keeps the hardware-auddec path.
 - Native media must use the audio decoder ABI from the linked HCRTOS
   `libauddrv.a`, not blindly copy either adjacent public header. The bundled
   driver switches on `AUDDEC_INIT == 0x82500301`, which corresponds to a
@@ -99,8 +96,8 @@ or `src/unifrog_media.c`.
   This matches the stock HCRTOS direct-decoder examples, which memset
   `struct audio_config` and do not set the field. UniFrog keeps compatibility
   variants with value `1`, but the stock-style zero value is attempted first.
-- GB300 compressed `/dev/auddec` routes start with an I2SO-only KSHM profile
-  and do not rotate the first route. The 0127 diagnostics showed only
+- GB300 compressed `/dev/auddec` diagnostics start with an I2SO-only KSHM
+  profile and do not rotate the first route. The 0127 diagnostics showed only
   `/dev/sndC0i2so` exists as a direct SND node; SPO/PCMO masks can return
   successful `AUDDEC_INIT`/`AUDDEC_START` while leaving the decoder clock stuck
   and the speaker silent. The combined I2SO+SPO, SPO, and PCMO profiles remain
@@ -111,18 +108,16 @@ or `src/unifrog_media.c`.
   `MEDIA_GB300_I2SO_EXTRA_ROUTE=1` (which defines
   `UNIFROG_MEDIA_GB300_I2SO_EXTRA_ROUTE`) while default builds use the
   established I2SO prime routes first.
-- GB300 hardware-auddec attempts keep the speaker gate closed until auddec
-  status reports header or frame progress. Init/start success and a moving
-  `AUDDEC_GET_CUR_TIME` clock are not enough to unmute the physical output.
+- GB300 hardware-auddec probe attempts keep the speaker gate closed until
+  auddec status reports header or frame progress. Init/start success and a
+  moving `AUDDEC_GET_CUR_TIME` clock are not enough to unmute the physical
+  output.
 - System volume/mute opens keep `/dev/sndC0i2so` write-only. Only UniFrog-owned
   PCM and I2SO-prime playback paths use bidirectional SND opens for DMA.
-- GB300 builds now treat "auddec init/start success but no decode progress" as
-  a runtime fault. If packets advance while `frames_decoded=0`,
-  `first_header_*==0`, native playback logs `reason=decode_stall` and falls
-  back to FFmpeg software audio instead of reporting a false-success silent run.
-  Do not use `AUDDEC_GET_CUR_TIME` alone as the health signal; 0132 GB300 logs
-  showed the decoder clock can advance while headers and decoded frames remain
-  at zero.
+- GB300 diagnostics treat "auddec init/start success but no decode progress" as
+  a runtime fault. Do not use `AUDDEC_GET_CUR_TIME` alone as the health signal;
+  0132 and 0140 GB300 logs showed the decoder clock can advance while headers
+  and decoded frames remain at zero.
 - Audio-only compressed playback should open `/dev/auddec` in freerun mode
   first. STC update/sync modes are reserved for audio plus video, where the
   video decoder can synchronize to the audio-owned clock.

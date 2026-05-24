@@ -162,7 +162,7 @@ void unifrog_boot_reboot(void)
 
 int unifrog_boot_firmware_asd(const char *name)
 {
-   static const char prefix[] = "unifrog_data/firmware/";
+   static const char prefix[] = "firmware/";
    char path[FASTBOOT_HANDOFF_PATH_BYTES];
 
    printf("unifrog boot request name=%s supported=%d\n",

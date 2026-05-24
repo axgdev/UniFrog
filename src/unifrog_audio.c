@@ -129,11 +129,11 @@ int unifrog_audio_prefers_stereo_output(void)
 unsigned unifrog_audio_output_channels(void)
 {
    /*
-    * GB300 is a physical mono-speaker device, but the I2SO/DAC route behaves
-    * like a stereo frame sink. Keep media mono-mixed above this layer and feed
-    * duplicated stereo frames to the hardware route.
+    * GB300 diagnostics show the only cleanly transferring direct route is the
+    * single-channel runtime SND profile. Keep release playback on that mono
+    * transport; stereo/auddec experiments stay in diagnostics.
     */
-   return unifrog_audio_prefers_stereo_output() ? 2u : 1u;
+   return 1u;
 }
 
 static uint32_t current_audio_snd_devs(void)
