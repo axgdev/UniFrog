@@ -32,7 +32,7 @@
 #define GPIO_L15_MASK (1u << 15)
 #define GPIO_R07_MASK (1u << 7)
 #define SYSTEM_AUDIO_VOLUME 65u
-#define GB300_SYSTEM_AUDIO_VOLUME 75u
+#define GB300_SYSTEM_AUDIO_VOLUME 90u
 #define UNIFROG_AUDIO_ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #ifndef UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE
 #define UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE 0
@@ -51,6 +51,8 @@
 #define GB300_GATE_PROBE_VOLUME 100u
 #define GB300_GATE_PROBE_STAGE_XFERS 4u
 #define GB300_GATE_PROBE_STAGE_PAUSE_US 450000u
+#define GB300_CONTROL_SWEEP_XFERS 5u
+#define GB300_CONTROL_SWEEP_PAUSE_US 250000u
 #define PWMCTRL_BASE ((volatile uint32_t *)0xb8818410u)
 #define SND0_BASE ((volatile uint32_t *)0xb880a000u)
 #define SND0_DAC_BASE ((volatile uint32_t *)0xb880b000u)
@@ -65,6 +67,28 @@ extern unsigned long PINMUXT;
 extern unsigned long SND0;
 extern unsigned long SND0_DAC;
 extern int unifrog_input_uses_stock_bits(void) __attribute__((weak));
+extern unsigned char i2so_platform_dev[] __attribute__((weak));
+
+/* Offsets mirror the SDK i2so_platform_device layout; the app include path
+ * intentionally does not expose the kernel-private header. */
+#define I2SO_PLATFORM_STATUS_OFF 4u
+#define I2SO_PLATFORM_REMAINS_OFF 40u
+#define I2SO_PLATFORM_WR_OFF 52u
+#define I2SO_PLATFORM_RD_OFF 56u
+#define I2SO_PLATFORM_AVAIL_OFF 60u
+#define I2SO_PLATFORM_REF_CNT_OFF 168u
+#define I2SO_PLATFORM_PINMUX_DATA_OFF 172u
+#define I2SO_PLATFORM_PINMUX_MUTE_OFF 176u
+#define I2SO_PLATFORM_MUTE_POLAR_OFF 180u
+#define I2SO_PLATFORM_VOLUME_OFF 181u
+#define I2SO_PLATFORM_FADE_EN_OFF 182u
+#define I2SO_PLATFORM_FADE_STEP_OFF 183u
+#define I2SO_PLATFORM_MUTE_OFF 264u
+#define I2SO_PLATFORM_U8(off) (*(volatile uint8_t *)(void *)(i2so_platform_dev + (off)))
+#define I2SO_PLATFORM_INT(off) (*(volatile int *)(void *)(i2so_platform_dev + (off)))
+#define I2SO_PLATFORM_SIZE(off) (*(volatile size_t *)(void *)(i2so_platform_dev + (off)))
+#define I2SO_PLATFORM_PINMUX_DATA (*(struct pinmux_setting **)(void *)(i2so_platform_dev + I2SO_PLATFORM_PINMUX_DATA_OFF))
+#define I2SO_PLATFORM_PINMUX_MUTE (*(struct pinmux_setting **)(void *)(i2so_platform_dev + I2SO_PLATFORM_PINMUX_MUTE_OFF))
 
 enum audio_gate {
    AUDIO_GATE_SF2000_R07,
@@ -73,6 +97,7 @@ enum audio_gate {
 
 static int stock_audio_output_gate_enabled;
 
+static int current_audio_uses_gb300_gate(void);
 static unsigned read_pinmux(pinpad_e pin);
 
 static void clear_audio(struct unifrog_audio *audio)
@@ -117,6 +142,44 @@ static const char *audio_backend_name(int backend)
    default:
       return "unknown";
    }
+}
+
+static void gb300_i2so_platform_log(const char *tag)
+{
+   struct pinmux_setting *data;
+   struct pinmux_setting *mute;
+   int mute_pin = -1;
+   unsigned mute_func = 0;
+   int data_pin = -1;
+   unsigned data_func = 0;
+
+   if (!current_audio_uses_gb300_gate() || !i2so_platform_dev)
+      return;
+   data = I2SO_PLATFORM_PINMUX_DATA;
+   mute = I2SO_PLATFORM_PINMUX_MUTE;
+   if (mute && mute->num_pins > 0) {
+      mute_pin = (int)mute->settings[0].pin;
+      mute_func = mute->settings[0].func;
+   }
+   if (data && data->num_pins > 0) {
+      data_pin = (int)data->settings[0].pin;
+      data_func = data->settings[0].func;
+   }
+   printf("unifrog audio i2so_platform tag=%s status=%d ref=%d mute=%d vol=%u fade_en=%u fade_step=%u pin_data=0x%08lx data0=%d/%u pin_mute=0x%08lx mute0=%d/%u mute_polar=%u wr=%lu rd=%lu avail=%lu remains=%lu\n",
+      tag ? tag : "?",
+      I2SO_PLATFORM_INT(I2SO_PLATFORM_STATUS_OFF),
+      I2SO_PLATFORM_INT(I2SO_PLATFORM_REF_CNT_OFF),
+      I2SO_PLATFORM_INT(I2SO_PLATFORM_MUTE_OFF),
+      (unsigned)I2SO_PLATFORM_U8(I2SO_PLATFORM_VOLUME_OFF),
+      (unsigned)I2SO_PLATFORM_U8(I2SO_PLATFORM_FADE_EN_OFF),
+      (unsigned)I2SO_PLATFORM_U8(I2SO_PLATFORM_FADE_STEP_OFF),
+      (unsigned long)data, data_pin, data_func,
+      (unsigned long)mute, mute_pin, mute_func,
+      I2SO_PLATFORM_U8(I2SO_PLATFORM_MUTE_POLAR_OFF) ? 1u : 0u,
+      (unsigned long)I2SO_PLATFORM_SIZE(I2SO_PLATFORM_WR_OFF),
+      (unsigned long)I2SO_PLATFORM_SIZE(I2SO_PLATFORM_RD_OFF),
+      (unsigned long)I2SO_PLATFORM_SIZE(I2SO_PLATFORM_AVAIL_OFF),
+      (unsigned long)I2SO_PLATFORM_SIZE(I2SO_PLATFORM_REMAINS_OFF));
 }
 
 static int current_audio_uses_gb300_gate(void)
@@ -302,7 +365,7 @@ static int open_system_snd(void)
    return open("/dev/sndC0i2so", O_WRONLY);
 }
 
-static void configure_neutral_audio_controls_fd(int fd, const char *tag)
+static int configure_neutral_audio_controls_fd(int fd, const char *tag)
 {
    struct snd_twotone twotone;
    struct snd_audio_eq6 eq6;
@@ -312,17 +375,10 @@ static void configure_neutral_audio_controls_fd(int fd, const char *tag)
    int balance_ret;
    static unsigned log_count;
    static unsigned gb300_log_count;
+   int gb300_route = current_audio_uses_gb300_gate();
 
    if (fd < 0)
-      return;
-   if (current_audio_uses_gb300_gate()) {
-      if (gb300_log_count < 6) {
-         gb300_log_count++;
-         printf("unifrog audio neutral_controls tag=%s action=gb300_skip fd=%d\n",
-            tag ? tag : "?", fd);
-      }
-      return;
-   }
+      return -1;
    memset(&twotone, 0, sizeof(twotone));
    memset(&eq6, 0, sizeof(eq6));
    memset(&balance, 0, sizeof(balance));
@@ -332,18 +388,25 @@ static void configure_neutral_audio_controls_fd(int fd, const char *tag)
    twotone_ret = ioctl(fd, SND_IOCTL_SET_TWOTONE, &twotone);
    eq_ret = ioctl(fd, SND_IOCTL_SET_EQ6, &eq6);
    balance_ret = ioctl(fd, SND_IOCTL_SET_LR_BALANCE, &balance);
-   if (log_count < 12 || twotone_ret != 0 || eq_ret != 0 ||
-       balance_ret != 0) {
-      log_count++;
-      printf("unifrog audio neutral_controls tag=%s fd=%d twotone=%d eq6=%d balance=%d\n",
-         tag ? tag : "?", fd, twotone_ret, eq_ret, balance_ret);
+   if ((gb300_route && gb300_log_count < 32) ||
+       (!gb300_route && log_count < 12) || twotone_ret != 0 ||
+       eq_ret != 0 || balance_ret != 0) {
+      if (gb300_route)
+         gb300_log_count++;
+      else
+         log_count++;
+      printf("unifrog audio neutral_controls tag=%s fd=%d gb300=%d twotone=%d eq6=%d balance=%d\n",
+         tag ? tag : "?", fd, gb300_route, twotone_ret, eq_ret,
+         balance_ret);
    }
+   return twotone_ret == 0 && eq_ret == 0 && balance_ret == 0 ? 0 : -1;
 }
 
 int unifrog_audio_set_system_volume(unsigned volume)
 {
    uint8_t value;
    int ret;
+   int ret_errno;
    int fd;
 
    if (volume > 100)
@@ -356,9 +419,16 @@ int unifrog_audio_set_system_volume(unsigned volume)
       return -1;
    }
    configure_neutral_audio_controls_fd(fd, "system_volume");
+   errno = 0;
    ret = ioctl(fd, SND_IOCTL_SET_VOLUME, &value);
+   ret_errno = errno;
    close(fd);
-   printf("unifrog audio system_volume volume=%u ret=%d\n", volume, ret);
+   printf("unifrog audio system_volume volume=%u ret=%d errno=%d dac0=%08lx dac1=%08lx fade90=%08lx\n",
+      volume, ret, ret_errno,
+      (unsigned long)SND0_DAC_BASE[0],
+      (unsigned long)SND0_DAC_BASE[1],
+      (unsigned long)SND0_BASE[SND0_FADE_REG]);
+   gb300_i2so_platform_log("system_volume");
    return ret;
 }
 
@@ -366,6 +436,7 @@ int unifrog_audio_set_system_mute(int mute)
 {
    int value = mute ? 1 : 0;
    int ret;
+   int ret_errno;
    int fd;
 
    (void)ensure_audio_drivers();
@@ -380,9 +451,16 @@ int unifrog_audio_set_system_mute(int mute)
       return -1;
    }
    configure_neutral_audio_controls_fd(fd, "system_mute");
+   errno = 0;
    ret = ioctl(fd, SND_IOCTL_SET_MUTE, value);
+   ret_errno = errno;
    close(fd);
-   printf("unifrog audio system_mute mute=%d ret=%d\n", value, ret);
+   printf("unifrog audio system_mute mute=%d ret=%d errno=%d dac0=%08lx dac1=%08lx fade90=%08lx\n",
+      value, ret, ret_errno,
+      (unsigned long)SND0_DAC_BASE[0],
+      (unsigned long)SND0_DAC_BASE[1],
+      (unsigned long)SND0_BASE[SND0_FADE_REG]);
+   gb300_i2so_platform_log("system_mute");
    return ret;
 }
 
@@ -466,6 +544,7 @@ static int open_snd(struct unifrog_audio *audio,
    int hw_ret;
    int hw_errno = 0;
    int avail_ret = -1;
+   int neutral_ret = -1;
    int fd;
 
    if (gb300_route) {
@@ -500,7 +579,7 @@ static int open_snd(struct unifrog_audio *audio,
       goto fail;
    avail_min = period_bytes;
    avail_ret = ioctl(fd, SND_IOCTL_AVAIL_MIN, &avail_min);
-   configure_neutral_audio_controls_fd(fd, "open_snd");
+   neutral_ret = configure_neutral_audio_controls_fd(fd, "open_snd");
 
    audio->fd = fd;
    audio->backend = UNIFROG_AUDIO_BACKEND_SND;
@@ -512,16 +591,17 @@ static int open_snd(struct unifrog_audio *audio,
    audio->muted = 1;
    memset(&hw, 0, sizeof(hw));
    (void)ioctl(fd, SND_IOCTL_GET_HW_INFO, &hw);
-   printf("unifrog audio open backend=snd fd=%d rate=%u ch=%u req_period=%u req_periods=%u period=%u periods=%u start_threshold=%u avail_min=%lu avail_ret=%d route=%s output_ch=%u mode=%s dma=0x%08lx/%lu hw_period=%lu hw_periods=%lu\n",
+   printf("unifrog audio open backend=snd fd=%d rate=%u ch=%u req_period=%u req_periods=%u period=%u periods=%u start_threshold=%u avail_min=%lu avail_ret=%d neutral=%d route=%s output_ch=%u mode=%s dma=0x%08lx/%lu hw_period=%lu hw_periods=%lu\n",
       fd, rate, channels, requested_period, requested_periods,
       period_bytes, periods, start_threshold, (unsigned long)avail_min,
-      avail_ret,
+      avail_ret, neutral_ret,
       audio_gate_name(current_audio_gate()),
       unifrog_audio_output_channels(),
       gb300_route ? "gb300_audpad" : "audpad",
       (unsigned long)hw.dma_addr, (unsigned long)hw.dma_size,
       (unsigned long)hw.pcm_params.period_size,
       (unsigned long)hw.pcm_params.periods);
+   gb300_i2so_platform_log("open_snd");
    return 0;
 
 fail:
@@ -634,31 +714,44 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
    static unsigned failure_log_count;
    static unsigned success_log_count;
    static unsigned mute_transition_log_count;
+   static unsigned signal_log_count;
+   int gb300_snd = audio && audio->backend == UNIFROG_AUDIO_BACKEND_SND &&
+      unifrog_audio_prefers_stereo_output();
+   int has_signal = 0;
+   unsigned signal_nonzero = 0;
+   unsigned signal_abs_max = 0;
+   int first_sample = 0;
+   int last_sample = 0;
 
    if (!audio || audio->fd < 0 || !samples || frames == 0)
       return -1;
    if (attempts == 0)
       attempts = 1;
-   if (unifrog_audio_prefers_stereo_output() &&
-       audio->backend == UNIFROG_AUDIO_BACKEND_SND &&
-       attempts < GB300_SND_MIN_WRITE_ATTEMPTS)
+   if (gb300_snd && attempts < GB300_SND_MIN_WRITE_ATTEMPTS)
       attempts = GB300_SND_MIN_WRITE_ATTEMPTS;
    if (audio->backend == UNIFROG_AUDIO_BACKEND_SND) {
-      int has_signal = 0;
       unsigned channels = audio->channels ? audio->channels : 1u;
       unsigned total = frames * channels;
 
+      if (total > 0) {
+         first_sample = samples[0];
+         last_sample = samples[total - 1u];
+      }
       for (unsigned i = 0; i < total; i++) {
          int sample = samples[i];
+         unsigned abs_value;
 
          if (sample < 0)
             sample = -sample;
-         if (sample > 4) {
+         abs_value = (unsigned)sample;
+         if (abs_value > 4u) {
             has_signal = 1;
-            break;
+            signal_nonzero++;
          }
+         if (abs_value > signal_abs_max)
+            signal_abs_max = abs_value;
       }
-      if (unifrog_audio_prefers_stereo_output()) {
+      if (gb300_snd) {
          int mute_ret = audio->muted ?
             unifrog_audio_set_mute(audio, 0) : 0;
 
@@ -668,8 +761,9 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
             audio->output_gate_pending_signal = 0;
             if (mute_transition_log_count < 12) {
                mute_transition_log_count++;
-               printf("unifrog audio signal_gate backend=snd fd=%d action=gb300_gate_on_write signal=%d mute_ret=%d frames=%u ch=%u\n",
-                  audio->fd, has_signal, mute_ret, frames, channels);
+               printf("unifrog audio signal_gate backend=snd fd=%d action=gb300_gate_on_write signal=%d nonzero=%u abs_max=%u mute_ret=%d frames=%u ch=%u\n",
+                  audio->fd, has_signal, signal_nonzero, signal_abs_max,
+                  mute_ret, frames, channels);
             }
          }
       } else if (has_signal && audio->muted) {
@@ -715,9 +809,19 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
          last_errno = errno;
       }
       if (ret >= 0) {
-         if (unifrog_audio_prefers_stereo_output() &&
-             audio->backend == UNIFROG_AUDIO_BACKEND_SND &&
-             success_log_count < 8) {
+         if (gb300_snd && has_signal && signal_log_count < 12) {
+            signal_log_count++;
+            printf("unifrog audio gb300_first_signal idx=%u fd=%d frames=%u ch=%u nonzero=%u abs_max=%u first=%d last=%d muted=%d gate=%d dac0=%08lx dac1=%08lx fade90=%08lx\n",
+               signal_log_count, audio->fd, frames, audio->channels,
+               signal_nonzero, signal_abs_max, first_sample, last_sample,
+               audio->muted, audio->output_gate_enabled,
+               (unsigned long)SND0_DAC_BASE[0],
+               (unsigned long)SND0_DAC_BASE[1],
+               (unsigned long)SND0_BASE[SND0_FADE_REG]);
+            if (signal_log_count <= 4)
+               unifrog_audio_debug_dump(audio, "gb300_first_signal");
+         }
+         if (gb300_snd && success_log_count < 8) {
             snd_pcm_uframes_t delay = 0;
             int delay_ret = ioctl(audio->fd, SND_IOCTL_DELAY, &delay);
 
@@ -778,6 +882,10 @@ int unifrog_audio_delay(struct unifrog_audio *audio, unsigned long *frames)
 int unifrog_audio_set_volume(struct unifrog_audio *audio, unsigned volume)
 {
    uint8_t value;
+   int ret;
+   int ret_errno = 0;
+   int system_ret = 0;
+   static unsigned gb300_log_count;
 
    if (!audio || audio->fd < 0)
       return -1;
@@ -785,24 +893,59 @@ int unifrog_audio_set_volume(struct unifrog_audio *audio, unsigned volume)
       volume = 100;
    value = (uint8_t)volume;
    if (audio->backend == UNIFROG_AUDIO_BACKEND_AUDSINK) {
-      int ret = ioctl(audio->fd, AUDSINK_IOCTL_SET_VOLUME, &value);
-      int system_ret = unifrog_audio_set_system_volume(volume);
-
-      return ret == 0 ? 0 : system_ret;
+      errno = 0;
+      ret = ioctl(audio->fd, AUDSINK_IOCTL_SET_VOLUME, &value);
+      ret_errno = errno;
+      system_ret = unifrog_audio_set_system_volume(volume);
+   } else {
+      errno = 0;
+      ret = ioctl(audio->fd, SND_IOCTL_SET_VOLUME, &value);
+      ret_errno = errno;
    }
-   return ioctl(audio->fd, SND_IOCTL_SET_VOLUME, &value);
+   if (current_audio_uses_gb300_gate() &&
+       (gb300_log_count < 40 || ret != 0 || system_ret != 0)) {
+      gb300_log_count++;
+      printf("unifrog audio set_volume backend=%s fd=%d volume=%u ret=%d errno=%d system_ret=%d dac0=%08lx dac1=%08lx fade90=%08lx\n",
+         audio_backend_name(audio->backend), audio->fd, volume, ret,
+         ret_errno, system_ret,
+         (unsigned long)SND0_DAC_BASE[0],
+         (unsigned long)SND0_DAC_BASE[1],
+         (unsigned long)SND0_BASE[SND0_FADE_REG]);
+      gb300_i2so_platform_log("set_volume");
+   }
+   if (audio->backend == UNIFROG_AUDIO_BACKEND_AUDSINK)
+      return ret == 0 ? 0 : system_ret;
+   return ret;
 }
 
 int unifrog_audio_set_mute(struct unifrog_audio *audio, int mute)
 {
    int ret;
+   int ret_errno;
+   static unsigned gb300_log_count;
 
    if (!audio || audio->fd < 0)
       return -1;
-   if (audio->backend == UNIFROG_AUDIO_BACKEND_AUDSINK)
+   if (audio->backend == UNIFROG_AUDIO_BACKEND_AUDSINK) {
+      errno = 0;
       ret = unifrog_audio_set_system_mute(mute);
-   else
+      ret_errno = errno;
+   } else {
+      errno = 0;
       ret = ioctl(audio->fd, SND_IOCTL_SET_MUTE, mute ? 1 : 0);
+      ret_errno = errno;
+   }
+   if (current_audio_uses_gb300_gate() &&
+       (gb300_log_count < 48 || ret != 0)) {
+      gb300_log_count++;
+      printf("unifrog audio set_mute backend=%s fd=%d mute=%d ret=%d errno=%d dac0=%08lx dac1=%08lx fade90=%08lx\n",
+         audio_backend_name(audio->backend), audio->fd, mute ? 1 : 0, ret,
+         ret_errno,
+         (unsigned long)SND0_DAC_BASE[0],
+         (unsigned long)SND0_DAC_BASE[1],
+         (unsigned long)SND0_BASE[SND0_FADE_REG]);
+      gb300_i2so_platform_log("set_mute");
+   }
    if (ret != 0)
       return -1;
    audio->muted = mute ? 1 : 0;
@@ -815,22 +958,36 @@ int unifrog_audio_set_output_enabled(struct unifrog_audio *audio, int enabled)
       return -1;
    if (current_audio_uses_gb300_gate()) {
       if (enabled) {
-         (void)unifrog_audio_set_volume(audio, system_audio_volume());
-         (void)unifrog_audio_set_mute(audio, 0);
+         unsigned volume = system_audio_volume();
+         int system_volume_ret;
+         int system_mute_ret;
+         int volume_ret;
+         int mute_ret;
+
+         apply_stock_audio_silence_policy("gb300_enable");
+         system_volume_ret = unifrog_audio_set_system_volume(volume);
+         system_mute_ret = unifrog_audio_set_system_mute(0);
+         volume_ret = unifrog_audio_set_volume(audio, volume);
+         mute_ret = unifrog_audio_set_mute(audio, 0);
          set_stock_audio_output_gate(1);
          audio->output_gate_enabled = 1;
          audio->output_gate_pending_signal = 0;
-         printf("unifrog audio output_enable action=gb300_v044 backend=%s fd=%d muted=%d gate=%d\n",
-            audio_backend_name(audio->backend), audio->fd, audio->muted,
-            audio->output_gate_enabled);
+         printf("unifrog audio output_enable action=gb300_system_unmute backend=%s fd=%d volume=%u sys_volume=%d sys_mute=%d volume_ret=%d mute_ret=%d muted=%d gate=%d\n",
+            audio_backend_name(audio->backend), audio->fd, volume,
+            system_volume_ret, system_mute_ret, volume_ret, mute_ret,
+            audio->muted, audio->output_gate_enabled);
       } else {
+         int mute_ret;
+         int system_mute_ret;
+
          set_stock_audio_output_gate(0);
          audio->output_gate_enabled = 0;
          audio->output_gate_pending_signal = 0;
-         (void)unifrog_audio_set_mute(audio, 1);
-         printf("unifrog audio output_enable action=gb300_v044_off backend=%s fd=%d muted=%d gate=%d\n",
-            audio_backend_name(audio->backend), audio->fd, audio->muted,
-            audio->output_gate_enabled);
+         mute_ret = unifrog_audio_set_mute(audio, 1);
+         system_mute_ret = unifrog_audio_set_system_mute(1);
+         printf("unifrog audio output_enable action=gb300_system_mute backend=%s fd=%d mute_ret=%d sys_mute=%d muted=%d gate=%d\n",
+            audio_backend_name(audio->backend), audio->fd, mute_ret,
+            system_mute_ret, audio->muted, audio->output_gate_enabled);
       }
       return 0;
    }
@@ -885,7 +1042,7 @@ static int16_t gb300_route_probe_mono_pcm[GB300_ROUTE_PROBE_FRAMES];
 static void fill_gb300_route_probe_pcm(unsigned route)
 {
    unsigned period = 44u + (route % 7u) * 8u;
-   unsigned amplitude = 6000u + (route % 5u) * 900u;
+   unsigned amplitude = 9000u + (route % 5u) * 1200u;
 
    for (unsigned i = 0; i < GB300_ROUTE_PROBE_FRAMES; i++) {
       int16_t sample = ((i / period) & 1u) ?
@@ -1085,7 +1242,7 @@ static int gb300_route_probe_snd(unsigned route, const char *name,
       errno = 0;
       avail_ret = ioctl(fd, SND_IOCTL_AVAIL_MIN, &avail_min);
       avail_errno = errno;
-      configure_neutral_audio_controls_fd(fd, name);
+      neutral_ret = configure_neutral_audio_controls_fd(fd, name);
       errno = 0;
       volume_ret = ioctl(fd, SND_IOCTL_SET_VOLUME, &volume);
       volume_errno = errno;
@@ -1134,6 +1291,223 @@ static int gb300_route_probe_snd(unsigned route, const char *name,
    (void)ioctl(fd, SND_IOCTL_HW_FREE, 0);
    close(fd);
    return hw_ret == 0 && start_ret == 0 && xfer_count > 0 ? 0 : -1;
+}
+
+struct gb300_control_sweep_profile {
+   const char *name;
+   unsigned channels;
+   unsigned volume;
+   int neutral_controls;
+   int system_unmute;
+   int disable_driver_mute_pin;
+   int fade_action;
+   int l15_high;
+   int r07_high;
+};
+
+static int gb300_route_probe_control_profile(unsigned route, unsigned index,
+   const struct gb300_control_sweep_profile *profile)
+{
+   struct snd_pcm_params params;
+   struct snd_xfer xfer;
+   struct snd_hw_info hw;
+   struct unifrog_audio diag_audio;
+   struct pinmux_setting *saved_mute_pin;
+   int saved_mute_polar;
+   uint32_t saved_underrun_fade;
+   snd_pcm_uframes_t avail_min = GB300_SND_PERIOD_BYTES;
+   snd_pcm_uframes_t delay = 0;
+   const int16_t *pcm;
+   uint8_t volume;
+   unsigned channels;
+   int fd = -1;
+   int open_errno = 0;
+   int hw_ret = -1;
+   int hw_errno = 0;
+   int avail_ret = -1;
+   int avail_errno = 0;
+   int neutral_ret = -2;
+   int sys_volume_ret = -2;
+   int sys_mute_ret = -2;
+   int volume_ret = -1;
+   int volume_errno = 0;
+   int mute_ret = -1;
+   int mute_errno = 0;
+   int start_ret = -1;
+   int start_errno = 0;
+   int xfer_ret = -1;
+   int xfer_errno = 0;
+   unsigned xfer_count = 0;
+   int delay_ret = -1;
+   int delay_errno = 0;
+   int drain_ret = -1;
+   int drain_errno = 0;
+   int info_ret = -1;
+
+   if (!profile || !i2so_platform_dev)
+      return -1;
+   channels = profile->channels;
+   if (channels == 0 || channels > 2u)
+      channels = GB300_ROUTE_PROBE_CHANNELS;
+   volume = (uint8_t)(profile->volume > 100u ? 100u : profile->volume);
+   pcm = channels == 1u ? gb300_route_probe_mono_pcm : gb300_route_probe_pcm;
+   saved_mute_pin = I2SO_PLATFORM_PINMUX_MUTE;
+   saved_mute_polar = I2SO_PLATFORM_U8(I2SO_PLATFORM_MUTE_POLAR_OFF) ? 1 : 0;
+   saved_underrun_fade = SND0_BASE[SND0_UNDERRUN_FADE_REG];
+   fill_gb300_route_probe_pcm(route);
+
+   printf("unifrog audio gb300_sweep profile=%u route=%u name=%s begin ch=%u volume=%u neutral=%d system_unmute=%d disable_driver_mute_pin=%d fade_action=%d l15_high=%d r07_high=%d\n",
+      index, route, profile->name, channels, (unsigned)volume,
+      profile->neutral_controls, profile->system_unmute,
+      profile->disable_driver_mute_pin, profile->fade_action,
+      profile->l15_high, profile->r07_high);
+   if (profile->disable_driver_mute_pin)
+      I2SO_PLATFORM_PINMUX_MUTE = NULL;
+   if (profile->fade_action == 0)
+      SND0_BASE[SND0_UNDERRUN_FADE_REG] =
+         saved_underrun_fade & ~SND0_UNDERRUN_FADE_BIT;
+   else if (profile->fade_action > 0)
+      SND0_BASE[SND0_UNDERRUN_FADE_REG] =
+         saved_underrun_fade | SND0_UNDERRUN_FADE_BIT;
+   gb300_i2so_platform_log("gb300_sweep_before_open");
+
+   errno = 0;
+   fd = open("/dev/sndC0i2so", O_RDWR);
+   open_errno = errno;
+   if (fd < 0)
+      goto done;
+
+   init_gb300_route_probe_pcm_params(&params, SND_PCM_SOURCE_AUDPAD);
+   params.channels = channels;
+   params.period_size = GB300_SND_PERIOD_BYTES;
+   params.periods = GB300_SND_PERIODS;
+   params.start_threshold = GB300_SND_START_THRESHOLD;
+   params.pcm_dest = SND_PCM_DEST_DMA;
+   errno = 0;
+   hw_ret = ioctl(fd, SND_IOCTL_HW_PARAMS, &params);
+   hw_errno = errno;
+   if (hw_ret == 0) {
+      errno = 0;
+      avail_ret = ioctl(fd, SND_IOCTL_AVAIL_MIN, &avail_min);
+      avail_errno = errno;
+      if (profile->neutral_controls)
+         neutral_ret = configure_neutral_audio_controls_fd(fd, profile->name);
+      else
+         printf("unifrog audio neutral_controls tag=%s fd=%d gb300=1 action=sweep_skip\n",
+            profile->name, fd);
+      if (profile->system_unmute) {
+         sys_volume_ret = unifrog_audio_set_system_volume(volume);
+         sys_mute_ret = unifrog_audio_set_system_mute(0);
+      }
+      errno = 0;
+      volume_ret = ioctl(fd, SND_IOCTL_SET_VOLUME, &volume);
+      volume_errno = errno;
+      errno = 0;
+      mute_ret = ioctl(fd, SND_IOCTL_SET_MUTE, 0);
+      mute_errno = errno;
+      errno = 0;
+      start_ret = ioctl(fd, SND_IOCTL_START, 0);
+      start_errno = errno;
+      if (start_ret == 0) {
+         memset(&diag_audio, 0, sizeof(diag_audio));
+         diag_audio.fd = fd;
+         diag_audio.backend = UNIFROG_AUDIO_BACKEND_SND;
+         diag_audio.rate = GB300_ROUTE_PROBE_RATE;
+         diag_audio.channels = channels;
+         diag_audio.period_bytes = GB300_SND_PERIOD_BYTES;
+         diag_audio.periods = GB300_SND_PERIODS;
+         diag_audio.frame_bytes = channels * sizeof(int16_t);
+         diag_audio.muted = 0;
+         diag_audio.output_gate_enabled = 1;
+         gb300_gate_probe_set_level(profile->name, profile->l15_high,
+            profile->r07_high);
+         unifrog_audio_debug_dump(&diag_audio, "gb300_sweep_after_start");
+         for (unsigned i = 0; i < GB300_CONTROL_SWEEP_XFERS; i++) {
+            memset(&xfer, 0, sizeof(xfer));
+            xfer.data = (void *)pcm;
+            xfer.frames = GB300_ROUTE_PROBE_FRAMES;
+            errno = 0;
+            xfer_ret = ioctl(fd, SND_IOCTL_XFER, &xfer);
+            xfer_errno = errno;
+            if (xfer_ret < 0)
+               break;
+            xfer_count++;
+         }
+         errno = 0;
+         delay_ret = ioctl(fd, SND_IOCTL_DELAY, &delay);
+         delay_errno = errno;
+         usleep(GB300_CONTROL_SWEEP_PAUSE_US);
+         errno = 0;
+         drain_ret = ioctl(fd, SND_IOCTL_DRAIN, 0);
+         drain_errno = errno;
+      }
+   }
+
+done:
+   memset(&hw, 0, sizeof(hw));
+   if (fd >= 0)
+      info_ret = ioctl(fd, SND_IOCTL_GET_HW_INFO, &hw);
+   printf("unifrog audio gb300_sweep profile=%u route=%u name=%s fd=%d open_errno=%d hw=%d hw_errno=%d avail=%d avail_errno=%d neutral=%d sys_volume=%d sys_mute=%d volume=%d volume_errno=%d mute=%d mute_errno=%d start=%d start_errno=%d xfer=%d xfer_errno=%d xfers=%u delay_ret=%d delay_errno=%d delay=%lu drain=%d drain_errno=%d info=%d dma=0x%08lx/%lu rate=%u ch=%u period=%lu periods=%lu saved_fade=%08lx now_fade=%08lx saved_mute_pin=0x%08lx now_mute_pin=0x%08lx saved_polar=%u now_polar=%u\n",
+      index, route, profile->name, fd, open_errno, hw_ret, hw_errno,
+      avail_ret, avail_errno, neutral_ret, sys_volume_ret, sys_mute_ret,
+      volume_ret, volume_errno, mute_ret, mute_errno, start_ret, start_errno,
+      xfer_ret, xfer_errno, xfer_count, delay_ret, delay_errno,
+      (unsigned long)delay, drain_ret, drain_errno, info_ret,
+      (unsigned long)hw.dma_addr, (unsigned long)hw.dma_size,
+      hw.pcm_params.rate, hw.pcm_params.channels,
+      (unsigned long)hw.pcm_params.period_size,
+      (unsigned long)hw.pcm_params.periods,
+      (unsigned long)saved_underrun_fade,
+      (unsigned long)SND0_BASE[SND0_UNDERRUN_FADE_REG],
+      (unsigned long)saved_mute_pin,
+      (unsigned long)I2SO_PLATFORM_PINMUX_MUTE,
+      saved_mute_polar ? 1u : 0u,
+      I2SO_PLATFORM_U8(I2SO_PLATFORM_MUTE_POLAR_OFF) ? 1u : 0u);
+   if (fd >= 0) {
+      (void)ioctl(fd, SND_IOCTL_SET_MUTE, 1);
+      (void)ioctl(fd, SND_IOCTL_DROP, 0);
+      (void)ioctl(fd, SND_IOCTL_HW_FREE, 0);
+      close(fd);
+   }
+   I2SO_PLATFORM_PINMUX_MUTE = saved_mute_pin;
+   I2SO_PLATFORM_U8(I2SO_PLATFORM_MUTE_POLAR_OFF) =
+      (uint8_t)(saved_mute_polar ? 1 : 0);
+   SND0_BASE[SND0_UNDERRUN_FADE_REG] = saved_underrun_fade;
+   gb300_gate_probe_set_level("gb300_sweep_between", 1, 1);
+   gb300_i2so_platform_log("gb300_sweep_restored");
+   (void)unifrog_audio_set_system_mute(1);
+   usleep(100000);
+   return hw_ret == 0 && start_ret == 0 && xfer_count > 0 ? 0 : -1;
+}
+
+static unsigned gb300_route_probe_control_sweep(unsigned *route_io)
+{
+   static const struct gb300_control_sweep_profile profiles[] = {
+      { "release_system90_neutral", 2, 90, 1, 1, 0, -1, 0, 0 },
+      { "no_neutral_system90", 2, 90, 0, 1, 0, -1, 0, 0 },
+      { "volume100_system_unmute", 2, 100, 1, 1, 0, -1, 0, 0 },
+      { "mono_system90", 1, 90, 1, 1, 0, -1, 0, 0 },
+      { "fade_clear_system90", 2, 90, 1, 1, 0, 0, 0, 0 },
+      { "driver_mute_disabled_r07_low", 2, 90, 1, 1, 1, -1, 0, 0 },
+      { "driver_mute_disabled_r07_high", 2, 90, 1, 1, 1, -1, 0, 1 },
+   };
+   unsigned route;
+   unsigned ok = 0;
+
+   if (!route_io)
+      return 0;
+   route = *route_io;
+   printf("unifrog audio gb300_sweep begin profiles=%lu route_base=%u\n",
+      (unsigned long)UNIFROG_AUDIO_ARRAY_SIZE(profiles), route);
+   for (unsigned i = 0; i < UNIFROG_AUDIO_ARRAY_SIZE(profiles); i++) {
+      if (gb300_route_probe_control_profile(route, i, &profiles[i]) == 0)
+         ok++;
+      route++;
+   }
+   *route_io = route;
+   printf("unifrog audio gb300_sweep end ok=%u profiles=%lu route_next=%u\n",
+      ok, (unsigned long)UNIFROG_AUDIO_ARRAY_SIZE(profiles), route);
+   return ok;
 }
 
 static void gb300_route_probe_gate_matrix(unsigned route)
@@ -1302,6 +1676,7 @@ int unifrog_audio_run_gb300_route_probe(const char *tag)
       GB300_ROUTE_PROBE_XFERS,
       audio_gate_name(current_audio_gate()));
    unifrog_audio_debug_dump(NULL, "gb300_probe_begin");
+   ok += gb300_route_probe_control_sweep(&route);
 
    for (unsigned i = 0; i < UNIFROG_AUDIO_ARRAY_SIZE(audsink_routes); i++) {
       fill_gb300_route_probe_pcm(route);
@@ -1440,4 +1815,5 @@ void unifrog_audio_debug_dump(struct unifrog_audio *audio, const char *tag)
       (unsigned long)SND0_BASE[SND0_FADE_REG],
       (unsigned long)SND0_DAC_BASE[0],
       (unsigned long)SND0_DAC_BASE[1]);
+   gb300_i2so_platform_log(tag ? tag : "debug_dump");
 }

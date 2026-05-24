@@ -846,8 +846,14 @@ static void media_log_pcm_stats(const char *scope,
    unsigned samples;
    unsigned nonzero = 0;
    unsigned abs_max = 0;
+   unsigned left_nonzero = 0;
+   unsigned right_nonzero = 0;
+   unsigned left_abs_max = 0;
+   unsigned right_abs_max = 0;
    int min = 0;
    int max = 0;
+   int first_left = 0;
+   int first_right = 0;
    uint64_t abs_sum = 0;
    int should_log;
 
@@ -855,9 +861,12 @@ static void media_log_pcm_stats(const char *scope,
       return;
    channels = audio->channels ? audio->channels : 1u;
    samples = frames * channels;
+   first_left = pcm[0];
+   first_right = channels > 1u ? pcm[1] : 0;
    for (unsigned i = 0; i < samples; i++) {
       int sample = pcm[i];
       unsigned abs_value;
+      unsigned channel = channels ? i % channels : 0u;
 
       if (i == 0 || sample < min)
          min = sample;
@@ -868,6 +877,17 @@ static void media_log_pcm_stats(const char *scope,
          nonzero++;
       if (abs_value > abs_max)
          abs_max = abs_value;
+      if (channel == 0u) {
+         if (abs_value > 4u)
+            left_nonzero++;
+         if (abs_value > left_abs_max)
+            left_abs_max = abs_value;
+      } else if (channel == 1u) {
+         if (abs_value > 4u)
+            right_nonzero++;
+         if (abs_value > right_abs_max)
+            right_abs_max = abs_value;
+      }
       abs_sum += abs_value;
    }
    should_log = log_count < 16u;
@@ -878,10 +898,12 @@ static void media_log_pcm_stats(const char *scope,
    if (!should_log)
       return;
    log_count++;
-   printf("unifrog media pcm_stats scope=%s idx=%u backend=%d fd=%d frames=%u ch=%u nonzero=%u/%u min=%d max=%d abs_max=%u abs_avg=%lu path=%s\n",
+   printf("unifrog media pcm_stats scope=%s idx=%u backend=%d fd=%d frames=%u ch=%u nonzero=%u/%u l_nonzero=%u r_nonzero=%u min=%d max=%d abs_max=%u l_abs_max=%u r_abs_max=%u abs_avg=%lu first_l=%d first_r=%d path=%s\n",
       scope ? scope : "?", log_count, audio->backend, audio->fd, frames,
-      channels, nonzero, samples, min, max, abs_max,
-      samples ? (unsigned long)(abs_sum / samples) : 0ul, path ? path : "");
+      channels, nonzero, samples, left_nonzero, right_nonzero, min, max,
+      abs_max, left_abs_max, right_abs_max,
+      samples ? (unsigned long)(abs_sum / samples) : 0ul,
+      first_left, first_right, path ? path : "");
 }
 
 static size_t media_mmz_total0(void)
