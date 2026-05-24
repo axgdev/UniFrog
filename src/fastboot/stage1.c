@@ -315,14 +315,6 @@ static void fastboot_backlight_off(void)
 	write_reg8(FASTBOOT_PINMUX_R05_ADDR, 0);
 }
 
-static void fastboot_speaker_off(void)
-{
-	/* Latch high before GPIO mux: R07 is an active-low speaker gate. */
-	set_reg32_bits(FASTBOOT_GPIOR_OUTPUT_REG, FASTBOOT_SPEAKER_R07_MASK);
-	set_reg32_bits(FASTBOOT_GPIOR_DIR_REG, FASTBOOT_SPEAKER_R07_MASK);
-	write_reg8(FASTBOOT_PINMUX_R07_ADDR, 0);
-}
-
 static int fastboot_backlight_state(void)
 {
 	uint32_t state = read_reg8(FASTBOOT_PINMUX_R05_ADDR);
@@ -776,7 +768,6 @@ static void jump_to_payload(const char *path)
 	int backlight_state;
 
 	fastboot_backlight_off();
-	fastboot_speaker_off();
 	backlight_state = fastboot_backlight_state();
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_JUMP, trace_path_hash(path),
 		(unsigned int)(uintptr_t)ENTRY_ADDR, (unsigned int)backlight_state);
@@ -799,7 +790,6 @@ void stage1_main(void)
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_START,
 		(unsigned int)(uintptr_t)FASTBOOT_STAGE1_ADDR, 0, 0);
 	fastboot_backlight_off();
-	fastboot_speaker_off();
 	boot_trace_note(FASTBOOT_TRACE_STAGE1_BACKLIGHT_OFF,
 		(unsigned int)fastboot_backlight_state(), 0, 0);
 	write_diag(FASTBOOT_DIAG_STAGE1_START, 0, "");
