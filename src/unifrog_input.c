@@ -25,7 +25,9 @@
 #define LCD_ID_GB300 0x009306ul
 #define LCD_ID_DY14 0x009307ul
 #define INPUT_LOCAL_ZERO_PROBE_POLLS 128u
-#define INPUT_GB300_FALLBACK_PROBE_DIV 8u
+#define INPUT_GB300_FALLBACK_PROBE_DIV 4u
+#define INPUT_GB300_FALLBACK_CONFIRM_POLLS 3u
+#define INPUT_GB300_FALLBACK_MAX_BUTTONS 4u
 #define KEY_SHIFTER_LOAD_US 4u
 #define KEY_SHIFTER_SETTLE_US 4u
 #define KEY_SHIFTER_CLOCK_LOW_US 3u
@@ -58,6 +60,7 @@ static uint32_t local_menu_hold_buttons;
 static unsigned local_zero_probe_count;
 static unsigned local_zero_probe_poll_count;
 static unsigned gb300_fallback_probe_phase;
+static uint32_t gb300_fallback_candidate_raw;
 static uint32_t gb300_fallback_candidate_norm;
 static unsigned gb300_fallback_candidate_count;
 static int local_input_profile = -1;
@@ -271,6 +274,32 @@ static uint32_t scan_sf2000_local_raw(void)
    return raw_mask;
 }
 
+static unsigned input_popcount(uint32_t mask)
+{
+   unsigned count = 0;
+
+   while (mask) {
+      count += mask & 1u;
+      mask >>= 1;
+   }
+   return count;
+}
+
+static int gb300_input_candidate_valid(uint32_t raw, uint32_t normalized)
+{
+   unsigned pressed;
+
+   normalized &= INPUT_VALID_BUTTON_MASK;
+   if (!normalized || raw == 0xffffu || raw == 0xffffffffu)
+      return 0;
+   if ((raw & INPUT_VALID_BUTTON_MASK) == normalized)
+      return 0;
+   pressed = input_popcount(normalized);
+   if (pressed == 0 || pressed > INPUT_GB300_FALLBACK_MAX_BUTTONS)
+      return 0;
+   return 1;
+}
+
 static int probe_gb300_input_fallback(uint32_t *raw_out,
    uint32_t *normalized_out)
 {
@@ -284,14 +313,17 @@ static int probe_gb300_input_fallback(uint32_t *raw_out,
 
    raw = scan_gb300_local_raw();
    normalized = normalize_local_raw_for_profile(raw, LOCAL_INPUT_STOCK_BITS);
-   if (normalized && raw != 0xffffu) {
-      if (normalized == gb300_fallback_candidate_norm)
+   if (gb300_input_candidate_valid(raw, normalized)) {
+      if (raw == gb300_fallback_candidate_raw &&
+          normalized == gb300_fallback_candidate_norm)
          gb300_fallback_candidate_count++;
       else {
+         gb300_fallback_candidate_raw = raw;
          gb300_fallback_candidate_norm = normalized;
          gb300_fallback_candidate_count = 1;
       }
-      if (gb300_fallback_candidate_count >= 2) {
+      if (gb300_fallback_candidate_count >=
+          INPUT_GB300_FALLBACK_CONFIRM_POLLS) {
          set_local_input_profile(LOCAL_INPUT_STOCK_BITS, "gb300_bus", raw,
             normalized);
          if (raw_out)
@@ -301,6 +333,7 @@ static int probe_gb300_input_fallback(uint32_t *raw_out,
          return 1;
       }
    } else {
+      gb300_fallback_candidate_raw = 0;
       gb300_fallback_candidate_norm = 0;
       gb300_fallback_candidate_count = 0;
    }
@@ -345,8 +378,12 @@ static uint32_t scan_local_buttons(int update_debounce,
          LOCAL_INPUT_SF2000);
       if (raw_mask == INPUT_VALID_BUTTON_MASK)
          normalized_mask = 0;
-      if (!normalized_mask)
-         (void)probe_gb300_input_fallback(&raw_mask, &normalized_mask);
+      /*
+       * A GB300 with an SF2000 replacement panel can produce plausible
+       * SF2000-looking button bits. Probe the GB300 stock-bit bus periodically
+       * even when the LCD-selected scanner reports a button.
+       */
+      (void)probe_gb300_input_fallback(&raw_mask, &normalized_mask);
    }
 
    if (normalized_out)
@@ -392,6 +429,7 @@ void unifrog_input_clear(void)
    local_zero_probe_count = 0;
    local_zero_probe_poll_count = 0;
    gb300_fallback_probe_phase = 0;
+   gb300_fallback_candidate_raw = 0;
    gb300_fallback_candidate_norm = 0;
    gb300_fallback_candidate_count = 0;
    unifrog_input_wireless_clear();

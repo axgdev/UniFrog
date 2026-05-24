@@ -2597,8 +2597,8 @@ static unsigned host_audio_output_channels(void)
 static const char *host_audio_route_name(void)
 {
    if (unifrog_audio_prefers_stereo_output())
-      return host.audio_channels > 1u ? "gb300_auto_snd_stereo" :
-         "gb300_auto_snd_mono";
+      return host.audio_channels > 1u ? "gb300_auto_pcm_stereo" :
+         "gb300_auto_pcm_mono";
    return LIBRETRO_AUDIO_ROUTE;
 }
 

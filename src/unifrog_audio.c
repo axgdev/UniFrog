@@ -36,9 +36,6 @@
 #ifndef UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE
 #define UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE 0
 #endif
-#ifndef UNIFROG_AUDIO_GB300_PREFER_SND
-#define UNIFROG_AUDIO_GB300_PREFER_SND 1
-#endif
 #define GB300_ROUTE_PROBE_RATE 44100u
 #define GB300_ROUTE_PROBE_CHANNELS 2u
 #define GB300_ROUTE_PROBE_PERIOD_BYTES 4096u
@@ -227,8 +224,24 @@ static void apply_stock_audio_silence_policy(const char *tag)
 {
    uint32_t before;
    uint32_t after;
+   static unsigned gb300_log_count;
 
    before = SND0_BASE[SND0_UNDERRUN_FADE_REG];
+   if (current_audio_gate() == AUDIO_GATE_GB300_L15) {
+      after = before & ~SND0_UNDERRUN_FADE_BIT;
+      if (after != before)
+         SND0_BASE[SND0_UNDERRUN_FADE_REG] = after;
+      if (gb300_log_count < 6 || after != before) {
+         gb300_log_count++;
+         printf("unifrog audio silence_policy tag=%s action=gb300_legacy underrun_fade=%08lx->%08lx fade90=%08lx dac=%08lx\n",
+            tag ? tag : "?",
+            (unsigned long)before, (unsigned long)after,
+            (unsigned long)SND0_BASE[SND0_FADE_REG],
+            (unsigned long)SND0_DAC_BASE[0]);
+      }
+      return;
+   }
+
    after = before | SND0_UNDERRUN_FADE_BIT;
    if (after != before) {
       SND0_BASE[SND0_UNDERRUN_FADE_REG] = after;
@@ -368,6 +381,8 @@ static int open_audsink(struct unifrog_audio *audio,
    struct audsink_init_params params;
    int duplicate;
    int fd;
+   int init_ret;
+   int init_errno;
 
    fd = open("/dev/audsink", O_WRONLY);
    if (fd < 0)
@@ -389,8 +404,17 @@ static int open_audsink(struct unifrog_audio *audio,
    params.pcm.bitdepth = 16;
    params.pcm.start_threshold = 0;
    params.pcm.pcm_dest = SND_PCM_DEST_DMA;
-   if (ioctl(fd, AUDSINK_IOCTL_INIT, &params) != 0)
+   errno = 0;
+   init_ret = ioctl(fd, AUDSINK_IOCTL_INIT, &params);
+   init_errno = errno;
+   if (init_ret != 0) {
+      printf("unifrog audio open backend=audsink failed fd=%d rate=%u ch=%u period=%u periods=%u route=%s output_ch=%u snd=0x%lx init_ret=%d errno=%d\n",
+         fd, rate, channels, period_bytes, periods,
+         audio_gate_name(current_audio_gate()),
+         unifrog_audio_output_channels(),
+         (unsigned long)params.snd_devs, init_ret, init_errno);
       goto fail;
+   }
 
    duplicate = unifrog_audio_output_channels() > 1u && channels > 1 ?
       AUDSINK_PCM_DUPLICATE_STEREO : AUDSINK_PCM_DUPLICATE_LEFT;
@@ -426,20 +450,19 @@ static int open_snd(struct unifrog_audio *audio,
    unsigned requested_period = period_bytes;
    unsigned requested_periods = periods;
    unsigned start_threshold = 0;
+   int gb300_route = current_audio_gate() == AUDIO_GATE_GB300_L15;
    int hw_ret;
    int hw_errno = 0;
    int avail_ret = -1;
    int fd;
 
-   if (unifrog_audio_prefers_stereo_output()) {
-      if (period_bytes < GB300_SND_PERIOD_BYTES)
-         period_bytes = GB300_SND_PERIOD_BYTES;
-      if (periods < GB300_SND_PERIODS)
-         periods = GB300_SND_PERIODS;
-      start_threshold = GB300_SND_START_THRESHOLD;
-   }
+   /*
+    * The newer AUDPAD/O_RDWR direct route accepts DMA on GB300 but stayed
+    * silent in 0142. Keep direct SND as a fallback, but use the simpler
+    * v0.4.4-style playback parameters when release audio lands here.
+    */
 
-   fd = open("/dev/sndC0i2so", O_RDWR);
+   fd = open("/dev/sndC0i2so", gb300_route ? O_WRONLY : O_RDWR);
    if (fd < 0)
       return -1;
 
@@ -454,7 +477,8 @@ static int open_snd(struct unifrog_audio *audio,
    params.periods = periods;
    params.bitdepth = 16;
    params.start_threshold = start_threshold;
-   params.pcm_source = SND_PCM_SOURCE_AUDPAD;
+   if (!gb300_route)
+      params.pcm_source = SND_PCM_SOURCE_AUDPAD;
    params.pcm_dest = SND_PCM_DEST_DMA;
    errno = 0;
    hw_ret = ioctl(fd, SND_IOCTL_HW_PARAMS, &params);
@@ -475,22 +499,24 @@ static int open_snd(struct unifrog_audio *audio,
    audio->muted = 1;
    memset(&hw, 0, sizeof(hw));
    (void)ioctl(fd, SND_IOCTL_GET_HW_INFO, &hw);
-   printf("unifrog audio open backend=snd fd=%d rate=%u ch=%u req_period=%u req_periods=%u period=%u periods=%u start_threshold=%u avail_min=%lu avail_ret=%d route=%s output_ch=%u dma=0x%08lx/%lu hw_period=%lu hw_periods=%lu\n",
+   printf("unifrog audio open backend=snd fd=%d rate=%u ch=%u req_period=%u req_periods=%u period=%u periods=%u start_threshold=%u avail_min=%lu avail_ret=%d route=%s output_ch=%u mode=%s dma=0x%08lx/%lu hw_period=%lu hw_periods=%lu\n",
       fd, rate, channels, requested_period, requested_periods,
       period_bytes, periods, start_threshold, (unsigned long)avail_min,
       avail_ret,
       audio_gate_name(current_audio_gate()),
       unifrog_audio_output_channels(),
+      gb300_route ? "legacy" : "audpad",
       (unsigned long)hw.dma_addr, (unsigned long)hw.dma_size,
       (unsigned long)hw.pcm_params.period_size,
       (unsigned long)hw.pcm_params.periods);
    return 0;
 
 fail:
-   printf("unifrog audio open backend=snd failed fd=%d rate=%u ch=%u req_period=%u req_periods=%u period=%u periods=%u start_threshold=%u hw_ret=%d hw_errno=%d route=%s\n",
+   printf("unifrog audio open backend=snd failed fd=%d rate=%u ch=%u req_period=%u req_periods=%u period=%u periods=%u start_threshold=%u hw_ret=%d hw_errno=%d route=%s mode=%s\n",
       fd, rate, channels, requested_period, requested_periods,
       period_bytes, periods, start_threshold, hw_ret, hw_errno,
-      audio_gate_name(current_audio_gate()));
+      audio_gate_name(current_audio_gate()),
+      gb300_route ? "legacy" : "audpad");
    close(fd);
    return -1;
 }
@@ -520,15 +546,9 @@ int unifrog_audio_open_backend(struct unifrog_audio *audio,
       return open_snd(audio, rate, channels, period_bytes, periods);
 
    if (unifrog_audio_prefers_stereo_output()) {
-#if UNIFROG_AUDIO_GB300_PREFER_SND
-      if (open_snd(audio, rate, channels, period_bytes, periods) == 0)
-         return 0;
-      return open_audsink(audio, rate, channels, period_bytes, periods);
-#else
       if (open_audsink(audio, rate, channels, period_bytes, periods) == 0)
          return 0;
       return open_snd(audio, rate, channels, period_bytes, periods);
-#endif
    }
 
    if (open_snd(audio, rate, channels, period_bytes, periods) == 0)
