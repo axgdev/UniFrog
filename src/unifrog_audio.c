@@ -566,7 +566,10 @@ int unifrog_audio_start(struct unifrog_audio *audio)
    if (audio->backend == UNIFROG_AUDIO_BACKEND_AUDSINK)
       return ioctl(audio->fd, AUDSINK_IOCTL_START, 0);
    if (unifrog_audio_prefers_stereo_output() && audio->muted) {
-      int mute_ret = unifrog_audio_set_mute(audio, 0);
+      int mute_ret;
+
+      (void)unifrog_audio_set_system_mute(0);
+      mute_ret = unifrog_audio_set_mute(audio, 0);
 
       printf("unifrog audio start_unmute backend=snd fd=%d ret=%d\n",
          audio->fd, mute_ret);
@@ -619,28 +622,17 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
          }
       }
       if (unifrog_audio_prefers_stereo_output()) {
-         if (has_signal) {
-            int mute_ret = audio->muted ?
-               unifrog_audio_set_mute(audio, 0) : 0;
+         int mute_ret = audio->muted ?
+            unifrog_audio_set_mute(audio, 0) : 0;
 
-            if (!audio->output_gate_enabled) {
-               set_stock_audio_output_gate(1);
-               audio->output_gate_enabled = 1;
-               audio->output_gate_pending_signal = 0;
-               if (mute_transition_log_count < 12) {
-                  mute_transition_log_count++;
-                  printf("unifrog audio signal_gate backend=snd fd=%d action=gate_on mute_ret=%d frames=%u ch=%u\n",
-                     audio->fd, mute_ret, frames, channels);
-               }
-            }
-         } else if (!has_signal && audio->output_gate_enabled) {
-            set_stock_audio_output_gate(0);
-            audio->output_gate_enabled = 0;
-            audio->output_gate_pending_signal = 1;
+         if (!audio->output_gate_enabled) {
+            set_stock_audio_output_gate(1);
+            audio->output_gate_enabled = 1;
+            audio->output_gate_pending_signal = 0;
             if (mute_transition_log_count < 12) {
                mute_transition_log_count++;
-               printf("unifrog audio signal_gate backend=snd fd=%d action=gate_off frames=%u ch=%u\n",
-                  audio->fd, frames, channels);
+               printf("unifrog audio signal_gate backend=snd fd=%d action=gb300_gate_on_write signal=%d mute_ret=%d frames=%u ch=%u\n",
+                  audio->fd, has_signal, mute_ret, frames, channels);
             }
          }
       } else if (has_signal && audio->muted) {
@@ -785,11 +777,12 @@ int unifrog_audio_set_output_enabled(struct unifrog_audio *audio, int enabled)
       (void)unifrog_audio_set_volume(audio, system_audio_volume());
       if (audio->backend == UNIFROG_AUDIO_BACKEND_SND &&
           unifrog_audio_prefers_stereo_output()) {
+         (void)unifrog_audio_set_system_mute(0);
          (void)unifrog_audio_set_mute(audio, 0);
-         set_stock_audio_output_gate(0);
-         audio->output_gate_enabled = 0;
-         audio->output_gate_pending_signal = 1;
-         printf("unifrog audio signal_gate backend=snd fd=%d action=arm_gate\n",
+         set_stock_audio_output_gate(1);
+         audio->output_gate_enabled = 1;
+         audio->output_gate_pending_signal = 0;
+         printf("unifrog audio signal_gate backend=snd fd=%d action=gb300_gate_on_enable\n",
             audio->fd);
       } else {
          set_stock_audio_output_gate(1);
@@ -1138,9 +1131,8 @@ static void gb300_route_probe_gate_matrix(unsigned route)
    printf("unifrog audio gb300_gate_probe end route=%u\n", route);
 }
 
-void unifrog_audio_run_gb300_route_probe_once(const char *tag)
+int unifrog_audio_run_gb300_route_probe(const char *tag)
 {
-   static int done;
    static int running;
    static const struct {
       const char *name;
@@ -1168,12 +1160,11 @@ void unifrog_audio_run_gb300_route_probe_once(const char *tag)
       { "snd_pcmo_audpad", "/dev/sndC0pcmo", SND_PCM_SOURCE_AUDPAD },
    };
    unsigned route = 0;
+   unsigned ok = 0;
 
-   if (!UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE ||
-       !unifrog_audio_prefers_stereo_output() || done || running)
-      return;
+   if (!unifrog_audio_prefers_stereo_output() || running)
+      return -1;
    running = 1;
-   done = 1;
    (void)ensure_audio_drivers();
    printf("unifrog audio gb300_probe begin tag=%s audsink_routes=%lu snd_routes=%lu rate=%u frames=%u gate=%s\n",
       tag ? tag : "?", (unsigned long)UNIFROG_AUDIO_ARRAY_SIZE(audsink_routes),
@@ -1185,8 +1176,9 @@ void unifrog_audio_run_gb300_route_probe_once(const char *tag)
    for (unsigned i = 0; i < UNIFROG_AUDIO_ARRAY_SIZE(audsink_routes); i++) {
       fill_gb300_route_probe_pcm(route);
       unifrog_audio_set_system_output_enabled(1);
-      (void)gb300_route_probe_audsink(route, audsink_routes[i].name,
-         audsink_routes[i].snd_devs, audsink_routes[i].duplicate);
+      if (gb300_route_probe_audsink(route, audsink_routes[i].name,
+          audsink_routes[i].snd_devs, audsink_routes[i].duplicate) == 0)
+         ok++;
       unifrog_audio_set_system_output_enabled(0);
       usleep(80000);
       route++;
@@ -1195,8 +1187,9 @@ void unifrog_audio_run_gb300_route_probe_once(const char *tag)
    for (unsigned i = 0; i < UNIFROG_AUDIO_ARRAY_SIZE(snd_routes); i++) {
       fill_gb300_route_probe_pcm(route);
       unifrog_audio_set_system_output_enabled(1);
-      (void)gb300_route_probe_snd(route, snd_routes[i].name, snd_routes[i].dev,
-         snd_routes[i].source);
+      if (gb300_route_probe_snd(route, snd_routes[i].name, snd_routes[i].dev,
+          snd_routes[i].source) == 0)
+         ok++;
       unifrog_audio_set_system_output_enabled(0);
       usleep(80000);
       route++;
@@ -1206,9 +1199,20 @@ void unifrog_audio_run_gb300_route_probe_once(const char *tag)
    route++;
 
    unifrog_audio_debug_dump(NULL, "gb300_probe_end");
-   printf("unifrog audio gb300_probe end tag=%s routes=%u\n",
-      tag ? tag : "?", route);
+   printf("unifrog audio gb300_probe end tag=%s ok=%u routes=%u\n",
+      tag ? tag : "?", ok, route);
    running = 0;
+   return ok > 0 ? 0 : -1;
+}
+
+void unifrog_audio_run_gb300_route_probe_once(const char *tag)
+{
+   static int done;
+
+   if (!UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE || done)
+      return;
+   done = 1;
+   (void)unifrog_audio_run_gb300_route_probe(tag);
 }
 
 void unifrog_audio_debug_gate(uint32_t *l_dir, uint32_t *l_out,

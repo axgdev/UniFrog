@@ -556,6 +556,12 @@ int host_action(void *opaque, const char *id)
       printf("js2300 action developer system_check\n");
       return 0;
    }
+   if (strcmp(id, "developer:audio_test") == 0) {
+      unifrog_text_copy(frontend->action, sizeof(frontend->action),
+         "audio_test");
+      printf("js2300 action developer audio_test\n");
+      return 0;
+   }
    if (strcmp(id, "developer:storage_test") == 0) {
       unifrog_text_copy(frontend->action, sizeof(frontend->action),
          "storage_test");
@@ -811,6 +817,27 @@ int run_requested_action(struct js2300_frontend *frontend)
 
       if (frontend->owns_framebuffer)
          frontend_fb_reopen(frontend, "system_check_return");
+      return ret;
+   }
+   if (strcmp(frontend->action, "audio_test") == 0) {
+      char summary[96];
+      int ret;
+
+      host_video_clear(frontend, 0x0000);
+      host_video_text(frontend, 16, 42, "Audio test running", 0xffff);
+      host_video_text(frontend, 16, 66, "Listen for route tones", 0xbdf7);
+      host_video_text(frontend, 16, 90, "Do not power off", 0x7bef);
+      host_video_present(frontend);
+      summary[0] = '\0';
+      ret = unifrog_media_run_audio_diagnostics(summary, sizeof(summary));
+      host_video_clear(frontend, 0x0000);
+      host_video_text(frontend, 16, 42, "Audio test finished", 0xffff);
+      host_video_text(frontend, 16, 66, summary, ret == 0 ? 0x07e0 : 0xf800);
+      host_video_text(frontend, 16, 90, "Returning to menu", 0x7bef);
+      host_video_present(frontend);
+      usleep(700000);
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "audio_test_return");
       return ret;
    }
    if (strcmp(frontend->action, "storage_test") == 0) {

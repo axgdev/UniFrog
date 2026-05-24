@@ -50,6 +50,7 @@ void unifrog_audio_set_system_output_enabled(int enabled);
 void unifrog_audio_set_output_gate_enabled(int enabled);
 void unifrog_audio_restore_output_gate(void);
 int unifrog_audio_prefers_stereo_output(void);
+int unifrog_audio_run_gb300_route_probe(const char *tag);
 void unifrog_audio_run_gb300_route_probe_once(const char *tag);
 void unifrog_audio_debug_gate(uint32_t *l_dir, uint32_t *l_out,
    uint32_t *r_dir, uint32_t *r_out);

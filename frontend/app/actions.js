@@ -152,6 +152,7 @@ function openDeveloperItem(now) {
   if (id === "system_check") runAction("developer:system_check", now);
   else if (id === "smoke") runAction("script:" + SCRIPT_DIR + "/smoke-test.js", now);
   else if (id === "perf") runAction("script:" + SCRIPT_DIR + "/perf-test.js", now);
+  else if (id === "audio") runAction("developer:audio_test", now);
   else if (id === "storage") runAction("developer:storage_test", now);
   else if (id === "storage_full") runAction("developer:storage_full_test", now);
   else if (id === "storage_mode") {

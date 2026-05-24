@@ -18,6 +18,7 @@ var developerItems = [
   { id: "system_check", label: "System check", detail: "Detect stale SD files" },
   { id: "smoke", label: "Smoke test", detail: "Run packaged diagnostics" },
   { id: "perf", label: "Performance test", detail: "Measure JS screens" },
+  { id: "audio", label: "Audio test", detail: "GB300 routes" },
   { id: "storage", label: "Storage test", detail: "Measure SD reads" },
   { id: "storage_full", label: "Storage full test", detail: "Probe SD modes" },
   { id: "storage_mode", label: "Storage mode test", detail: "Choose SD mode" },
