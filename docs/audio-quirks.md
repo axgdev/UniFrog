@@ -20,8 +20,8 @@ or `src/unifrog_media.c`.
   `0x801b8b74` sets `0xb8800058` bit 15 as output and writes
   `(level << 15)` to `0xb8800054`. The stock emulation path calls this helper
   with `level=0` after `run_sound_init(0, sample_rate, channels)`, so UniFrog
-  keeps L15 active-low and explicitly restores the L15 pinmux to GPIO when the
-  audio gate is enabled.
+  keeps L15 active-low and changes only the same GPIO direction/output state
+  when the audio gate is enabled.
 - The LCD panel ID is only a default board hint. Some GB300 units can have an
   SF2000 panel, so UniFrog also switches to the GB300/L15 audio gate when the
   local input scanner proves that the GB300 stock-bit keypad bus is present.
@@ -50,8 +50,9 @@ or `src/unifrog_media.c`.
     enabled and only reasserts the open state if a later write observes it
     closed.
 - `unifrog_audio_set_output_enabled(audio, 1)` enables the SF2000 physical gate
-  immediately. On GB300 direct SND it also unmutes the global SND path and opens
-  the L15 gate immediately instead of using the SF2000 delayed signal gate.
+  immediately. On GB300 it follows the v0.4.4-compatible order for AUDSINK and
+  direct-SND fallback: set playback volume, unmute the global SND path, then
+  open the L15 gate instead of using the SF2000 delayed signal gate.
 - Closing audio mutes SND and disables the physical output gate.
 - Native media playback keeps audio inside UniFrog where possible, so silence
   gating is based on decoded PCM instead of supervising an external player.
@@ -70,9 +71,9 @@ or `src/unifrog_media.c`.
   SF2000 because it gives the silence gate full PCM visibility and has been the
   stable route there.
 - The SF2000 underrun-fade silence policy is not applied on GB300. When the
-  GB300/L15 route is selected, UniFrog clears that bit back to the legacy state
-  before starting playback so the SF2000 noise mitigation cannot suppress a
-  GB300 speaker path.
+  GB300/L15 route is selected, UniFrog leaves the underrun-fade register and
+  neutral tone/EQ/balance controls untouched so the SF2000 noise mitigation
+  cannot suppress a GB300 speaker path.
 - On GB300, the broad direct-PCM route probe is available at runtime from
   Developer -> Audio test. It is no longer a normal-playback startup probe, so a
   single device run can test direct PCM routes, L15/R07 gate combinations, and
@@ -85,7 +86,7 @@ or `src/unifrog_media.c`.
   valid ADTS AAC packets being fed to auddec, but every production and probe
   route stayed at `frames_decoded=0` and `first_header_*=0`. Audio-only files
   and native video-container audio therefore use FFmpeg-decoded PCM through the
-  UniFrog SND path on GB300. SF2000 keeps the hardware-auddec path.
+  UniFrog PCM output path on GB300. SF2000 keeps the hardware-auddec path.
 - Native media must use the audio decoder ABI from the linked HCRTOS
   `libauddrv.a`, not blindly copy either adjacent public header. The bundled
   driver switches on `AUDDEC_INIT == 0x82500301`, which corresponds to a
