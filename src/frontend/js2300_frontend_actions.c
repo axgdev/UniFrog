@@ -455,6 +455,23 @@ int host_action(void *opaque, const char *id)
          frontend_fb_reopen(frontend, "display_color_test_return");
       return ret == 0 ? 1 : -1;
    }
+   if (strcmp(id, "developer:audio_test") == 0) {
+      char summary[96];
+      int ret;
+
+      host_video_clear(frontend, 0x0000);
+      host_video_text(frontend, 16, 42, "Audio test running", 0xffff);
+      host_video_text(frontend, 16, 66, "Listen for route tones", 0xbdf7);
+      host_video_text(frontend, 16, 90, "Logs capture route results", 0x7bef);
+      host_video_present(frontend);
+      summary[0] = '\0';
+      ret = unifrog_media_run_audio_diagnostics(summary, sizeof(summary));
+      printf("js2300 action developer audio_test immediate ret=%d summary=%s\n",
+         ret, summary);
+      if (frontend->owns_framebuffer)
+         frontend_fb_reopen(frontend, "audio_test_return");
+      return ret == 0 ? 1 : -1;
+   }
    if (strncmp(id, "developer:storage_stress:", 25) == 0) {
       const char *profile = id + 25;
       int ret = run_storage_stress_test(frontend, profile);

@@ -5759,6 +5759,8 @@ static void show_apps(struct native_frontend *fe)
       "package_check", NULL);
    add_item(fe, "Runtime Settings", "core options", FRONTEND_ITEM_ACTION,
       "launch_settings", NULL);
+   add_item(fe, "Audio Diagnostics", "GB300 route test",
+      FRONTEND_ITEM_ACTION, "audio_test", NULL);
    add_item(fe, "JavaScript Scripts", "/unifrog/scripts", FRONTEND_ITEM_ACTION,
       "scripts", NULL);
    add_item(fe, "History", "recent games", FRONTEND_ITEM_ACTION,
@@ -7111,6 +7113,20 @@ static void activate(struct native_frontend *fe)
       ret = unifrog_storage_fast_probe_run(fast_probe_progress_cb, fe,
          summary, sizeof(summary));
       set_status(fe, "fast SD probe %d  %s", ret, summary);
+   } else if (strcmp(item.path, "audio_test") == 0) {
+      char summary[96];
+      int ret;
+
+      frontend_loading_show(fe, "Audio", "GB300 diagnostics",
+         "listen for route tones", 8);
+      frontend_sound_shutdown();
+      (void)unifrog_log_flush();
+      unifrog_ui_close(&fe->ui);
+      summary[0] = '\0';
+      ret = unifrog_media_run_audio_diagnostics(summary, sizeof(summary));
+      (void)unifrog_ui_open(&fe->ui, 0);
+      unifrog_input_clear();
+      set_status(fe, "audio diag %d %s", ret, summary);
    } else if (strcmp(item.path, "battery_refresh") == 0) {
       int ret = unifrog_battery_update(&fe->battery, 0);
       set_status(fe, "battery refresh %d", ret);
