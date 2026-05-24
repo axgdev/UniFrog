@@ -132,11 +132,11 @@ int unifrog_audio_prefers_stereo_output(void)
 unsigned unifrog_audio_output_channels(void)
 {
    /*
-    * GB300 diagnostics show the only cleanly transferring direct route is the
-    * single-channel runtime SND profile. Keep release playback on that mono
-    * transport; stereo/auddec experiments stay in diagnostics.
+    * The stock GB300 sound task is fed stereo S16 frames even though the
+    * handheld has one speaker. Mix content to mono above this layer and feed a
+    * duplicated stereo frame stream to the I2SO route.
     */
-   return 1u;
+   return current_audio_uses_gb300_gate() ? 2u : 1u;
 }
 
 static uint32_t current_audio_snd_devs(void)
@@ -468,13 +468,15 @@ static int open_snd(struct unifrog_audio *audio,
    int avail_ret = -1;
    int fd;
 
-   /*
-    * The newer AUDPAD/O_RDWR direct route accepts DMA on GB300 but stayed
-    * silent in 0142. Keep direct SND as a fallback, but use the simpler
-    * v0.4.4-style playback parameters when release audio lands here.
-    */
+   if (gb300_route) {
+      if (period_bytes < GB300_SND_PERIOD_BYTES)
+         period_bytes = GB300_SND_PERIOD_BYTES;
+      if (periods < GB300_SND_PERIODS)
+         periods = GB300_SND_PERIODS;
+      start_threshold = GB300_SND_START_THRESHOLD;
+   }
 
-   fd = open("/dev/sndC0i2so", gb300_route ? O_WRONLY : O_RDWR);
+   fd = open("/dev/sndC0i2so", O_RDWR);
    if (fd < 0)
       return -1;
 
@@ -489,8 +491,7 @@ static int open_snd(struct unifrog_audio *audio,
    params.periods = periods;
    params.bitdepth = 16;
    params.start_threshold = start_threshold;
-   if (!gb300_route)
-      params.pcm_source = SND_PCM_SOURCE_AUDPAD;
+   params.pcm_source = SND_PCM_SOURCE_AUDPAD;
    params.pcm_dest = SND_PCM_DEST_DMA;
    errno = 0;
    hw_ret = ioctl(fd, SND_IOCTL_HW_PARAMS, &params);
@@ -517,7 +518,7 @@ static int open_snd(struct unifrog_audio *audio,
       avail_ret,
       audio_gate_name(current_audio_gate()),
       unifrog_audio_output_channels(),
-      gb300_route ? "legacy" : "audpad",
+      gb300_route ? "gb300_audpad" : "audpad",
       (unsigned long)hw.dma_addr, (unsigned long)hw.dma_size,
       (unsigned long)hw.pcm_params.period_size,
       (unsigned long)hw.pcm_params.periods);
@@ -528,7 +529,7 @@ fail:
       fd, rate, channels, requested_period, requested_periods,
       period_bytes, periods, start_threshold, hw_ret, hw_errno,
       audio_gate_name(current_audio_gate()),
-      gb300_route ? "legacy" : "audpad");
+      gb300_route ? "gb300_audpad" : "audpad");
    close(fd);
    return -1;
 }
@@ -558,9 +559,9 @@ int unifrog_audio_open_backend(struct unifrog_audio *audio,
       return open_snd(audio, rate, channels, period_bytes, periods);
 
    if (unifrog_audio_prefers_stereo_output()) {
-      if (open_audsink(audio, rate, channels, period_bytes, periods) == 0)
+      if (open_snd(audio, rate, channels, period_bytes, periods) == 0)
          return 0;
-      return open_snd(audio, rate, channels, period_bytes, periods);
+      return open_audsink(audio, rate, channels, period_bytes, periods);
    }
 
    if (open_snd(audio, rate, channels, period_bytes, periods) == 0)

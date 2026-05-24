@@ -33,10 +33,10 @@ or `src/unifrog_media.c`.
   polling so GB300 audio is not silently disabled by controller polling.
 - `SND_IOCTL_SET_MUTE` controls the low-level HCRTOS sound output path. For
   SF2000 UniFrog-owned SND playback, this is the reliable way to keep the DAC
-  quiet until non-silent PCM is available. On GB300, release playback prefers
-  the older AUDSINK path and keeps the L15 amplifier gate behavior separate
-  from the SF2000 delayed-signal mute policy; 0142 showed the newer direct SND
-  AUDPAD route could accept nonzero DMA writes while remaining inaudible.
+  quiet until non-silent PCM is available. On GB300, release playback keeps the
+  L15 amplifier gate behavior separate from the SF2000 delayed-signal mute
+  policy and uses the same direct-SND profile that produced audible diagnostic
+  tones in 0140.
 - Digital zero samples are not enough by themselves. If the amplifier path is
   unmuted and enabled, zero PCM can still produce audible board noise.
 
@@ -59,15 +59,15 @@ or `src/unifrog_media.c`.
 - UniFrog-owned UI/theme playback prefers the SND backend because the silence
   gate can inspect PCM buffers before transfer. The audsink backend remains a
   fallback for those short sounds.
-- Libretro core playback uses mono output on SF2000 and GB300. GB300 or a
-  stock-bit GB300 input bus still gets the GB300 L15 gate, but release playback
-  now sends AUTO PCM through AUDSINK first, matching the v0.4.4-era route more
-  closely than the silent direct-SND experiment.
-- On GB300, UniFrog's AUTO PCM opener tries AUDSINK before direct
-  `/dev/sndC0i2so`. The direct SND fallback intentionally uses the simpler
-  v0.4.4-style parameters (`O_WRONLY`, no AUDPAD source, `start_threshold=0`)
-  because 0142 showed the newer vendor-style `O_RDWR`/AUDPAD route can report
-  successful transfers without audible output. Direct SND remains first on
+- Libretro core playback uses mono output on SF2000. GB300 or a stock-bit
+  GB300 input bus still gets the GB300 L15 gate, but UniFrog mixes content to
+  mono and duplicates it into stereo I2S frames before writing to
+  `/dev/sndC0i2so`. The GB300 has one speaker, but the stock firmware and
+  HCRTOS diagnostic path both treat its I2SO/DAC route as a stereo frame sink.
+- On GB300, UniFrog's AUTO PCM opener tries direct `/dev/sndC0i2so` before
+  AUDSINK. The direct SND open uses the vendor-style HCRTOS parameters that
+  produced the audible 0140 production tone: `O_RDWR`, AUDPAD source,
+  `start_threshold=2`, and a larger DMA ring. Direct SND remains first on
   SF2000 because it gives the silence gate full PCM visibility and has been the
   stable route there.
 - The SF2000 underrun-fade silence policy is not applied on GB300. When the
@@ -123,9 +123,8 @@ or `src/unifrog_media.c`.
   moving `AUDDEC_GET_CUR_TIME` clock are not enough to unmute the physical
   output.
 - System volume/mute opens keep `/dev/sndC0i2so` write-only. GB300 release
-  direct-SND fallback is also write-only; only SF2000 UniFrog-owned direct PCM,
-  diagnostics, and I2SO-prime playback paths use bidirectional SND opens for
-  DMA.
+  PCM, SF2000 UniFrog-owned direct PCM, diagnostics, and I2SO-prime playback
+  paths use bidirectional SND opens for DMA.
 - GB300 diagnostics treat "auddec init/start success but no decode progress" as
   a runtime fault. Do not use `AUDDEC_GET_CUR_TIME` alone as the health signal;
   0132 and 0140 GB300 logs showed the decoder clock can advance while headers
@@ -197,11 +196,14 @@ or `src/unifrog_media.c`.
 ## Stock Firmware Notes
 
 The stock SF2000 firmware function used by the old multicore hijack at
-`0x8035665c` is not just a simple ring-buffer initializer. Disassembly shows it
-opens the stock sound device, stops it, configures a 16-bit PCM stream, starts
-the device, sets volume to `0x5a`, applies several sound ioctls, and then
-selects duplicate mode according to channel count. The stock libretro path then
-writes stereo frames into the stock audio ring. UniFrog cannot call that
+`0x8035665c`, and the GB300 equivalent at `0x8035b2a8`, are not just simple
+ring-buffer initializers. Disassembly shows they open the stock sound device,
+stop it, configure a 16-bit PCM stream, start the device, set volume to `0x5a`,
+apply several sound ioctls, select duplicate mode according to channel count,
+allocate a `0x4800`-byte ring, and start a task that copies stereo S16 frames
+from the stock audio ring into the sound device. The stock libretro GB300 path
+calls `platform_audio_init(sample_rate, 2)` and writes stereo frames into that
+ring, mixing content toward mono in the first channel. UniFrog cannot call that
 function from the HCRTOS build because the stock firmware runtime is not mapped
 there, but the important behavioral clues are:
 
