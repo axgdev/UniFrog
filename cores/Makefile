@@ -296,7 +296,7 @@ CORE_TARGETS := gambatte gpsp gpsp_multicore picodrive snes9x2005 snes9x2002 \
 	quicknes fceumm gearboy pce-fast qpsx pmp-video
 SUPPORT_TARGETS := libretro-common chd-support
 SMOKE_TARGETS := libretro-common quicknes
-MAINTAIN_TARGETS := support-init core-init init doctor core-status pin-status \
+MAINTAIN_TARGETS := support-init core-init init smoke-init doctor smoke-doctor core-status pin-status \
 	upgrade-pins diff-core log-core update-core smoke-check check clean \
 	status help print-config
 
@@ -398,6 +398,10 @@ support-init:
 	exit $$status
 
 init: support-init core-init
+
+smoke-init:
+	$(Q)$(MAKE) --no-print-directory support-init SUPPORT_SPECS="$(SMOKE_SUPPORT_SPECS)"
+	$(Q)$(MAKE) --no-print-directory core-init CORE_SPECS="$(SMOKE_CORE_SPECS)"
 
 core-init:
 	@set -e; \
@@ -511,6 +515,15 @@ doctor:
 	@test -f $(LIBCHDR_DIR)/src/libchdr_chd.c || { echo "missing support checkout: $(LIBCHDR_DIR); run: make init"; exit 1; }
 	@test -f $(ZSTD_DIR)/decompress/zstd_decompress.c || { echo "missing support checkout: $(ZSTD_DIR); run: make init"; exit 1; }
 	@test -f $(ZLIB_DIR)/inflate.c || { echo "missing support checkout: $(ZLIB_DIR); run: make init"; exit 1; }
+	@echo "OK"
+
+smoke-doctor:
+	@command -v $(CROSS_COMPILE)gcc >/dev/null || { echo "missing: $(CROSS_COMPILE)gcc"; exit 1; }
+	@command -v $(CROSS_COMPILE)g++ >/dev/null || { echo "missing: $(CROSS_COMPILE)g++"; exit 1; }
+	@command -v $(CROSS_COMPILE)ar >/dev/null || { echo "missing: $(CROSS_COMPILE)ar"; exit 1; }
+	@test -d "$(SDK)/include" || { echo "missing SDK include: $(SDK)/include"; exit 1; }
+	@test -e $(LIBRETRO_COMMON_DIR)/.git || { echo "missing core checkout: $(LIBRETRO_COMMON_DIR); run: make smoke-init"; exit 1; }
+	@test -e $(QUICKNES_DIR)/.git || { echo "missing core checkout: $(QUICKNES_DIR); run: make smoke-init"; exit 1; }
 	@echo "OK"
 
 core-status:
@@ -700,7 +713,7 @@ $(BUILD)/libretro-common/%.o: $(LIBRETRO_COMMON_DIR)/%.c | $(BUILD)
 	@mkdir -p $(dir $@)
 	$(CC) $(COMMON_CFLAGS) -MD -MP -c $< -o $@
 
-$(LIBRETRO_COMMON): $(LIBRETRO_COMMON_OBJECTS) | $(OUT) doctor
+$(LIBRETRO_COMMON): $(LIBRETRO_COMMON_OBJECTS) | $(OUT) smoke-doctor
 	@echo "  AR      $@"
 	$(AR) rcs $@ $(LIBRETRO_COMMON_OBJECTS)
 
@@ -788,7 +801,7 @@ snes9x2002: doctor | $(OUT)
 		fpic= TARGET=snes9x2002_libretro_sf2000.a
 	$(call copy_core_lib,$(SNES9X2002_LIB))
 
-quicknes: doctor | $(OUT)
+quicknes: smoke-doctor | $(OUT)
 	CFLAGS="$(QUICKNES_CFLAGS)" CXXFLAGS="$(QUICKNES_CFLAGS)" \
 	$(MAKE) -C $(QUICKNES_DIR) -f Makefile platform=unix \
 		CC="$(CC)" CXX="$(CXX)" AR=$(AR) STATIC_LINKING=1 \

@@ -1,18 +1,16 @@
-name: Commit smoke
+name: Commit smoke full
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
-  commit-smoke:
+  commit-smoke-full:
     runs-on: ubuntu-latest
     container:
       image: alpine:latest
     steps:
       - name: Install packages
-        run: apk add git make dtc tcc tcc-libs-static musl-dev zlib-dev curl tar xz zip patch
+        run: apk add git make dtc tcc tcc-libs-static musl-dev zlib-dev ccache curl tar xz zip patch
 
       - name: Check out UniFrog
         uses: actions/checkout@v4
@@ -25,6 +23,14 @@ jobs:
           git config --global --add safe.directory "$PWD"
           git config --global user.name "UniFrog CI"
           git config --global user.email "ci@unifrog.local"
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: unifrog-ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            unifrog-ccache-${{ runner.os }}-
 
       - name: Cache core sources
         uses: actions/cache@v4
@@ -46,4 +52,5 @@ jobs:
 
       - name: Check current commit
         run: |
-          make ci-commit-smoke HOSTCC=tcc TOOLCHAIN="$PWD/toolchain"
+          export CCACHE_DIR="$PWD/.ccache"
+          make ci-commit-check HOSTCC=tcc CCACHE=ccache TOOLCHAIN="$PWD/toolchain"

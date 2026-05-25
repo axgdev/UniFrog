@@ -24,3 +24,10 @@ CORE_SPECS := \
 	'pce-fast|$(CORE_SOURCE_ROOT)/beetle-pce-fast-libretro|https://github.com/libretro/beetle-pce-fast-libretro.git|head|9ba79648d6ec85e833aef719d7f359117498d89c|mednafen libretro-common' \
 	'qpsx|$(CORE_SOURCE_ROOT)/sf2000-qpsx-playstation-emulator|https://github.com/angree/sf2000-qpsx-playstation-emulator.git|head|368310aa1b94fe764b8fdf4ddbd7afd06d7bd2a1|src libretro' \
 	'pmp-video|$(CORE_SOURCE_ROOT)/sf2000-video-player|https://github.com/angree/sf2000-video-player.git|head|3fba73781f3b502642ef7eb7748ab0dca357926d|.'
+
+SMOKE_SUPPORT_SPECS := \
+	'zlib|$(CORE_SUPPORT_ROOT)/zlib|https://github.com/madler/zlib.git|tag|da607da739fa6047df13e66a2af6b8bec7c2a498|:root-files'
+
+SMOKE_CORE_SPECS := \
+	'libretro-common|$(CORE_SOURCE_ROOT)/libretro-common|https://github.com/libretro/libretro-common.git|head|e2e3eccfd245a04771e6a435320b42234c8cc4d7|compat encodings file formats streams string time vfs include' \
+	'quicknes|$(CORE_SOURCE_ROOT)/QuickNES_Core|https://github.com/libretro/QuickNES_Core.git|head|7848e1ac22b1c69d056ae4cb57710651ff1dd169|.'

@@ -945,10 +945,10 @@ $(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 
 .DELETE_ON_ERROR:
 COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild list-cores core core-archive core-out ffmpeg
-SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores deps-lvgl deps-ffmpeg
+SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores deps-core-smoke deps-lvgl deps-ffmpeg
 PACKAGE_TARGETS := frontend-package core-package module-package sdcard-package sd-zip install refresh-sd refresh-sd-clean
 VERIFY_TARGETS := asdcheck fastboot-check fastboot-only-check layout-check boot-logo-check js2300-check frontend-check native-frontend-check core-smoke-check
-ADVANCED_TARGETS := sdk dtb lib fastboot fastboot-only size ci-deps ci-toolchain ci-commit-check ci-sd-zip print-config
+ADVANCED_TARGETS := sdk dtb lib fastboot fastboot-only size ci-deps ci-smoke-deps ci-toolchain ci-commit-smoke ci-commit-check ci-sd-zip print-config
 .PHONY: $(COMMON_TARGETS) $(SETUP_TARGETS) $(PACKAGE_TARGETS) $(VERIFY_TARGETS) $(ADVANCED_TARGETS)
 
 all: $(ASD) sdcard-package
@@ -1362,6 +1362,9 @@ deps-support:
 
 deps-cores:
 	$(Q)$(MAKE) -C $(CORES) init $(CORE_MAKE_ARGS)
+
+deps-core-smoke:
+	$(Q)$(MAKE) -C $(CORES) smoke-init $(CORE_MAKE_ARGS)
 
 doctor:
 	@echo "Toolchain: $(TOOLCHAIN)"
@@ -1963,6 +1966,8 @@ sd-zip: sdcard-package
 
 ci-deps: deps
 
+ci-smoke-deps: deps-sdk deps-mquickjs deps-core-smoke
+
 ci-toolchain:
 	@if test ! -x "$(TOOLCHAIN)/bin/mipsel-mti-elf-gcc"; then \
 		command -v curl >/dev/null || { echo "missing: curl"; exit 1; }; \
@@ -1979,6 +1984,9 @@ ci-toolchain:
 		rm -f /tmp/frog-toolchain.tar.xz; \
 	fi
 	@test -x "$(TOOLCHAIN)/bin/mipsel-mti-elf-gcc" || { echo "missing: $(TOOLCHAIN)/bin/mipsel-mti-elf-gcc"; exit 1; }
+
+ci-commit-smoke: ci-smoke-deps ci-toolchain
+	$(Q)$(MAKE) quick-check TOOLCHAIN=$(TOOLCHAIN)
 
 ci-commit-check: ci-deps ci-toolchain
 	$(Q)$(MAKE) quick-check TOOLCHAIN=$(TOOLCHAIN)
