@@ -32,7 +32,7 @@
 #define GPIO_L15_MASK (1u << 15)
 #define GPIO_R07_MASK (1u << 7)
 #define SYSTEM_AUDIO_VOLUME 65u
-#define GB300_SYSTEM_AUDIO_VOLUME 90u
+#define GB300_SYSTEM_AUDIO_VOLUME 75u
 #define UNIFROG_AUDIO_ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #ifndef UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE
 #define UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE 0
@@ -325,7 +325,6 @@ static void apply_stock_audio_output_gate(int enabled)
    enum audio_gate gate = current_audio_gate();
 
    if (gate == AUDIO_GATE_GB300_L15) {
-      pinmux_configure(PINPAD_L15, PINMUX_L15_GPIO);
       gpio_configure(PINPAD_L15, GPIO_DIR_OUTPUT);
       gpio_set_output(PINPAD_L15, enabled ? false : true);
       set_reg_gate(GPIO_L_DIR, GPIO_L_OUTPUT, GPIO_L15_MASK, enabled);
@@ -375,14 +374,11 @@ static void apply_stock_audio_silence_policy(const char *tag)
 
    before = SND0_BASE[SND0_UNDERRUN_FADE_REG];
    if (current_audio_uses_gb300_gate()) {
-      after = before & ~SND0_UNDERRUN_FADE_BIT;
-      if (after != before)
-         SND0_BASE[SND0_UNDERRUN_FADE_REG] = after;
-      if (gb300_log_count < 6 || after != before) {
+      if (gb300_log_count < 6) {
          gb300_log_count++;
-         printf("unifrog audio silence_policy tag=%s action=gb300_legacy underrun_fade=%08lx->%08lx fade90=%08lx dac=%08lx\n",
+         printf("unifrog audio silence_policy tag=%s action=gb300_skip underrun_fade=%08lx fade90=%08lx dac=%08lx\n",
             tag ? tag : "?",
-            (unsigned long)before, (unsigned long)after,
+            (unsigned long)before,
             (unsigned long)SND0_BASE[SND0_FADE_REG],
             (unsigned long)SND0_DAC_BASE[0]);
       }
@@ -456,10 +452,17 @@ static int configure_neutral_audio_controls_fd(int fd, const char *tag)
    int balance_ret;
    static unsigned log_count;
    static unsigned gb300_log_count;
-   int gb300_route = current_audio_uses_gb300_gate();
 
    if (fd < 0)
       return -1;
+   if (current_audio_uses_gb300_gate()) {
+      if (gb300_log_count < 12) {
+         gb300_log_count++;
+         printf("unifrog audio neutral_controls tag=%s action=gb300_skip fd=%d\n",
+            tag ? tag : "?", fd);
+      }
+      return 0;
+   }
    memset(&twotone, 0, sizeof(twotone));
    memset(&eq6, 0, sizeof(eq6));
    memset(&balance, 0, sizeof(balance));
@@ -469,16 +472,11 @@ static int configure_neutral_audio_controls_fd(int fd, const char *tag)
    twotone_ret = ioctl(fd, SND_IOCTL_SET_TWOTONE, &twotone);
    eq_ret = ioctl(fd, SND_IOCTL_SET_EQ6, &eq6);
    balance_ret = ioctl(fd, SND_IOCTL_SET_LR_BALANCE, &balance);
-   if ((gb300_route && gb300_log_count < 32) ||
-       (!gb300_route && log_count < 12) || twotone_ret != 0 ||
-       eq_ret != 0 || balance_ret != 0) {
-      if (gb300_route)
-         gb300_log_count++;
-      else
-         log_count++;
-      printf("unifrog audio neutral_controls tag=%s fd=%d gb300=%d twotone=%d eq6=%d balance=%d\n",
-         tag ? tag : "?", fd, gb300_route, twotone_ret, eq_ret,
-         balance_ret);
+   if (log_count < 12 || twotone_ret != 0 || eq_ret != 0 ||
+       balance_ret != 0) {
+      log_count++;
+      printf("unifrog audio neutral_controls tag=%s fd=%d twotone=%d eq6=%d balance=%d\n",
+         tag ? tag : "?", fd, twotone_ret, eq_ret, balance_ret);
    }
    return twotone_ret == 0 && eq_ret == 0 && balance_ret == 0 ? 0 : -1;
 }

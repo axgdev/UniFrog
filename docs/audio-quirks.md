@@ -20,7 +20,7 @@ or `src/unifrog_media.c`.
   `0x801b8b74` sets `0xb8800058` bit 15 as output and writes
   `(level << 15)` to `0xb8800054`. The stock emulation path calls this helper
   with `level=0` after `run_sound_init(0, sample_rate, channels)`, so UniFrog
-  keeps L15 active-low and restores the L15 pinmux/GPIO direction/output state
+  keeps L15 active-low and changes only the same GPIO direction/output state
   when the audio gate is enabled.
 - The LCD panel ID is only a default board hint. Some GB300 units can have an
   SF2000 panel, so UniFrog also switches to the GB300/L15 audio gate when the
@@ -72,9 +72,9 @@ or `src/unifrog_media.c`.
   SF2000 because it gives the silence gate full PCM visibility and has been the
   stable route there.
 - The SF2000 underrun-fade silence policy is not applied on GB300. When the
-  GB300/L15 route is selected, UniFrog clears that bit back to the legacy state
-  before starting playback so the SF2000 noise mitigation cannot suppress a
-  GB300 speaker path.
+  GB300/L15 route is selected, UniFrog leaves the underrun-fade register and
+  neutral tone/EQ/balance controls untouched so the SF2000 noise mitigation
+  cannot suppress a GB300 speaker path.
 - On GB300, the broad direct-PCM route probe is available at runtime from
   Developer -> Audio test. It is no longer a normal-playback startup probe, so a
   single device run can test direct PCM routes, L15/R07 gate combinations, and
