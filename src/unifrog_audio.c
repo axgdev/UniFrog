@@ -196,6 +196,45 @@ static void gb300_i2so_platform_log(const char *tag)
       (unsigned long)I2SO_PLATFORM_SIZE(I2SO_PLATFORM_REMAINS_OFF));
 }
 
+static void apply_gb300_i2so_platform_quirks(const char *tag)
+{
+   static int applied;
+   struct pinmux_setting *old_mute;
+   unsigned old_fade_en;
+   unsigned old_fade_step;
+   unsigned old_volume;
+
+   if (!current_audio_uses_gb300_gate() || !i2so_platform_dev)
+      return;
+
+   old_mute = I2SO_PLATFORM_PINMUX_MUTE;
+   old_fade_en = (unsigned)I2SO_PLATFORM_U8(I2SO_PLATFORM_FADE_EN_OFF);
+   old_fade_step = (unsigned)I2SO_PLATFORM_U8(I2SO_PLATFORM_FADE_STEP_OFF);
+   old_volume = (unsigned)I2SO_PLATFORM_U8(I2SO_PLATFORM_VOLUME_OFF);
+
+   /*
+    * The shared DTS currently describes the SF2000 R07 mute pin and fade
+    * policy. Known-working GB300 builds predate those i2so_platform fields,
+    * and GB300 has its own L15 physical gate instead.
+    */
+   I2SO_PLATFORM_PINMUX_MUTE = NULL;
+   I2SO_PLATFORM_U8(I2SO_PLATFORM_FADE_EN_OFF) = 0;
+   I2SO_PLATFORM_U8(I2SO_PLATFORM_FADE_STEP_OFF) = 0xff;
+
+   if (!applied || old_mute || old_fade_en || old_fade_step != 0xffu) {
+      printf("unifrog audio gb300_i2so_quirk tag=%s mute=0x%08lx->0x%08lx fade_en=%u->%u fade_step=%u->%u vol=%u\n",
+         tag ? tag : "?",
+         (unsigned long)old_mute,
+         (unsigned long)I2SO_PLATFORM_PINMUX_MUTE,
+         old_fade_en,
+         (unsigned)I2SO_PLATFORM_U8(I2SO_PLATFORM_FADE_EN_OFF),
+         old_fade_step,
+         (unsigned)I2SO_PLATFORM_U8(I2SO_PLATFORM_FADE_STEP_OFF),
+         old_volume);
+   }
+   applied = 1;
+}
+
 static int current_audio_uses_gb300_gate(void)
 {
    return current_audio_gate() == AUDIO_GATE_GB300_L15;
@@ -209,10 +248,12 @@ int unifrog_audio_prefers_stereo_output(void)
 unsigned unifrog_audio_output_channels(void)
 {
    /*
-    * GB300 release playback uses the v0.4.4-compatible mono AUDSINK route.
-    * Stereo/direct-SND experiments stay in diagnostics until device logs prove
-    * that route is audible for normal playback.
+    * GB300 has one speaker, but the stock/HCRTOS path initializes the hardware
+    * for stereo s16 frames. Callers mono-mix the content, then duplicate that
+    * mono sample into both hardware slots.
     */
+   if (current_audio_uses_gb300_gate())
+      return 2u;
    return 1u;
 }
 
@@ -418,8 +459,10 @@ static int ensure_audio_drivers(void)
       "audsink",
    };
 
-   if (initialized)
+   if (initialized) {
+      apply_gb300_i2so_platform_quirks("drivers_cached");
       return result;
+   }
 
    initialized = 1;
    for (size_t i = 0; i < sizeof(modules) / sizeof(modules[0]); i++) {
@@ -429,6 +472,7 @@ static int ensure_audio_drivers(void)
       if (ret != 0 && result == 0)
          result = ret;
    }
+   apply_gb300_i2so_platform_quirks("drivers");
    apply_stock_audio_silence_policy("drivers");
    return result;
 }

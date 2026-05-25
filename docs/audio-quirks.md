@@ -60,10 +60,12 @@ or `src/unifrog_media.c`.
 - UniFrog-owned UI/theme playback prefers the SND backend because the silence
   gate can inspect PCM buffers before transfer. The audsink backend remains a
   fallback for those short sounds.
-- Libretro core playback uses mono output on SF2000 and GB300. GB300 or a
-  stock-bit GB300 input bus still gets the GB300 L15 gate, but release playback
-  sends AUTO PCM through AUDSINK first, matching the v0.4.4-era route more
-  closely than the silent direct-SND experiment.
+- Libretro core playback uses mono output on SF2000. GB300 or a stock-bit
+  GB300 input bus still gets the GB300 L15 gate, but release playback sends
+  mono-mixed content through stereo s16 hardware frames. This matches the stock
+  GB300 `run_sound_init(..., 2)` transport while preserving the single-speaker
+  mono content policy. AUTO PCM still tries AUDSINK first, matching the
+  v0.4.4-era route more closely than the silent direct-SND experiment.
 - On GB300, UniFrog's AUTO PCM opener tries AUDSINK before direct
   `/dev/sndC0i2so`. The direct SND fallback intentionally uses the simpler
   v0.4.4-style parameters (`O_WRONLY`, no AUDPAD source, `start_threshold=0`)
@@ -75,6 +77,9 @@ or `src/unifrog_media.c`.
   GB300/L15 route is selected, UniFrog leaves the underrun-fade register and
   neutral tone/EQ/balance controls untouched so the SF2000 noise mitigation
   cannot suppress a GB300 speaker path.
+- GB300 also strips the shared DTS `i2so_platform` mute/fade fields after the
+  audio modules initialize: the R07 `pinmux-mute` hook is cleared and platform
+  fade is disabled at runtime. SF2000 keeps the DTS R07 mute and fade behavior.
 - On GB300, the broad direct-PCM route probe is available at runtime from
   Developer -> Audio test. It is no longer a normal-playback startup probe, so a
   single device run can test direct PCM routes, L15/R07 gate combinations, and
