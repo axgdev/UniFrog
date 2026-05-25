@@ -595,6 +595,7 @@ static void media_auddec_log_packet_status(struct media_auddec *auddec,
    int32_t pts, int32_t dur);
 static void media_auddec_finish(struct media_auddec *auddec,
    unsigned timeout_ms);
+static void media_auddec_release_fd(int *fdp, const char *tag);
 static void media_auddec_close(struct media_auddec *auddec);
 static int media_run_gb300_auddec_probe(const char *tag);
 static void media_run_gb300_auddec_probe_once(const char *tag);
@@ -4612,10 +4613,8 @@ static void media_auddec_close(struct media_auddec *auddec)
    if (!auddec)
       return;
    had_output = auddec->fd >= 0 || auddec->prime_fd >= 0;
-   if (auddec->fd >= 0) {
-      close(auddec->fd);
-      auddec->fd = -1;
-   }
+   if (auddec->fd >= 0)
+      media_auddec_release_fd(&auddec->fd, "auddec_close");
    media_gb300_i2so_prime_close(&auddec->prime_fd,
       auddec->prime_extra_path, "auddec_close");
    auddec->prime_extra_path = 0;
@@ -4623,6 +4622,38 @@ static void media_auddec_close(struct media_auddec *auddec)
       unifrog_audio_set_system_output_enabled(0);
       auddec->output_enabled = 0;
    }
+}
+
+static void media_auddec_release_fd(int *fdp, const char *tag)
+{
+   int fd;
+   int pause_ret;
+   int pause_errno;
+   int flush_ret;
+   int flush_errno;
+   int rls_ret;
+   int rls_errno;
+   int close_errno;
+
+   if (!fdp || *fdp < 0)
+      return;
+   fd = *fdp;
+   *fdp = -1;
+   errno = 0;
+   pause_ret = ioctl(fd, AUDDEC_PAUSE, 0);
+   pause_errno = errno;
+   errno = 0;
+   flush_ret = ioctl(fd, AUDDEC_FLUSH, 0);
+   flush_errno = errno;
+   errno = 0;
+   rls_ret = ioctl(fd, AUDDEC_RLS, 0);
+   rls_errno = errno;
+   errno = 0;
+   close(fd);
+   close_errno = errno;
+   printf("unifrog media auddec release tag=%s fd=%d pause=%d pause_errno=%d flush=%d flush_errno=%d rls=%d rls_errno=%d close_errno=%d\n",
+      tag ? tag : "?", fd, pause_ret, pause_errno, flush_ret, flush_errno,
+      rls_ret, rls_errno, close_errno);
 }
 
 static void media_auddec_finish(struct media_auddec *auddec,
@@ -5386,7 +5417,7 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
                   (unsigned long)cfg.snd_devs,
                   (unsigned long)variant->prime_dest,
                   (unsigned long)variant->prime_extra_path);
-               close(fd);
+               media_auddec_release_fd(&fd, "raw_prime_failed");
                continue;
             }
          } else {
@@ -5408,7 +5439,7 @@ static int media_auddec_open_raw(const char *label, uint32_t codec_id,
             channel_errno, volume_ret, volume_errno);
          return 0;
       }
-      close(fd);
+      media_auddec_release_fd(&fd, "raw_open_failed");
    }
    return -1;
 }
@@ -5755,7 +5786,7 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
                   (unsigned long)cfg.snd_devs,
                   (unsigned long)variant->prime_dest,
                   (unsigned long)variant->prime_extra_path);
-               close(fd);
+               media_auddec_release_fd(&fd, "prime_failed");
                continue;
             }
          } else {
@@ -5787,7 +5818,7 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
          (((uint32_t)i & 0xffu) << 16),
          ((uint32_t)(init_errno & 0xffffu) << 16) |
          ((uint32_t)(start_errno & 0xffffu)));
-      close(fd);
+      media_auddec_release_fd(&fd, "open_failed");
    }
    printf("unifrog media auddec open failed stream=%d codec=%d name=%s rate=%d ch=%d extra=%d\n",
       stream_index, par->codec_id, media_avcodec_name(par->codec_id),
