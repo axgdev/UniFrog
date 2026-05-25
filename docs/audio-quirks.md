@@ -73,6 +73,11 @@ or `src/unifrog_media.c`.
   report successful transfers without audible output. Direct SND remains first on
   SF2000 because it gives the silence gate full PCM visibility and has been the
   stable route there.
+- GB300 direct-SND fallback treats `SND_IOCTL_XFER` returning `errno=EPERM` as
+  a transient full-ring condition, not a permission failure. The SDK core
+  returns bare `-1` when available frames are below the requested transfer, and
+  GB300's poll readiness can return immediately, so UniFrog sleeps and retries
+  with a longer GB300-only budget.
 - The SF2000 underrun-fade silence policy is not applied on GB300. When the
   GB300/L15 route is selected, UniFrog leaves the underrun-fade register and
   neutral tone/EQ/balance controls untouched so the SF2000 noise mitigation
@@ -127,17 +132,20 @@ or `src/unifrog_media.c`.
   attempt, GB300 uses the simpler direct-SND software output backend to avoid a
   poisoned AUDSINK state from the failed decoder session.
 - GB300 hardware-auddec probe attempts keep the speaker gate closed until
-  auddec status reports header or frame progress. Init/start success and a
-  moving `AUDDEC_GET_CUR_TIME` clock are not enough to unmute the physical
-  output.
+  auddec status reports header/frame progress or the auddec clock advances.
+  The clock-progress allowance is GB300-only: after the 0150/0153 route tests,
+  the earlier raw-ASC AAC path's moving clock is the useful hardware-decoder
+  signal, while the ADTS-wrapped regression leaves `AUDDEC_GET_CUR_TIME` stuck
+  at zero.
 - System volume/mute opens keep `/dev/sndC0i2so` write-only. GB300 release
   direct-SND fallback is also write-only; only SF2000 UniFrog-owned direct PCM,
   diagnostics, and I2SO-prime playback paths use bidirectional SND opens for
   DMA.
-- GB300 diagnostics treat "auddec init/start success but no decode progress" as
-  a runtime fault. Do not use `AUDDEC_GET_CUR_TIME` alone as the health signal;
-  0132 and 0140 GB300 logs showed the decoder clock can advance while headers
-  and decoded frames remain at zero.
+- GB300 diagnostics treat "auddec init/start success with no decode progress
+  and a stuck decoder clock" as a runtime fault. Init/start alone is still not
+  enough; the useful split is raw ASC with a moving `AUDDEC_GET_CUR_TIME`
+  versus ADTS/no-KSHM paths that leave headers, decoded frames, and time at
+  zero.
 - Audio-only compressed playback should open `/dev/auddec` in freerun mode
   first. STC update/sync modes are reserved for audio plus video, where the
   video decoder can synchronize to the audio-owned clock.
@@ -200,7 +208,8 @@ or `src/unifrog_media.c`.
 - MP4/M4A AAC must be passed like HCPlayer does: AudioSpecificConfig in
   `audio_config.extra_data`, then raw demuxed AAC access units as ES packets.
   Wrapping those raw MP4 packets in synthetic ADTS headers initialized the
-  SF2000 decoder but produced no audible audio in 0109 logs.
+  SF2000 decoder but produced no audible audio in 0109 logs; on GB300 0153 it
+  also kept the auddec clock at zero.
 
 ## Stock Firmware Notes
 

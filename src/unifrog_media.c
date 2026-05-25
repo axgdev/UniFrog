@@ -586,11 +586,17 @@ static int media_auddec_send_packet(struct media_auddec *auddec,
    const AVPacket *packet);
 static int media_auddec_status_decode_stalled(
    const struct audio_decore_status *status);
+static int media_auddec_clock_has_progress(int time_ok, int64_t cur_time);
+static int media_auddec_runtime_decode_stalled(
+   const struct audio_decore_status *status, int time_ok, int64_t cur_time);
 static int media_auddec_status_has_progress(
    const struct audio_decore_status *status);
 static void media_auddec_enable_output_on_progress(
    struct media_auddec *auddec, const struct audio_decore_status *status,
    const char *scope, uint32_t packet_index);
+static void media_auddec_enable_output_on_clock_progress(
+   struct media_auddec *auddec, int64_t cur_time, const char *scope,
+   uint32_t packet_index);
 static void media_auddec_log_packet_status(struct media_auddec *auddec,
    const char *scope, uint32_t packet_index, const uint8_t *data, size_t size,
    int32_t pts, int32_t dur);
@@ -3377,7 +3383,8 @@ static int media_play_native_audio_compressed(const char *path)
             if (time_ok)
                last_audio_time = cur_time;
             if (status_ok &&
-                media_auddec_status_decode_stalled(&status)) {
+                media_auddec_runtime_decode_stalled(&status, time_ok,
+                   cur_time)) {
                printf("unifrog media auddec fallback trigger reason=decode_stall packets=%lu ms=%lu decoded=%lu hdr=%u/%u time_ok=%d atime=%lld path=%s\n",
                   (unsigned long)auddec.packets, (unsigned long)elapsed_ms,
                   (unsigned long)status.frames_decoded,
@@ -3386,6 +3393,9 @@ static int media_play_native_audio_compressed(const char *path)
                decode_stalled = 1;
                break;
             }
+            if (time_ok)
+               media_auddec_enable_output_on_clock_progress(&auddec, cur_time,
+                  "audio_stall_poll", auddec.packets);
             if (status_ok)
                media_auddec_enable_output_on_progress(&auddec, &status,
                   "audio_stall_poll", auddec.packets);
@@ -3461,7 +3471,8 @@ static int media_play_native_audio_compressed(const char *path)
        auddec.packets >= MEDIA_GB300_AUDDEC_STALL_PACKETS &&
        last_status_ok &&
        last_decoded == 0 &&
-       !last_header_seen) {
+       !last_header_seen &&
+       !media_auddec_clock_has_progress(last_time_ok, last_audio_time)) {
       printf("unifrog media auddec fallback trigger reason=decode_stall packets=%lu decoded=%lu hdr=%u time_ok=%d atime=%lld path=%s\n",
          (unsigned long)auddec.packets, last_decoded, last_header_seen,
          last_time_ok, (long long)last_audio_time, path ? path : "");
@@ -4709,6 +4720,18 @@ static int media_auddec_status_decode_stalled(
       !status->first_header_parsed;
 }
 
+static int media_auddec_clock_has_progress(int time_ok, int64_t cur_time)
+{
+   return time_ok && cur_time > 0;
+}
+
+static int media_auddec_runtime_decode_stalled(
+   const struct audio_decore_status *status, int time_ok, int64_t cur_time)
+{
+   return media_auddec_status_decode_stalled(status) &&
+      !media_auddec_clock_has_progress(time_ok, cur_time);
+}
+
 static int media_auddec_status_has_progress(
    const struct audio_decore_status *status)
 {
@@ -4732,6 +4755,20 @@ static void media_auddec_enable_output_on_progress(
       scope ? scope : "?", (unsigned long)packet_index,
       (unsigned long)status->frames_decoded,
       status->first_header_got, status->first_header_parsed);
+}
+
+static void media_auddec_enable_output_on_clock_progress(
+   struct media_auddec *auddec, int64_t cur_time, const char *scope,
+   uint32_t packet_index)
+{
+   if (!auddec || auddec->fd < 0 || auddec->output_enabled ||
+       !unifrog_audio_prefers_stereo_output() || cur_time <= 0)
+      return;
+   unifrog_audio_set_system_output_enabled(1);
+   auddec->output_enabled = 1;
+   printf("unifrog media auddec output_enable reason=clock_progress scope=%s idx=%lu atime=%lld\n",
+      scope ? scope : "?", (unsigned long)packet_index,
+      (long long)cur_time);
 }
 
 static void media_auddec_log_packet_status(struct media_auddec *auddec,
@@ -4767,6 +4804,9 @@ static void media_auddec_log_packet_status(struct media_auddec *auddec,
    errno = 0;
    time_ret = ioctl(auddec->fd, AUDDEC_GET_CUR_TIME, &cur_time);
    time_errno = errno;
+   if (time_ret == 0)
+      media_auddec_enable_output_on_clock_progress(auddec, cur_time, scope,
+         packet_index);
    printf("unifrog media auddec packet_status scope=%s idx=%lu size=%lu pts=%ld dur=%ld first=%02x %02x %02x %02x status=%d status_errno=%d decoded=%lu rate=%lu ch=%u bits=%u hdr=%u/%u time=%lld time_ret=%d time_errno=%d freerun=%d\n",
       scope ? scope : "?", (unsigned long)packet_index,
       (unsigned long)size, (long)pts, (long)dur,
@@ -5604,15 +5644,14 @@ static int media_auddec_open(AVFormatContext *fmt, int stream_index,
       (uint32_t)par->sample_rate : 44100u;
    if (par->codec_id == AV_CODEC_ID_AAC) {
       /*
-       * SF2000 accepts MP4/M4A AAC as raw frames with AudioSpecificConfig in
-       * audio_config. GB300 accepted that setup but never parsed a header in
-       * 0139, so feed GB300 AAC as ADTS-framed ES data instead.
+       * HCPlayer passes MP4/M4A AAC as raw access units with
+       * AudioSpecificConfig in audio_config. The 0153 GB300 ADTS-wrapped path
+       * initialized cleanly but left the decoder clock stuck at zero, while
+       * the earlier raw ASC path advanced the auddec clock.
        */
       media_aac_parse_asc(par, &auddec->aac_profile,
          &auddec->aac_sample_rate_index, &auddec->aac_channels);
-      if (unifrog_audio_prefers_stereo_output()) {
-         auddec->aac_adts = 1;
-      } else if (par->extradata && par->extradata_size > 0) {
+      if (par->extradata && par->extradata_size > 0) {
          base_cfg.extradata_size = (uint32_t)par->extradata_size;
          if (par->extradata_size <= (int)sizeof(base_cfg.extra_data)) {
             base_cfg.extradata_mode = 0;
@@ -7012,7 +7051,8 @@ static int media_play_native_video(const char *path,
              elapsed_ms >= MEDIA_GB300_AUDDEC_STALL_MS &&
              auddec.packets >= MEDIA_GB300_AUDDEC_STALL_PACKETS &&
              aud_status_ok &&
-             media_auddec_status_decode_stalled(&aud_status)) {
+             media_auddec_runtime_decode_stalled(&aud_status,
+                audio_time >= 0, audio_time)) {
             printf("unifrog media native auddec fallback trigger reason=decode_stall packets=%lu ms=%lu decoded=%lu hdr=%u/%u atime=%lld path=%s\n",
                (unsigned long)auddec.packets, (unsigned long)elapsed_ms,
                (unsigned long)aud_status.frames_decoded,
@@ -7029,6 +7069,9 @@ static int media_play_native_video(const char *path,
                   audio_stream, path ? path : "");
             }
          }
+         if (auddec.fd >= 0 && !audio_enabled && audio_time >= 0)
+            media_auddec_enable_output_on_clock_progress(&auddec, audio_time,
+               "video_monitor", auddec.packets);
          if (auddec.fd >= 0 && !audio_enabled && aud_status_ok &&
              media_auddec_status_has_progress(&aud_status))
             media_auddec_enable_output_on_progress(&auddec, &aud_status,

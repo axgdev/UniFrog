@@ -47,7 +47,8 @@
 #define GB300_SND_PERIOD_BYTES 3072u
 #define GB300_SND_PERIODS 40u
 #define GB300_SND_START_THRESHOLD 2u
-#define GB300_SND_MIN_WRITE_ATTEMPTS 16u
+#define GB300_SND_MIN_WRITE_ATTEMPTS 100u
+#define GB300_SND_TRANSIENT_LOG_LIMIT 12u
 /* GB300 diagnostics produce audible output with multi-period bursts, while
  * media and cores feed 512-frame chunks. Coalesce small runtime writes to the
  * burst size that the direct SND path is known to accept. */
@@ -847,6 +848,7 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
    static unsigned success_log_count;
    static unsigned mute_transition_log_count;
    static unsigned signal_log_count;
+   static unsigned transient_log_count;
    int gb300_snd = audio && audio->backend == UNIFROG_AUDIO_BACKEND_SND &&
       unifrog_audio_prefers_stereo_output();
    int gb300_coalesced_flush = 0;
@@ -1019,7 +1021,20 @@ int unifrog_audio_write_timeout(struct unifrog_audio *audio,
       }
       if (tries + 1 >= attempts)
          break;
-      poll(&pollfd, 1, (int)poll_timeout_ms);
+      if (gb300_snd && last_errno == EPERM) {
+         snd_pcm_uframes_t delay = 0;
+         int delay_ret = ioctl(audio->fd, SND_IOCTL_DELAY, &delay);
+
+         if (transient_log_count < GB300_SND_TRANSIENT_LOG_LIMIT) {
+            transient_log_count++;
+            printf("unifrog audio gb300_write_wait reason=not_enough_avail fd=%d frames=%u try=%u attempts=%u sleep_ms=%u delay_ret=%d delay=%lu\n",
+               audio->fd, frames, tries + 1, attempts, poll_timeout_ms,
+               delay_ret, (unsigned long)delay);
+         }
+         usleep((poll_timeout_ms ? poll_timeout_ms : 1u) * 1000u);
+      } else {
+         poll(&pollfd, 1, (int)poll_timeout_ms);
+      }
    } while (++tries < attempts);
 
    if (failure_log_count < 20) {
