@@ -944,7 +944,7 @@ $(FASTBOOT_OBJECTS): $(FASTBOOT_CONFIG_STAMP)
 $(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 
 .DELETE_ON_ERROR:
-COMMON_TARGETS := all help setup doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild list-cores core core-archive core-out ffmpeg
+COMMON_TARGETS := all help setup doctor smoke-doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild list-cores core core-archive core-out ffmpeg
 SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores deps-core-smoke deps-lvgl deps-ffmpeg
 PACKAGE_TARGETS := frontend-package core-package module-package sdcard-package sd-zip install refresh-sd refresh-sd-clean
 VERIFY_TARGETS := asdcheck fastboot-check fastboot-only-check layout-check boot-logo-check js2300-check frontend-check native-frontend-check core-smoke-check
@@ -1395,6 +1395,24 @@ doctor:
 	fi
 	@echo "OK"
 	@echo "Run 'make print-config' to show resolved paths and tools."
+
+smoke-doctor:
+	@echo "Toolchain: $(TOOLCHAIN)"
+	@command -v $(CC) >/dev/null || { echo "missing: $(CC)"; exit 1; }
+	@command -v $(AR) >/dev/null || { echo "missing: $(AR)"; exit 1; }
+	@command -v $(HOSTCC) >/dev/null || { echo "missing: $(HOSTCC)"; exit 1; }
+	@test -n "$(GCC_LIBDIR)" || { echo "missing: GCC libdir under $(TOOLCHAIN)/lib/gcc/mipsel-mti-elf"; exit 1; }
+	@test -d "$(SDK)/include" || { echo "missing: $(SDK)/include"; exit 1; }
+	@test -f "$(SDK)/Makefile" || { echo "missing SDK checkout: $(SDK)"; exit 1; }
+	@test -f "$(CORES)/Makefile" || { echo "missing: $(CORES)/Makefile"; exit 1; }
+	@test -e "$(CORE_SOURCE_ROOT)/libretro-common/.git" || { echo "missing core smoke checkout; run: make deps-core-smoke"; exit 1; }
+	@test -e "$(CORE_SOURCE_ROOT)/QuickNES_Core/.git" || { echo "missing core smoke checkout; run: make deps-core-smoke"; exit 1; }
+	@test -f "$(CORE_SUPPORT_ROOT)/zlib/inflate.c" || { echo "missing core smoke support checkout; run: make deps-core-smoke"; exit 1; }
+	@if test "$(FRONTEND_IMPL)" = native; then \
+		test -f "$(JS2300)/Makefile" || { echo "missing JS2300 source: $(JS2300)"; exit 1; }; \
+		test -f "$(MQUICKJS_DIR)/mquickjs.c" || { echo "missing MQuickJS checkout: $(MQUICKJS_DIR)"; exit 1; }; \
+	fi
+	@echo "OK"
 
 repo-check:
 	@echo "  CHECK   repository hygiene"
@@ -1986,7 +2004,17 @@ ci-toolchain:
 	@test -x "$(TOOLCHAIN)/bin/mipsel-mti-elf-gcc" || { echo "missing: $(TOOLCHAIN)/bin/mipsel-mti-elf-gcc"; exit 1; }
 
 ci-commit-smoke: ci-smoke-deps ci-toolchain
-	$(Q)$(MAKE) quick-check TOOLCHAIN=$(TOOLCHAIN)
+	$(Q)$(MAKE) --no-print-directory repo-check
+	$(Q)$(MAKE) --no-print-directory smoke-doctor TOOLCHAIN=$(TOOLCHAIN)
+	@echo "  CHECK   core smoke"
+	$(Q)$(MAKE) --no-print-directory core-smoke-check TOOLCHAIN=$(TOOLCHAIN)
+	@echo "  CHECK   $(FRONTEND_IMPL) frontend"
+	$(Q)$(MAKE) --no-print-directory native-frontend-check
+	@echo "  CHECK   js2300 script runtime"
+	$(Q)$(MAKE) --no-print-directory js2300-check TOOLCHAIN=$(TOOLCHAIN) HOSTCC=$(HOSTCC)
+	@echo "  CHECK   boot logo"
+	$(Q)$(MAKE) --no-print-directory boot-logo-check
+	@echo "OK"
 
 ci-commit-check: ci-deps ci-toolchain
 	$(Q)$(MAKE) quick-check TOOLCHAIN=$(TOOLCHAIN)
