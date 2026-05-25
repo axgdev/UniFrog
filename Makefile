@@ -1130,10 +1130,10 @@ endif
 deps: deps-sdk deps-mquickjs deps-lvgl deps-cores deps-ffmpeg ffmpeg
 
 deps-alpine:
-	apk add git make dtc tcc tcc-libs-static musl-dev ccache curl tar xz zip patch
+	apk add git make dtc tcc tcc-libs-static musl-dev zlib-dev ccache curl tar xz zip patch
 
 deps-ubuntu:
-	@echo "sudo apt-get update && sudo apt-get install -y git make device-tree-compiler tcc ccache curl xz-utils zip patch"
+	@echo "sudo apt-get update && sudo apt-get install -y git make device-tree-compiler tcc zlib1g-dev ccache curl xz-utils zip patch"
 
 deps-sdk:
 	git config --global --add safe.directory "$(abspath .)" 2>/dev/null || true
@@ -1689,10 +1689,18 @@ $(BOOT_LOGO_TOOL): tools/bootlogo.c $(CORE_SUPPORT_ROOT)/zlib/inflate.c $(BUILD_
 		$(CORE_SUPPORT_ROOT)/zlib/zutil.c \
 		-o $@
 
-$(THEME_ARCHIVE_CHECK): tools/theme_archive_check.c $(BUILD_CONFIG_STAMP) | $(BUILD)
+$(THEME_ARCHIVE_CHECK): tools/theme_archive_check.c $(CORE_SUPPORT_ROOT)/zlib/inflate.c $(BUILD_CONFIG_STAMP) | $(BUILD)
 	@echo "  HOSTCC  $@"
 	$(Q)mkdir -p $(dir $@)
-	$(Q)$(HOSTCC) $(HOSTCFLAGS) $< -lz -o $@
+	$(Q)$(HOSTCC) $(HOSTCFLAGS) -I$(CORE_SUPPORT_ROOT)/zlib \
+		$< \
+		$(CORE_SUPPORT_ROOT)/zlib/adler32.c \
+		$(CORE_SUPPORT_ROOT)/zlib/crc32.c \
+		$(CORE_SUPPORT_ROOT)/zlib/inffast.c \
+		$(CORE_SUPPORT_ROOT)/zlib/inflate.c \
+		$(CORE_SUPPORT_ROOT)/zlib/inftrees.c \
+		$(CORE_SUPPORT_ROOT)/zlib/zutil.c \
+		-o $@
 
 $(THEME_VISUAL_CHECK): tools/theme_visual_check.c $(BUILD_CONFIG_STAMP) | $(BUILD)
 	@echo "  HOSTCC  $@"
