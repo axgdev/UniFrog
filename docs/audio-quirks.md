@@ -119,10 +119,13 @@ or `src/unifrog_media.c`.
   and the speaker silent. The combined I2SO+SPO, SPO, and PCMO profiles remain
   as fallback diagnostics if I2SO-only init fails.
 - The GB300 hardware-auddec route opens a persistent `/dev/sndC0i2so` handle.
-  Default builds use the vendor `SND_IOCTL_SET_EXTRA_DATA_PATH` loopthrough to
-  `AUDDEV_I2SO` first, then fall back to the established I2SO prime routes if a
-  route cannot initialize. Set `MEDIA_GB300_I2SO_EXTRA_ROUTE=0` only when
-  comparing against the older direct-prime diagnostics.
+  The vendor `SND_IOCTL_SET_EXTRA_DATA_PATH` loopthrough to `AUDDEV_I2SO`
+  remains opt-in via `MEDIA_GB300_I2SO_EXTRA_ROUTE=1`; default builds use the
+  established I2SO prime route first. Stalled GB300 auddec sessions are closed
+  without extra PAUSE/FLUSH/RLS teardown ioctls because those can block hard on
+  this runtime. If auddec falls back to FFmpeg-decoded PCM after an auddec
+  attempt, GB300 uses the simpler direct-SND software output backend to avoid a
+  poisoned AUDSINK state from the failed decoder session.
 - GB300 hardware-auddec probe attempts keep the speaker gate closed until
   auddec status reports header or frame progress. Init/start success and a
   moving `AUDDEC_GET_CUR_TIME` clock are not enough to unmute the physical
