@@ -88,11 +88,11 @@ or `src/unifrog_media.c`.
   Developer -> Audio test. 0134 through 0136 showed all production auddec routes
   stayed at `decoded=0`/`first_header_*=0`; use the runtime probe to collect
   auddec route labels instead of compiling separate one-off probe builds.
-- GB300 normal playback bypasses `/dev/auddec` for release builds. 0140 showed
-  valid ADTS AAC packets being fed to auddec, but every production and probe
-  route stayed at `frames_decoded=0` and `first_header_*=0`. Audio-only files
-  and native video-container audio therefore use FFmpeg-decoded PCM through the
-  UniFrog PCM output path on GB300. SF2000 keeps the hardware-auddec path.
+- GB300 normal playback uses `/dev/auddec` first again. 0150 proved the missing
+  board step was the shared DTS `i2so_platform` mute/fade state, not the PCM
+  speaker gate or mono mix. Hardware auddec now prepares that audio route before
+  opening the decoder and falls back to FFmpeg-decoded PCM only if init, packet
+  writes, or decode-progress checks fail.
 - Native media must use the audio decoder ABI from the linked HCRTOS
   `libauddrv.a`, not blindly copy either adjacent public header. The bundled
   driver switches on `AUDDEC_INIT == 0x82500301`, which corresponds to a

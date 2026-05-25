@@ -477,6 +477,11 @@ static int ensure_audio_drivers(void)
    return result;
 }
 
+void unifrog_audio_prepare_output_route(void)
+{
+   (void)ensure_audio_drivers();
+}
+
 static int open_system_snd(void)
 {
    /*
