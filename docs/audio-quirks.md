@@ -20,7 +20,7 @@ or `src/unifrog_media.c`.
   `0x801b8b74` sets `0xb8800058` bit 15 as output and writes
   `(level << 15)` to `0xb8800054`. The stock emulation path calls this helper
   with `level=0` after `run_sound_init(0, sample_rate, channels)`, so UniFrog
-  keeps L15 active-low and changes only the same GPIO direction/output state
+  keeps L15 active-low and restores the L15 pinmux/GPIO direction/output state
   when the audio gate is enabled.
 - The LCD panel ID is only a default board hint. Some GB300 units can have an
   SF2000 panel, so UniFrog also switches to the GB300/L15 audio gate when the
@@ -33,10 +33,11 @@ or `src/unifrog_media.c`.
   polling so GB300 audio is not silently disabled by controller polling.
 - `SND_IOCTL_SET_MUTE` controls the low-level HCRTOS sound output path. For
   SF2000 UniFrog-owned SND playback, this is the reliable way to keep the DAC
-  quiet until non-silent PCM is available. On GB300, release playback keeps the
-  L15 amplifier gate behavior separate from the SF2000 delayed-signal mute
-  policy and uses the same direct-SND profile that produced audible diagnostic
-  tones in 0140.
+  quiet until non-silent PCM is available. On GB300, release playback prefers
+  the older AUDSINK path and keeps the L15 amplifier gate behavior separate
+  from the SF2000 delayed-signal mute policy; 0142 and 0147 showed the newer
+  direct SND AUDPAD route could accept nonzero DMA writes while remaining
+  inaudible.
 - Digital zero samples are not enough by themselves. If the amplifier path is
   unmuted and enabled, zero PCM can still produce audible board noise.
 
@@ -59,21 +60,21 @@ or `src/unifrog_media.c`.
 - UniFrog-owned UI/theme playback prefers the SND backend because the silence
   gate can inspect PCM buffers before transfer. The audsink backend remains a
   fallback for those short sounds.
-- Libretro core playback uses mono output on SF2000. GB300 or a stock-bit
-  GB300 input bus still gets the GB300 L15 gate, but UniFrog mixes content to
-  mono and duplicates it into stereo I2S frames before writing to
-  `/dev/sndC0i2so`. The GB300 has one speaker, but the stock firmware and
-  HCRTOS diagnostic path both treat its I2SO/DAC route as a stereo frame sink.
-- On GB300, UniFrog's AUTO PCM opener tries direct `/dev/sndC0i2so` before
-  AUDSINK. The direct SND open uses the vendor-style HCRTOS parameters that
-  produced the audible 0140 production tone: `O_RDWR`, AUDPAD source,
-  `start_threshold=2`, and a larger DMA ring. Direct SND remains first on
+- Libretro core playback uses mono output on SF2000 and GB300. GB300 or a
+  stock-bit GB300 input bus still gets the GB300 L15 gate, but release playback
+  sends AUTO PCM through AUDSINK first, matching the v0.4.4-era route more
+  closely than the silent direct-SND experiment.
+- On GB300, UniFrog's AUTO PCM opener tries AUDSINK before direct
+  `/dev/sndC0i2so`. The direct SND fallback intentionally uses the simpler
+  v0.4.4-style parameters (`O_WRONLY`, no AUDPAD source, `start_threshold=0`)
+  because 0142 and 0147 showed the newer vendor-style `O_RDWR`/AUDPAD route can
+  report successful transfers without audible output. Direct SND remains first on
   SF2000 because it gives the silence gate full PCM visibility and has been the
   stable route there.
 - The SF2000 underrun-fade silence policy is not applied on GB300. When the
-  GB300/L15 route is selected, UniFrog leaves the underrun-fade register and
-  neutral tone/EQ/balance controls untouched so the SF2000 noise mitigation
-  cannot suppress a GB300 speaker path.
+  GB300/L15 route is selected, UniFrog clears that bit back to the legacy state
+  before starting playback so the SF2000 noise mitigation cannot suppress a
+  GB300 speaker path.
 - On GB300, the broad direct-PCM route probe is available at runtime from
   Developer -> Audio test. It is no longer a normal-playback startup probe, so a
   single device run can test direct PCM routes, L15/R07 gate combinations, and
@@ -123,8 +124,9 @@ or `src/unifrog_media.c`.
   moving `AUDDEC_GET_CUR_TIME` clock are not enough to unmute the physical
   output.
 - System volume/mute opens keep `/dev/sndC0i2so` write-only. GB300 release
-  PCM, SF2000 UniFrog-owned direct PCM, diagnostics, and I2SO-prime playback
-  paths use bidirectional SND opens for DMA.
+  direct-SND fallback is also write-only; only SF2000 UniFrog-owned direct PCM,
+  diagnostics, and I2SO-prime playback paths use bidirectional SND opens for
+  DMA.
 - GB300 diagnostics treat "auddec init/start success but no decode progress" as
   a runtime fault. Do not use `AUDDEC_GET_CUR_TIME` alone as the health signal;
   0132 and 0140 GB300 logs showed the decoder clock can advance while headers

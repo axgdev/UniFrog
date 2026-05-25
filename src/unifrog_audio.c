@@ -209,11 +209,11 @@ int unifrog_audio_prefers_stereo_output(void)
 unsigned unifrog_audio_output_channels(void)
 {
    /*
-    * The stock GB300 sound task is fed stereo S16 frames even though the
-    * handheld has one speaker. Mix content to mono above this layer and feed a
-    * duplicated stereo frame stream to the I2SO route.
+    * GB300 release playback uses the v0.4.4-compatible mono AUDSINK route.
+    * Stereo/direct-SND experiments stay in diagnostics until device logs prove
+    * that route is audible for normal playback.
     */
-   return current_audio_uses_gb300_gate() ? 2u : 1u;
+   return 1u;
 }
 
 static uint32_t current_audio_snd_devs(void)
@@ -325,6 +325,7 @@ static void apply_stock_audio_output_gate(int enabled)
    enum audio_gate gate = current_audio_gate();
 
    if (gate == AUDIO_GATE_GB300_L15) {
+      pinmux_configure(PINPAD_L15, PINMUX_L15_GPIO);
       gpio_configure(PINPAD_L15, GPIO_DIR_OUTPUT);
       gpio_set_output(PINPAD_L15, enabled ? false : true);
       set_reg_gate(GPIO_L_DIR, GPIO_L_OUTPUT, GPIO_L15_MASK, enabled);
@@ -374,11 +375,14 @@ static void apply_stock_audio_silence_policy(const char *tag)
 
    before = SND0_BASE[SND0_UNDERRUN_FADE_REG];
    if (current_audio_uses_gb300_gate()) {
-      if (gb300_log_count < 6) {
+      after = before & ~SND0_UNDERRUN_FADE_BIT;
+      if (after != before)
+         SND0_BASE[SND0_UNDERRUN_FADE_REG] = after;
+      if (gb300_log_count < 6 || after != before) {
          gb300_log_count++;
-         printf("unifrog audio silence_policy tag=%s action=gb300_skip underrun_fade=%08lx fade90=%08lx dac=%08lx\n",
+         printf("unifrog audio silence_policy tag=%s action=gb300_legacy underrun_fade=%08lx->%08lx fade90=%08lx dac=%08lx\n",
             tag ? tag : "?",
-            (unsigned long)before,
+            (unsigned long)before, (unsigned long)after,
             (unsigned long)SND0_BASE[SND0_FADE_REG],
             (unsigned long)SND0_DAC_BASE[0]);
       }
@@ -624,15 +628,14 @@ static int open_snd(struct unifrog_audio *audio,
    int neutral_ret = -1;
    int fd;
 
-   if (gb300_route) {
-      if (period_bytes < GB300_SND_PERIOD_BYTES)
-         period_bytes = GB300_SND_PERIOD_BYTES;
-      if (periods < GB300_SND_PERIODS)
-         periods = GB300_SND_PERIODS;
-      start_threshold = GB300_SND_START_THRESHOLD;
-   }
+   /*
+    * 0142 and 0147 both showed the newer GB300 AUDPAD/O_RDWR direct route can
+    * accept nonzero DMA writes while staying inaudible. Keep direct SND as a
+    * fallback, but use the simpler v0.4.4-style parameters when release audio
+    * lands here.
+    */
 
-   fd = open("/dev/sndC0i2so", O_RDWR);
+   fd = open("/dev/sndC0i2so", gb300_route ? O_WRONLY : O_RDWR);
    if (fd < 0)
       return -1;
 
@@ -647,7 +650,8 @@ static int open_snd(struct unifrog_audio *audio,
    params.periods = periods;
    params.bitdepth = 16;
    params.start_threshold = start_threshold;
-   params.pcm_source = SND_PCM_SOURCE_AUDPAD;
+   if (!gb300_route)
+      params.pcm_source = SND_PCM_SOURCE_AUDPAD;
    params.pcm_dest = SND_PCM_DEST_DMA;
    errno = 0;
    hw_ret = ioctl(fd, SND_IOCTL_HW_PARAMS, &params);
@@ -676,7 +680,7 @@ static int open_snd(struct unifrog_audio *audio,
       avail_ret, neutral_ret,
       audio_gate_name(current_audio_gate()),
       unifrog_audio_output_channels(),
-      gb300_route ? "gb300_audpad" : "audpad",
+      gb300_route ? "gb300_legacy" : "audpad",
       (unsigned long)hw.dma_addr, (unsigned long)hw.dma_size,
       (unsigned long)hw.pcm_params.period_size,
       (unsigned long)hw.pcm_params.periods);
@@ -688,7 +692,7 @@ fail:
       fd, rate, channels, requested_period, requested_periods,
       period_bytes, periods, start_threshold, hw_ret, hw_errno,
       audio_gate_name(current_audio_gate()),
-      gb300_route ? "gb300_audpad" : "audpad");
+      gb300_route ? "gb300_legacy" : "audpad");
    close(fd);
    return -1;
 }
@@ -718,9 +722,9 @@ int unifrog_audio_open_backend(struct unifrog_audio *audio,
       return open_snd(audio, rate, channels, period_bytes, periods);
 
    if (unifrog_audio_prefers_stereo_output()) {
-      if (open_snd(audio, rate, channels, period_bytes, periods) == 0)
+      if (open_audsink(audio, rate, channels, period_bytes, periods) == 0)
          return 0;
-      return open_audsink(audio, rate, channels, period_bytes, periods);
+      return open_snd(audio, rate, channels, period_bytes, periods);
    }
 
    if (open_snd(audio, rate, channels, period_bytes, periods) == 0)
