@@ -99,10 +99,10 @@ static int draw_logo(struct unifrog_fb *fb, const char *tag)
    flush_ms = unifrog_perf_time_ms();
    (void)unifrog_fb_pan(fb, fb->current_buffer);
    pan_ms = unifrog_perf_time_ms();
-   vsync1_ret = unifrog_fb_wait_vsync(fb);
-   vsync1_ms = unifrog_perf_time_ms();
-   vsync2_ret = unifrog_fb_wait_vsync(fb);
-   vsync2_ms = unifrog_perf_time_ms();
+   vsync1_ret = 0;
+   vsync1_ms = pan_ms;
+   vsync2_ret = 0;
+   vsync2_ms = pan_ms;
    (void)unifrog_av_set_mode(0);
    av_ms = unifrog_perf_time_ms();
    ret = unifrog_backlight_set(BOOT_LOGO_BACKLIGHT);

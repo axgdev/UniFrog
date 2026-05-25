@@ -11,7 +11,7 @@ var config = {
   language: "en",
   font: "builtin",
   fontSize: 12,
-  fastSd: "uhs25",
+  fastSd: "boot",
   lastPath: "",
   lastCore: ""
 };

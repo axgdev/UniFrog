@@ -12,8 +12,8 @@ backlight gate and the PWM-capable brightness pin.
 - `PINPAD_R05` muxed as `PINMUX_R05_PWM_2` exposes the real brightness path as
   `/dev/pwm2`.
 - The confirmed useful PWM profile is:
-  - frequency: 10 kHz
-  - period: 100000 ns
+  - frequency: 20 kHz
+  - period: 50000 ns
   - polarity: 1
   - duty: `period * level / 100`
 - With that profile, brightness tracks duty directly:
@@ -37,7 +37,7 @@ pwm@2 {
 backlight {
     backlight-gpios-rtos = <PINPAD_R05 GPIO_ACTIVE_LOW>;
     backlight-pwmdev = "/dev/pwm2";
-    backlight-frequency = <10000>;
+    backlight-frequency = <20000>;
     brightness-levels = <0 1 2 4 6 8 10 12 16 20 25 32 40 50 64 80 100>;
     default-brightness-level = <16>;
     default-off;
@@ -56,7 +56,7 @@ For nonzero brightness:
 2. Call `pinmux_configure(PINPAD_R05, PINMUX_R05_PWM_2)`.
 3. Open `/dev/pwm2` with `O_RDWR`.
 4. Fill `struct pwm_info_s`:
-   - `period_ns = 100000`
+   - `period_ns = 50000`
    - `duty_ns = period_ns * level / 100`
    - `polarity = true`
 5. Call `PWMIOC_SETCHARACTERISTICS`.
@@ -84,7 +84,7 @@ Every brightness write should be cheap and safe to log. A healthy direct PWM
 write looks like:
 
 ```text
-unifrog backlight direct level=10 duty_ns=10000 period_ns=100000 polarity=1 ret_set=0 ret_start=0
+unifrog backlight direct level=10 duty_ns=5000 period_ns=50000 polarity=1 ret_set=0 ret_start=0
 js2300 backlight request=10 ret=0 current=10
 ```
 
@@ -92,7 +92,7 @@ If the panel brightness does not move:
 
 - Confirm the log line says `direct`, not only `/dev/backlight`.
 - Confirm `ret_set=0` and `ret_start=0`.
-- Confirm `duty_ns` matches `level * 1000` for the 10 kHz profile.
+- Confirm `duty_ns` matches `level * 500` for the 20 kHz profile.
 - Confirm no later code switches `PINPAD_R05` back to GPIO for nonzero levels.
 - Confirm the SDK FAT append fix is present; otherwise repeated flushes may
   overwrite the earlier diagnostic lines and make the test look inconsistent.

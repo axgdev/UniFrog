@@ -8,7 +8,7 @@
 	.globl _start
 	.ent _start
 _start:
-	/* Latch R05 high before muxing it to GPIO so the backlight cannot pulse on. */
+	/* Keep fastboot board-neutral: only blank the known backlight gate. */
 	li	$t4, FASTBOOT_GPIOR_OUTPUT_REG
 	lw	$t5, 0($t4)
 	ori	$t5, $t5, FASTBOOT_BACKLIGHT_R05_MASK

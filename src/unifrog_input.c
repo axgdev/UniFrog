@@ -25,11 +25,15 @@
 #define LCD_ID_GB300 0x009306ul
 #define LCD_ID_DY14 0x009307ul
 #define INPUT_LOCAL_ZERO_PROBE_POLLS 128u
+#define INPUT_GB300_FALLBACK_PROBE_DIV 4u
+#define INPUT_GB300_FALLBACK_CONFIRM_POLLS 3u
+#define INPUT_GB300_FALLBACK_MAX_BUTTONS 4u
 #define KEY_SHIFTER_LOAD_US 4u
 #define KEY_SHIFTER_SETTLE_US 4u
 #define KEY_SHIFTER_CLOCK_LOW_US 3u
 #define KEY_SHIFTER_CLOCK_HIGH_US 3u
 #define INPUT_DEBOUNCE_STABLE_POLLS 1
+#define INPUT_VALID_BUTTON_MASK ((1u << UNIFROG_BUTTON_COUNT) - 1u)
 
 static int button_state[UNIFROG_BUTTON_COUNT];
 static int button_prev[UNIFROG_BUTTON_COUNT];
@@ -52,8 +56,13 @@ static unsigned input_source_log_wireless_count;
 static unsigned input_source_log_menu_count;
 static unsigned wireless_poll_phase;
 static unsigned local_menu_guard;
+static uint32_t local_menu_hold_buttons;
 static unsigned local_zero_probe_count;
 static unsigned local_zero_probe_poll_count;
+static unsigned gb300_fallback_probe_phase;
+static uint32_t gb300_fallback_candidate_raw;
+static uint32_t gb300_fallback_candidate_norm;
+static unsigned gb300_fallback_candidate_count;
 static int local_input_profile = -1;
 
 extern unsigned long sf2000_lcd_panel_id(void) __attribute__((weak));
@@ -95,22 +104,39 @@ static uint32_t buttons_from_state(void)
    return mask;
 }
 
-static int detect_local_input_profile(void)
+static const char *local_input_profile_name(int profile)
+{
+   return profile == LOCAL_INPUT_STOCK_BITS ? "stock_bits" : "sf2000";
+}
+
+static int lcd_default_input_profile(void)
 {
    unsigned long lcd_id = sf2000_lcd_panel_id ? sf2000_lcd_panel_id() : 0;
-   int profile = LOCAL_INPUT_SF2000;
 
    if (lcd_id == LCD_ID_GB300 || lcd_id == LCD_ID_DY14)
-      profile = LOCAL_INPUT_STOCK_BITS;
+      return LOCAL_INPUT_STOCK_BITS;
+   return LOCAL_INPUT_SF2000;
+}
+
+static void set_local_input_profile(int profile, const char *reason,
+   uint32_t raw, uint32_t normalized)
+{
+   unsigned long lcd_id = sf2000_lcd_panel_id ? sf2000_lcd_panel_id() : 0;
 
    if (profile != local_input_profile) {
       local_input_profile = profile;
-      unifrog_log("unifrog input local_profile=%s lcd_id=0x%06lx\n",
-         profile == LOCAL_INPUT_STOCK_BITS ? "stock_bits" : "sf2000",
-         lcd_id);
+      unifrog_log("unifrog input local_profile=%s lcd_id=0x%06lx reason=%s raw=0x%08lx norm=0x%08lx\n",
+         local_input_profile_name(profile), lcd_id, reason ? reason : "",
+         (unsigned long)raw, (unsigned long)normalized);
    }
+}
 
-   return profile;
+static int detect_local_input_profile(void)
+{
+   if (local_input_profile < 0)
+      set_local_input_profile(lcd_default_input_profile(), "lcd", 0, 0);
+
+   return local_input_profile;
 }
 
 static uint8_t pinmux_l_byte(pinpad_e pin)
@@ -145,19 +171,19 @@ void unifrog_input_log_local_bus_state(const char *tag)
       gpio_get_input(PINPAD_L27));
 }
 
-static uint32_t normalize_local_raw(uint32_t raw)
+static uint32_t normalize_local_raw_for_profile(uint32_t raw, int profile)
 {
    uint32_t normalized = 0;
 
-   if (detect_local_input_profile() != LOCAL_INPUT_STOCK_BITS)
-      return raw & ((1u << UNIFROG_BUTTON_COUNT) - 1u);
+   if (profile != LOCAL_INPUT_STOCK_BITS)
+      return raw & INPUT_VALID_BUTTON_MASK;
 
    for (unsigned i = 0; i < UNIFROG_BUTTON_COUNT; i++) {
       if (raw & (1u << stock_bit_for_button[i]))
          normalized |= UNIFROG_BUTTON_MASK(i);
    }
 
-   return normalized;
+   return normalized & INPUT_VALID_BUTTON_MASK;
 }
 
 void unifrog_input_restore_local_bus(void)
@@ -221,8 +247,105 @@ static uint32_t scan_gb300_local_raw(void)
    return raw_mask;
 }
 
+static uint32_t scan_sf2000_local_raw(void)
+{
+   uint32_t raw_mask = 0;
+
+   gpio_configure(KEY_SHIFTER_CLK_PIN, GPIO_DIR_OUTPUT);
+   gpio_set_output(KEY_SHIFTER_CLK_PIN, 1);
+   gpio_configure(KEY_SHIFTER_PL1_PIN, GPIO_DIR_OUTPUT);
+   gpio_set_output(KEY_SHIFTER_PL1_PIN, 0);
+   unifrog_perf_delay_us(KEY_SHIFTER_LOAD_US);
+   gpio_configure(KEY_SHIFTER_PL1_PIN, GPIO_DIR_INPUT);
+   unifrog_perf_delay_us(KEY_SHIFTER_SETTLE_US);
+
+   for (unsigned i = 0; i < UNIFROG_BUTTON_COUNT; i++) {
+      int raw = 1 ^ gpio_get_input(KEY_SHIFTER_PL1_PIN);
+
+      if (raw)
+         raw_mask |= 1u << i;
+
+      gpio_set_output(KEY_SHIFTER_CLK_PIN, 0);
+      unifrog_perf_delay_us(KEY_SHIFTER_CLOCK_LOW_US);
+      gpio_set_output(KEY_SHIFTER_CLK_PIN, 1);
+      unifrog_perf_delay_us(KEY_SHIFTER_CLOCK_HIGH_US);
+   }
+
+   return raw_mask;
+}
+
+static unsigned input_popcount(uint32_t mask)
+{
+   unsigned count = 0;
+
+   while (mask) {
+      count += mask & 1u;
+      mask >>= 1;
+   }
+   return count;
+}
+
+static int gb300_input_candidate_valid(uint32_t raw, uint32_t normalized)
+{
+   unsigned pressed;
+
+   normalized &= INPUT_VALID_BUTTON_MASK;
+   if (!normalized || raw == 0xffffu || raw == 0xffffffffu)
+      return 0;
+   if ((raw & INPUT_VALID_BUTTON_MASK) == normalized)
+      return 0;
+   pressed = input_popcount(normalized);
+   if (pressed == 0 || pressed > INPUT_GB300_FALLBACK_MAX_BUTTONS)
+      return 0;
+   return 1;
+}
+
+static int probe_gb300_input_fallback(uint32_t *raw_out,
+   uint32_t *normalized_out)
+{
+   uint32_t raw;
+   uint32_t normalized;
+
+   if (detect_local_input_profile() != LOCAL_INPUT_SF2000)
+      return 0;
+   if ((gb300_fallback_probe_phase++ % INPUT_GB300_FALLBACK_PROBE_DIV) != 0)
+      return 0;
+
+   raw = scan_gb300_local_raw();
+   normalized = normalize_local_raw_for_profile(raw, LOCAL_INPUT_STOCK_BITS);
+   if (gb300_input_candidate_valid(raw, normalized)) {
+      if (raw == gb300_fallback_candidate_raw &&
+          normalized == gb300_fallback_candidate_norm)
+         gb300_fallback_candidate_count++;
+      else {
+         gb300_fallback_candidate_raw = raw;
+         gb300_fallback_candidate_norm = normalized;
+         gb300_fallback_candidate_count = 1;
+      }
+      if (gb300_fallback_candidate_count >=
+          INPUT_GB300_FALLBACK_CONFIRM_POLLS) {
+         set_local_input_profile(LOCAL_INPUT_STOCK_BITS, "gb300_bus", raw,
+            normalized);
+         if (raw_out)
+            *raw_out = raw;
+         if (normalized_out)
+            *normalized_out = normalized;
+         return 1;
+      }
+   } else {
+      gb300_fallback_candidate_raw = 0;
+      gb300_fallback_candidate_norm = 0;
+      gb300_fallback_candidate_count = 0;
+   }
+
+   unifrog_input_restore_local_bus();
+   return 0;
+}
+
 static void update_button_debounce(uint32_t normalized_mask)
 {
+   normalized_mask &= INPUT_VALID_BUTTON_MASK;
+
    for (unsigned i = 0; i < UNIFROG_BUTTON_COUNT; i++) {
       int raw = (normalized_mask & UNIFROG_BUTTON_MASK(i)) != 0;
 
@@ -247,29 +370,22 @@ static uint32_t scan_local_buttons(int update_debounce,
 
    if (detect_local_input_profile() == LOCAL_INPUT_STOCK_BITS) {
       raw_mask = scan_gb300_local_raw();
+      normalized_mask = normalize_local_raw_for_profile(raw_mask,
+         LOCAL_INPUT_STOCK_BITS);
    } else {
-      gpio_configure(KEY_SHIFTER_CLK_PIN, GPIO_DIR_OUTPUT);
-      gpio_set_output(KEY_SHIFTER_CLK_PIN, 1);
-      gpio_configure(KEY_SHIFTER_PL1_PIN, GPIO_DIR_OUTPUT);
-      gpio_set_output(KEY_SHIFTER_PL1_PIN, 0);
-      unifrog_perf_delay_us(KEY_SHIFTER_LOAD_US);
-      gpio_configure(KEY_SHIFTER_PL1_PIN, GPIO_DIR_INPUT);
-      unifrog_perf_delay_us(KEY_SHIFTER_SETTLE_US);
-
-      for (unsigned i = 0; i < UNIFROG_BUTTON_COUNT; i++) {
-         int raw = 1 ^ gpio_get_input(KEY_SHIFTER_PL1_PIN);
-
-         if (raw)
-            raw_mask |= 1u << i;
-
-         gpio_set_output(KEY_SHIFTER_CLK_PIN, 0);
-         unifrog_perf_delay_us(KEY_SHIFTER_CLOCK_LOW_US);
-         gpio_set_output(KEY_SHIFTER_CLK_PIN, 1);
-         unifrog_perf_delay_us(KEY_SHIFTER_CLOCK_HIGH_US);
-      }
+      raw_mask = scan_sf2000_local_raw();
+      normalized_mask = normalize_local_raw_for_profile(raw_mask,
+         LOCAL_INPUT_SF2000);
+      if (raw_mask == INPUT_VALID_BUTTON_MASK)
+         normalized_mask = 0;
+      /*
+       * A GB300 with an SF2000 replacement panel can produce plausible
+       * SF2000-looking button bits. Probe the GB300 stock-bit bus periodically
+       * even when the LCD-selected scanner reports a button.
+       */
+      (void)probe_gb300_input_fallback(&raw_mask, &normalized_mask);
    }
 
-   normalized_mask = normalize_local_raw(raw_mask);
    if (normalized_out)
       *normalized_out = normalized_mask;
 
@@ -309,8 +425,13 @@ void unifrog_input_clear(void)
    input_source_log_menu_count = 0;
    wireless_poll_phase = 0;
    local_menu_guard = 0;
+   local_menu_hold_buttons = 0;
    local_zero_probe_count = 0;
    local_zero_probe_poll_count = 0;
+   gb300_fallback_probe_phase = 0;
+   gb300_fallback_candidate_raw = 0;
+   gb300_fallback_candidate_norm = 0;
+   gb300_fallback_candidate_count = 0;
    unifrog_input_wireless_clear();
    unifrog_input_restore_local_bus();
    (void)detect_local_input_profile();
@@ -379,6 +500,7 @@ void unifrog_input_poll_with_wireless_divisor(unsigned wireless_divisor)
    uint32_t local_norm_before_wireless = 0;
    uint32_t local_norm_after_wireless = 0;
    uint32_t local_norm;
+   uint32_t local_menu_direct;
    uint32_t wireless_buttons = 0;
    int local_changed;
    int wireless_changed;
@@ -409,21 +531,28 @@ void unifrog_input_poll_with_wireless_divisor(unsigned wireless_divisor)
       } else {
          unifrog_input_restore_local_bus();
       }
-      wireless_buttons = unifrog_input_wireless_all_buttons();
+      wireless_buttons = unifrog_input_wireless_all_buttons() &
+         INPUT_VALID_BUTTON_MASK;
    }
 
-   local_norm = local_norm_before_wireless | local_norm_after_wireless;
+   local_norm_before_wireless &= INPUT_VALID_BUTTON_MASK;
+   local_norm_after_wireless &= INPUT_VALID_BUTTON_MASK;
+   local_norm = (local_norm_before_wireless | local_norm_after_wireless) &
+      INPUT_VALID_BUTTON_MASK;
    update_button_debounce(local_norm);
    local_buttons = buttons_from_state();
-   buttons = local_buttons | wireless_buttons;
-   if (local_buttons) {
-      local_menu_guard = 8;
-      menu_buttons = local_buttons;
+   local_menu_direct = local_norm ? local_norm : local_buttons;
+   buttons = (local_buttons | wireless_buttons) & INPUT_VALID_BUTTON_MASK;
+   if (local_menu_direct) {
+      local_menu_guard = 1;
+      local_menu_hold_buttons = local_menu_direct;
+      menu_buttons = local_menu_direct;
       local_zero_probe_poll_count = 0;
    } else if (local_menu_guard) {
       local_menu_guard--;
-      menu_buttons = 0;
+      menu_buttons = local_menu_hold_buttons;
    } else {
+      local_menu_hold_buttons = 0;
       menu_buttons = buttons;
    }
 
@@ -513,6 +642,11 @@ uint32_t unifrog_input_local_buttons(void)
 uint32_t unifrog_input_local_raw(void)
 {
    return local_raw;
+}
+
+int unifrog_input_uses_stock_bits(void)
+{
+   return detect_local_input_profile() == LOCAL_INPUT_STOCK_BITS;
 }
 
 int unifrog_input_down(enum unifrog_button button)

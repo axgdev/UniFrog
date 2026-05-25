@@ -52,7 +52,7 @@ static const char *const frontend_avi_folders[] = {
    "/video/", "/videos/", "/media/",
 };
 
-/* Keep this order in sync with frontend/main.js coreCatalog. */
+/* Keep this order aligned with the native content selection policy. */
 static const struct frontend_catalog_entry frontend_catalog[] = {
    { "Game Boy Advance", "gpsp",
       frontend_gba_suffixes, FRONTEND_ARRAY_SIZE(frontend_gba_suffixes),
@@ -241,9 +241,9 @@ static int frontend_skip_index_dir(const char *name, const char *full)
 {
    if (!name || name[0] == '.')
       return 1;
-   return strcmp(full, "/media/mmcblk0/unifrog") == 0 ||
-      strcmp(full, "/media/mmcblk0/bios") == 0 ||
-      strcmp(full, "/media/mmcblk0/firmware") == 0 ||
+   return strcmp(full, UNIFROG_DIST_ROOT) == 0 ||
+      strcmp(full, UNIFROG_DATA_ROOT) == 0 ||
+      strcmp(full, UNIFROG_BIOS_ROOT) == 0 ||
       strcmp(full, "/media/mmcblk0/System Volume Information") == 0;
 }
 
@@ -414,4 +414,3 @@ int frontend_index_scan_dir(const char *dir, unsigned depth,
       ret = -1;
    return ret;
 }
-

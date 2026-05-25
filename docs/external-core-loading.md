@@ -56,6 +56,8 @@ The module header is the first bytes in the file and contains:
 - magic and header size
 - format version and endian marker
 - required UniFrog ABI semantic version
+- required ABI table size, the ABI version used at build time, and export table
+  size for diagnostics
 - fixed load address, file end, memory end, BSS range, entry address, and
   module `$gp`
 - metadata: core id and supported extensions
@@ -79,7 +81,7 @@ The loader should:
 5. Flush data cache and invalidate instruction cache for the loaded range.
 6. Call the core entry point with `const struct unifrog_abi *`.
 7. Refuse to run if the core requires a newer major ABI, a newer minor ABI, or
-   more memory than the slot provides.
+   a larger ABI table than the runtime provides.
 
 ## `$gp` Boundary
 
@@ -137,18 +139,104 @@ The module wrapper is additive. Core archives stay upstream-shaped; UniFrog
 adds the module header, entry point, SDK glue symbols, cache flush hook, and
 optional `unifrog_core_load_progress()` bridge at packaging time.
 
+## Focused Core Development
+
+Developers working on one libretro core do not need to rebuild every core:
+
+```sh
+make list-cores
+make core CORE=picodrive
+make core-archive CORE=picodrive
+make core-out CORE=picodrive
+make core-package CORE=picodrive
+```
+
+`make core CORE=<id>` builds the frontend package and the selected
+`output/sdcard/unifrog/cores/<id>.bin`. `make core-archive CORE=<id>` stops
+after the upstream static archive under `cores/output/`, which is the fastest
+loop when iterating on core compiler flags or upstream source changes.
+`make core-out CORE=<id>` links the fixed-address ELF module but does not
+`objcopy` it into the SD package.
+
+To add a packaged core, register it once in the top-level `LIBRETRO_MODULES`
+list:
+
+```make
+LIBRETRO_MODULES += \
+	my-core:MY_CORE:my-core:my_core:foo\|bar:my_core:-
+```
+
+The fields are:
+
+- user-facing `CORE=` id
+- make variable prefix
+- module/output basename, using `_` when the ELF object cannot use `-`
+- `cores/Makefile` target and archive stem
+- supported ROM extensions separated with `\|`
+- optional libretro symbol prefix, or `-` if the core exports unprefixed symbols
+- optional support archive dependency, or `-`
+
+If the upstream static archive name does not match
+`cores/output/<archive-stem>_libretro_sf2000.a`, override
+`<PREFIX>_CORE_LIB` after the registration, as `QPSX_CORE_LIB` does. If the
+SD-package filename should differ from the module basename, override
+`<PREFIX>_CORE_BIN`, as `PCE_FAST_CORE_BIN` and `PMP_VIDEO_CORE_BIN` do. The
+core still needs a matching target in `cores/Makefile` and a source pin in
+`cores/manifest.mk`.
+
+## Pixel Formats and GE
+
+The HCRTOS framebuffer driver accepts 16 bpp and 32 bpp RGB layouts, and the
+GE API supports `RGB565`, `RGB24`, `RGB32`, and `ARGB8888` style surfaces.
+UniFrog currently opens `/dev/fb0` as `RGB565` because that is the lowest
+bandwidth native scanout path for the SF2000 panel.
+
+For libretro performance work, the useful distinction is:
+
+- A core producing `RGB565` can be sent to the `RGB565` framebuffer with GE
+  blit/stretch and no color-depth expansion.
+- A core producing `XRGB8888`/`ARGB8888` can already be used as a GE source;
+  GE can blit/stretch and convert it into the current `RGB565` framebuffer.
+- Using a 32 bpp framebuffer for final scanout would double framebuffer
+  bandwidth and memory footprint. It may remove one GE color conversion for
+  32 bpp cores, but it is not a guaranteed zero-cost win on this device.
+
+So the practical answer is: 32-bit sources are supported through GE, but the
+current performant default should remain `RGB565` scanout until device tests
+show that a 32 bpp framebuffer improves a specific core enough to offset the
+extra memory bandwidth.
+
 ## Versioning
 
-UniFrog ABI versions follow semantic versioning:
+UniFrog ABI versions follow semantic versioning, but core modules should stamp
+the oldest ABI they actually require:
 
 - major: breaking ABI change. Old cores need a compatibility layer or rebuild.
-- minor: breaking or additive ABI change while UniFrog remains pre-1.0.
+- minor: additive ABI change for appended callbacks or an intentional
+  compatibility break while UniFrog remains pre-1.0.
 - patch: behavior fixes with the same ABI surface.
 
-The loader should support old cores by either keeping compatible callback
-behavior or by selecting a compatibility table for the old major version. If no
+The stable core floor is `UNIFROG_ABI_CORE_MIN_VERSION`. A normal libretro core
+module uses that floor and `UNIFROG_ABI_CORE_MIN_SIZE`, even when it is built
+with a newer UniFrog tree. That lets one released core run on several UniFrog
+firmware releases.
+
+When adding host services to `struct unifrog_abi`, append them at the end of
+the table and make module-side code treat them as optional with
+`UNIFROG_ABI_HAS_MEMBER()`. Raise `UNIFROG_CORE_MODULE_REQUIRED_ABI_VERSION`
+only for modules that truly require the new callback. Never reorder or remove
+existing fields inside a major ABI.
+
+The loader supports old cores by keeping compatible callback behavior and
+checking both required semantic version and required ABI table size. If no
 compatible table exists, the UI should show a clear unsupported-core message
 instead of attempting to jump into the binary.
+
+The native frontend includes Apps -> Core Manager for device-side inspection of
+installed `unifrog/cores/*.bin` files. It reads each module header directly on
+device and reports the core id, required ABI version, required ABI table size,
+built ABI, memory range, export size, supported extensions, and whether the
+running firmware can load it.
 
 ## Relationship With libretro-common
 

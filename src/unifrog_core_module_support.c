@@ -72,8 +72,7 @@ static const struct unifrog_abi *module_abi(void)
 {
    const struct unifrog_abi *abi = unifrog_core_module_abi;
 
-   if (!abi || abi->magic != UNIFROG_ABI_MAGIC ||
-       abi->size < sizeof(struct unifrog_abi))
+   if (!UNIFROG_ABI_HAS_CORE_BASE(abi))
       return NULL;
    return abi;
 }

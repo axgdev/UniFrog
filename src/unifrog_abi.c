@@ -347,3 +347,26 @@ int unifrog_abi_compatible(uint32_t required_version)
       return 0;
    return 1;
 }
+
+int unifrog_abi_table_compatible(const struct unifrog_abi *abi,
+   uint32_t required_version, size_t required_size)
+{
+   uint32_t runtime_major;
+   uint32_t runtime_minor;
+   uint32_t required_major;
+   uint32_t required_minor;
+
+   if (!abi || abi->magic != UNIFROG_ABI_MAGIC)
+      return 0;
+   if (abi->size < required_size)
+      return 0;
+   runtime_major = UNIFROG_ABI_VERSION_GET_MAJOR(abi->version);
+   runtime_minor = UNIFROG_ABI_VERSION_GET_MINOR(abi->version);
+   required_major = UNIFROG_ABI_VERSION_GET_MAJOR(required_version);
+   required_minor = UNIFROG_ABI_VERSION_GET_MINOR(required_version);
+   if (runtime_major != required_major)
+      return 0;
+   if (runtime_minor < required_minor)
+      return 0;
+   return 1;
+}

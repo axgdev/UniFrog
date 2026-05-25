@@ -296,7 +296,7 @@ CORE_TARGETS := gambatte gpsp gpsp_multicore picodrive snes9x2005 snes9x2002 \
 	quicknes fceumm gearboy pce-fast qpsx pmp-video
 SUPPORT_TARGETS := libretro-common chd-support
 SMOKE_TARGETS := libretro-common quicknes
-MAINTAIN_TARGETS := support-init init doctor core-status pin-status \
+MAINTAIN_TARGETS := support-init core-init init smoke-init doctor smoke-doctor core-status pin-status \
 	upgrade-pins diff-core log-core update-core smoke-check check clean \
 	status help print-config
 
@@ -307,6 +307,7 @@ all: $(SUPPORT_TARGETS) $(CORE_TARGETS)
 help:
 	@echo "UniFrog core build:"
 	@echo "  make -C cores init                  Fetch pinned sources and apply patches"
+	@echo "  make -C cores core-init             Fetch only core sources and patches"
 	@echo "  make -C cores                       Build all core archives"
 	@echo "  make -C cores smoke-check           Build libretro-common and QuickNES"
 	@echo "  make -C cores check                 Verify clean patched checkouts"
@@ -340,112 +341,157 @@ print-config:
 support-init:
 	@set -e; \
 	mkdir -p "$(CORE_SUPPORT_ROOT)"; \
+	status=0; \
+	pids=""; \
 	for spec in $(SUPPORT_SPECS); do \
-		name=$${spec%%|*}; rest=$${spec#*|}; \
-		dir=$${rest%%|*}; rest=$${rest#*|}; \
-		url=$${rest%%|*}; rest=$${rest#*|}; \
-		policy=$${rest%%|*}; rest=$${rest#*|}; \
-		commit=$${rest%%|*}; rest=$${rest#*|}; \
-		sparse=$$rest; \
-		if test -d "$$dir/.git"; then \
-			git -C "$$dir" remote set-url origin "$$url"; \
-			if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
-				echo "  REUSE   support/$$name $$commit"; \
+		( \
+			set -e; \
+			name=$${spec%%|*}; rest=$${spec#*|}; \
+			dir=$${rest%%|*}; rest=$${rest#*|}; \
+			url=$${rest%%|*}; rest=$${rest#*|}; \
+			policy=$${rest%%|*}; rest=$${rest#*|}; \
+			commit=$${rest%%|*}; rest=$${rest#*|}; \
+			sparse=$$rest; \
+			fresh=0; \
+			if test -d "$$dir/.git"; then \
+				git -C "$$dir" remote set-url origin "$$url"; \
+				if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
+					echo "  REUSE   support/$$name $$commit"; \
+				else \
+					echo "  FETCH   support/$$name $$commit"; \
+					git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
+				fi; \
 			else \
 				echo "  FETCH   support/$$name $$commit"; \
+				rm -rf "$$dir"; \
+				git init -q "$$dir"; \
+				git -C "$$dir" remote add origin "$$url"; \
 				git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
+				fresh=1; \
 			fi; \
-		else \
-			echo "  FETCH   support/$$name $$commit"; \
-			rm -rf "$$dir"; \
-			git init -q "$$dir"; \
-			git -C "$$dir" remote add origin "$$url"; \
-			git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
-		fi; \
-		if test "$${sparse#":files "}" != "$$sparse"; then \
-			git -C "$$dir" sparse-checkout set --no-cone $${sparse#":files "}; \
-		elif test "$$sparse" = ":root-files"; then \
-			git -C "$$dir" sparse-checkout init --no-cone; \
-			printf '/*\n!/*/\n' >"$$dir/.git/info/sparse-checkout"; \
-		elif test "$$sparse" != "."; then \
-			git -C "$$dir" sparse-checkout init --cone; \
-			git -C "$$dir" sparse-checkout set --skip-checks $$sparse; \
-		fi; \
-		git -C "$$dir" checkout -q "$$commit"; \
-		git -C "$$dir" reset --hard -q "$$commit"; \
-		git -C "$$dir" clean -fdx -q; \
-	done
+			case "$$sparse" in \
+			:files\ *) \
+				git -C "$$dir" sparse-checkout set --no-cone $${sparse#*:files }; \
+				;; \
+			:root-files) \
+				git -C "$$dir" sparse-checkout init --no-cone; \
+				printf '/*\n!/*/\n' >"$$dir/.git/info/sparse-checkout"; \
+				;; \
+			.) \
+				;; \
+			*) \
+				git -C "$$dir" sparse-checkout init --cone; \
+				git -C "$$dir" sparse-checkout set --skip-checks $$sparse; \
+				;; \
+			esac; \
+			git -C "$$dir" checkout -q "$$commit"; \
+			git -C "$$dir" reset --hard -q "$$commit"; \
+			if test "$$fresh" -eq 0; then \
+				git -C "$$dir" clean -fdx -q; \
+			fi; \
+		) & \
+		pids="$$pids $$!"; \
+	done; \
+	for pid in $$pids; do \
+		wait $$pid || status=$$?; \
+	done; \
+	exit $$status
 
-init: support-init
+init: support-init core-init
+
+smoke-init:
+	$(Q)$(MAKE) --no-print-directory support-init SUPPORT_SPECS="$(SMOKE_SUPPORT_SPECS)"
+	$(Q)$(MAKE) --no-print-directory core-init CORE_SPECS="$(SMOKE_CORE_SPECS)"
+
+core-init:
 	@set -e; \
 	mkdir -p "$(CORE_SOURCE_ROOT)"; \
+	status=0; \
+	pids=""; \
 	for spec in $(CORE_SPECS); do \
-		name=$${spec%%|*}; rest=$${spec#*|}; \
-		dir=$${rest%%|*}; rest=$${rest#*|}; \
-		url=$${rest%%|*}; rest=$${rest#*|}; \
-		policy=$${rest%%|*}; rest=$${rest#*|}; \
-		commit=$${rest%%|*}; rest=$${rest#*|}; \
-		sparse=$$rest; \
-		if test -d "$$dir/.git"; then \
-			git -C "$$dir" remote set-url origin "$$url"; \
-			if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
-				echo "  REUSE   $$name $$commit"; \
+		( \
+			set -e; \
+			name=$${spec%%|*}; rest=$${spec#*|}; \
+			dir=$${rest%%|*}; rest=$${rest#*|}; \
+			url=$${rest%%|*}; rest=$${rest#*|}; \
+			policy=$${rest%%|*}; rest=$${rest#*|}; \
+			commit=$${rest%%|*}; rest=$${rest#*|}; \
+			sparse=$$rest; \
+			fresh=0; \
+			if test -d "$$dir/.git"; then \
+				git -C "$$dir" remote set-url origin "$$url"; \
+				if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
+					echo "  REUSE   $$name $$commit"; \
+				else \
+					echo "  FETCH   $$name $$commit"; \
+					git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
+				fi; \
 			else \
 				echo "  FETCH   $$name $$commit"; \
+				rm -rf "$$dir"; \
+				git init -q "$$dir"; \
+				git -C "$$dir" remote add origin "$$url"; \
 				git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
+				fresh=1; \
 			fi; \
-		else \
-			echo "  FETCH   $$name $$commit"; \
-			rm -rf "$$dir"; \
-			git init -q "$$dir"; \
-			git -C "$$dir" remote add origin "$$url"; \
-			git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
-		fi; \
-		if test "$${sparse#":files "}" != "$$sparse"; then \
-			git -C "$$dir" sparse-checkout set --no-cone $${sparse#":files "}; \
-		elif test "$$sparse" != "."; then \
-			git -C "$$dir" sparse-checkout init --cone; \
-			git -C "$$dir" sparse-checkout set --skip-checks $$sparse; \
-		fi; \
-		git -C "$$dir" checkout -q "$$commit"; \
-		git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
-		git -C "$$dir" reset --hard -q "$$commit"; \
-		git -C "$$dir" clean -fdx -q; \
-		git -C "$$dir" config user.name "UniFrog CI"; \
-		git -C "$$dir" config user.email "ci@unifrog.local"; \
-		if ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
-			am_err="$$dir/.git/unifrog-am.err"; \
-			if ! git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch 2>"$$am_err"; then \
-				cat "$$am_err" >&2; \
-				exit 1; \
+			case "$$sparse" in \
+			:files\ *) \
+				git -C "$$dir" sparse-checkout set --no-cone $${sparse#*:files }; \
+				;; \
+			.) \
+				;; \
+			*) \
+				git -C "$$dir" sparse-checkout init --cone; \
+				git -C "$$dir" sparse-checkout set --skip-checks $$sparse; \
+				;; \
+			esac; \
+			git -C "$$dir" checkout -q "$$commit"; \
+			git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
+			git -C "$$dir" reset --hard -q "$$commit"; \
+			if test "$$fresh" -eq 0; then \
+				git -C "$$dir" clean -fdx -q; \
 			fi; \
-			grep -v '^warning: quoted CRLF detected$$' "$$am_err" >&2 || true; \
-			rm -f "$$am_err"; \
-		fi; \
-		if test "$$name" = picodrive; then \
-			git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" -- cpu/cyclone pico/sound/emu2413 platform/libpicofe; \
-			dr_dir="$$dir/platform/common/dr_libs"; \
-			dr_url=$$(git -C "$$dir" config -f .gitmodules submodule.platform/common/dr_libs.url); \
-			dr_commit=$$(git -C "$$dir" rev-parse HEAD:platform/common/dr_libs); \
-			if test -d "$$dr_dir/.git"; then \
-				git -C "$$dr_dir" remote set-url origin "$$dr_url"; \
+			git -C "$$dir" config user.name "UniFrog CI"; \
+			git -C "$$dir" config user.email "ci@unifrog.local"; \
+			if ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
+				am_err="$$dir/.git/unifrog-am.err"; \
+				if ! git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch 2>"$$am_err"; then \
+					cat "$$am_err" >&2; \
+					exit 1; \
+				fi; \
+				grep -v '^warning: quoted CRLF detected$$' "$$am_err" >&2 || true; \
+				rm -f "$$am_err"; \
+			fi; \
+			if test "$$name" = picodrive; then \
+				git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" -- cpu/cyclone pico/sound/emu2413 platform/libpicofe; \
+				dr_dir="$$dir/platform/common/dr_libs"; \
+				dr_url=$$(git -C "$$dir" config -f .gitmodules submodule.platform/common/dr_libs.url); \
+				dr_commit=$$(git -C "$$dir" rev-parse HEAD:platform/common/dr_libs); \
+				if test -d "$$dr_dir/.git"; then \
+					git -C "$$dr_dir" remote set-url origin "$$dr_url"; \
+				else \
+					rm -rf "$$dr_dir"; \
+					git init -q "$$dr_dir"; \
+					git -C "$$dr_dir" remote add origin "$$dr_url"; \
+				fi; \
+				if ! git -C "$$dr_dir" cat-file -e "$$dr_commit^{commit}" 2>/dev/null; then \
+					git -C "$$dr_dir" fetch --depth 1 --filter=blob:none origin "$$dr_commit"; \
+				fi; \
+				git -C "$$dr_dir" sparse-checkout init --no-cone; \
+				printf '/dr_mp3.h\n/LICENSE\n' >"$$dr_dir/.git/info/sparse-checkout"; \
+				git -C "$$dr_dir" checkout -q "$$dr_commit"; \
+				git -C "$$dr_dir" reset --hard -q "$$dr_commit"; \
+				git -C "$$dr_dir" clean -fdx -q; \
 			else \
-				rm -rf "$$dr_dir"; \
-				git init -q "$$dr_dir"; \
-				git -C "$$dr_dir" remote add origin "$$dr_url"; \
+				git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)"; \
 			fi; \
-			if ! git -C "$$dr_dir" cat-file -e "$$dr_commit^{commit}" 2>/dev/null; then \
-				git -C "$$dr_dir" fetch --depth 1 --filter=blob:none origin "$$dr_commit"; \
-			fi; \
-			git -C "$$dr_dir" sparse-checkout init --no-cone; \
-			printf '/dr_mp3.h\n/LICENSE\n' >"$$dr_dir/.git/info/sparse-checkout"; \
-			git -C "$$dr_dir" checkout -q "$$dr_commit"; \
-			git -C "$$dr_dir" reset --hard -q "$$dr_commit"; \
-			git -C "$$dr_dir" clean -fdx -q; \
-		else \
-			git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)"; \
-		fi; \
-	done
+		) & \
+		pids="$$pids $$!"; \
+	done; \
+	for pid in $$pids; do \
+		wait $$pid || status=$$?; \
+	done; \
+	exit $$status
 
 doctor:
 	@command -v $(CROSS_COMPILE)gcc >/dev/null || { echo "missing: $(CROSS_COMPILE)gcc"; exit 1; }
@@ -469,6 +515,15 @@ doctor:
 	@test -f $(LIBCHDR_DIR)/src/libchdr_chd.c || { echo "missing support checkout: $(LIBCHDR_DIR); run: make init"; exit 1; }
 	@test -f $(ZSTD_DIR)/decompress/zstd_decompress.c || { echo "missing support checkout: $(ZSTD_DIR); run: make init"; exit 1; }
 	@test -f $(ZLIB_DIR)/inflate.c || { echo "missing support checkout: $(ZLIB_DIR); run: make init"; exit 1; }
+	@echo "OK"
+
+smoke-doctor:
+	@command -v $(CROSS_COMPILE)gcc >/dev/null || { echo "missing: $(CROSS_COMPILE)gcc"; exit 1; }
+	@command -v $(CROSS_COMPILE)g++ >/dev/null || { echo "missing: $(CROSS_COMPILE)g++"; exit 1; }
+	@command -v $(CROSS_COMPILE)ar >/dev/null || { echo "missing: $(CROSS_COMPILE)ar"; exit 1; }
+	@test -d "$(SDK)/include" || { echo "missing SDK include: $(SDK)/include"; exit 1; }
+	@test -e $(LIBRETRO_COMMON_DIR)/.git || { echo "missing core checkout: $(LIBRETRO_COMMON_DIR); run: make smoke-init"; exit 1; }
+	@test -e $(QUICKNES_DIR)/.git || { echo "missing core checkout: $(QUICKNES_DIR); run: make smoke-init"; exit 1; }
 	@echo "OK"
 
 core-status:
@@ -658,7 +713,7 @@ $(BUILD)/libretro-common/%.o: $(LIBRETRO_COMMON_DIR)/%.c | $(BUILD)
 	@mkdir -p $(dir $@)
 	$(CC) $(COMMON_CFLAGS) -MD -MP -c $< -o $@
 
-$(LIBRETRO_COMMON): $(LIBRETRO_COMMON_OBJECTS) | $(OUT) doctor
+$(LIBRETRO_COMMON): $(LIBRETRO_COMMON_OBJECTS) | $(OUT) smoke-doctor
 	@echo "  AR      $@"
 	$(AR) rcs $@ $(LIBRETRO_COMMON_OBJECTS)
 
@@ -746,7 +801,7 @@ snes9x2002: doctor | $(OUT)
 		fpic= TARGET=snes9x2002_libretro_sf2000.a
 	$(call copy_core_lib,$(SNES9X2002_LIB))
 
-quicknes: doctor | $(OUT)
+quicknes: smoke-doctor | $(OUT)
 	CFLAGS="$(QUICKNES_CFLAGS)" CXXFLAGS="$(QUICKNES_CFLAGS)" \
 	$(MAKE) -C $(QUICKNES_DIR) -f Makefile platform=unix \
 		CC="$(CC)" CXX="$(CXX)" AR=$(AR) STATIC_LINKING=1 \

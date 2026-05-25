@@ -84,6 +84,11 @@ void unifrog_audio_set_system_output_enabled(int enabled)
       abi->audio_set_system_output_enabled(enabled);
 }
 
+void unifrog_audio_set_output_gate_enabled(int enabled)
+{
+   (void)enabled;
+}
+
 void unifrog_audio_debug_dump(struct unifrog_audio *audio, const char *tag)
 {
    const struct unifrog_abi *abi = module_abi();

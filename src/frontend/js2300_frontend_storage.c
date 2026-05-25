@@ -1,5 +1,8 @@
 #include "js2300_frontend_internal.h"
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 struct storage_test_case {
    const char *label;
    const char *path;
@@ -227,8 +230,181 @@ static int storage_test_read_file(const struct storage_test_case *test,
 #define STORAGE_TEST_SWEEP_INDEX_BYTES (512u * 1024u)
 #define STORAGE_TEST_FULL_INDEX_BYTES (16u * 1024u * 1024u)
 #define STORAGE_TEST_FULL_INDEX_LARGE_BYTES (32u * 1024u * 1024u)
+#define STORAGE_STRESS_CHUNK_BYTES (32u * 1024u)
+#define STORAGE_STRESS_DURATION_MS 60000u
+#define STORAGE_STRESS_WRITE_WINDOW_BYTES (8u * 1024u * 1024u)
 
 static const char *storage_test_active_title = "Storage test";
+
+struct storage_stress_context {
+   volatile int start;
+   volatile int stop;
+   volatile int reader_done;
+   volatile int writer_done;
+   const char *read_path;
+   char write_path[JS2300_FRONTEND_MAX_PATH];
+   uint32_t duration_ms;
+   volatile unsigned long read_bytes;
+   volatile unsigned long read_ops;
+   volatile unsigned long write_bytes;
+   volatile unsigned long write_ops;
+   volatile unsigned read_errors;
+   volatile unsigned write_errors;
+   volatile int read_errno;
+   volatile int write_errno;
+   volatile int read_debug_dumped;
+   volatile int write_debug_dumped;
+   volatile uint32_t read_checksum;
+   volatile uint32_t write_checksum;
+};
+
+static void storage_stress_reader_task(void *arg)
+{
+   struct storage_stress_context *ctx = arg;
+   unsigned char *buffer;
+   int fd = -1;
+   uint32_t checksum = 2166136261u;
+
+   buffer = malloc(STORAGE_STRESS_CHUNK_BYTES);
+   if (!buffer) {
+      ctx->read_errors++;
+      ctx->read_errno = ENOMEM;
+      ctx->reader_done = 1;
+      vTaskDelete(NULL);
+      return;
+   }
+   while (!ctx->start && !ctx->stop)
+      vTaskDelay(pdMS_TO_TICKS(10));
+   fd = open(ctx->read_path, O_RDONLY);
+   if (fd < 0) {
+      ctx->read_errors++;
+      ctx->read_errno = errno;
+      free(buffer);
+      ctx->reader_done = 1;
+      vTaskDelete(NULL);
+      return;
+   }
+   while (!ctx->stop) {
+      ssize_t got = read(fd, buffer, STORAGE_STRESS_CHUNK_BYTES);
+
+      if (got < 0) {
+         ctx->read_errors++;
+         ctx->read_errno = errno;
+         if (!ctx->read_debug_dumped) {
+            ctx->read_debug_dumped = 1;
+            printf("unifrog storage_stress read_error path=%s errno=%d bytes=%lu ops=%lu active=%s\n",
+               ctx->read_path, ctx->read_errno, ctx->read_bytes,
+               ctx->read_ops, unifrog_platform_sd_active_profile());
+            unifrog_platform_sd_debug_dump("storage_stress_read_error");
+         }
+         break;
+      }
+      if (got == 0) {
+         if (lseek(fd, 0, SEEK_SET) < 0) {
+            ctx->read_errors++;
+            ctx->read_errno = errno;
+            if (!ctx->read_debug_dumped) {
+               ctx->read_debug_dumped = 1;
+               printf("unifrog storage_stress read_seek_error path=%s errno=%d bytes=%lu ops=%lu active=%s\n",
+                  ctx->read_path, ctx->read_errno, ctx->read_bytes,
+                  ctx->read_ops, unifrog_platform_sd_active_profile());
+               unifrog_platform_sd_debug_dump("storage_stress_read_seek_error");
+            }
+            break;
+         }
+         continue;
+      }
+      for (ssize_t i = 0; i < got; i++) {
+         checksum ^= buffer[i];
+         checksum *= 16777619u;
+      }
+      ctx->read_bytes += (unsigned long)got;
+      ctx->read_ops++;
+      ctx->read_checksum = checksum;
+   }
+   if (fd >= 0)
+      close(fd);
+   free(buffer);
+   ctx->reader_done = 1;
+   vTaskDelete(NULL);
+}
+
+static void storage_stress_writer_task(void *arg)
+{
+   struct storage_stress_context *ctx = arg;
+   unsigned char *buffer;
+   uint32_t checksum = 2166136261u;
+   unsigned sequence = 0;
+
+   buffer = malloc(STORAGE_STRESS_CHUNK_BYTES);
+   if (!buffer) {
+      ctx->write_errors++;
+      ctx->write_errno = ENOMEM;
+      ctx->writer_done = 1;
+      vTaskDelete(NULL);
+      return;
+   }
+   while (!ctx->start && !ctx->stop)
+      vTaskDelay(pdMS_TO_TICKS(10));
+   while (!ctx->stop) {
+      int fd = open(ctx->write_path, O_CREAT | O_TRUNC | O_WRONLY, 0666);
+      unsigned long window = 0;
+
+      if (fd < 0) {
+         ctx->write_errors++;
+         ctx->write_errno = errno;
+         if (!ctx->write_debug_dumped) {
+            ctx->write_debug_dumped = 1;
+            printf("unifrog storage_stress write_open_error path=%s errno=%d bytes=%lu ops=%lu active=%s\n",
+               ctx->write_path, ctx->write_errno, ctx->write_bytes,
+               ctx->write_ops, unifrog_platform_sd_active_profile());
+            unifrog_platform_sd_debug_dump("storage_stress_write_open_error");
+         }
+         break;
+      }
+      while (!ctx->stop && window < STORAGE_STRESS_WRITE_WINDOW_BYTES) {
+         for (unsigned i = 0; i < STORAGE_STRESS_CHUNK_BYTES; i++) {
+            buffer[i] = (unsigned char)(sequence + i + (i >> 8));
+            checksum ^= buffer[i];
+            checksum *= 16777619u;
+         }
+         if (write(fd, buffer, STORAGE_STRESS_CHUNK_BYTES) !=
+             STORAGE_STRESS_CHUNK_BYTES) {
+            ctx->write_errors++;
+            ctx->write_errno = errno;
+            if (!ctx->write_debug_dumped) {
+               ctx->write_debug_dumped = 1;
+               printf("unifrog storage_stress write_error path=%s errno=%d bytes=%lu ops=%lu active=%s\n",
+                  ctx->write_path, ctx->write_errno, ctx->write_bytes,
+                  ctx->write_ops, unifrog_platform_sd_active_profile());
+               unifrog_platform_sd_debug_dump("storage_stress_write_error");
+            }
+            break;
+         }
+         sequence++;
+         window += STORAGE_STRESS_CHUNK_BYTES;
+         ctx->write_bytes += STORAGE_STRESS_CHUNK_BYTES;
+         ctx->write_ops++;
+         ctx->write_checksum = checksum;
+      }
+      if (close(fd) != 0 && ctx->write_errors == 0) {
+         ctx->write_errors++;
+         ctx->write_errno = errno;
+         if (!ctx->write_debug_dumped) {
+            ctx->write_debug_dumped = 1;
+            printf("unifrog storage_stress write_close_error path=%s errno=%d bytes=%lu ops=%lu active=%s\n",
+               ctx->write_path, ctx->write_errno, ctx->write_bytes,
+               ctx->write_ops, unifrog_platform_sd_active_profile());
+            unifrog_platform_sd_debug_dump("storage_stress_write_close_error");
+         }
+      }
+      if (ctx->write_errors)
+         break;
+   }
+   free(buffer);
+   ctx->writer_done = 1;
+   vTaskDelete(NULL);
+}
 
 static void storage_test_progress(struct js2300_frontend *frontend,
    const char *title, const char *line1, const char *line2)
@@ -413,6 +589,20 @@ static int storage_test_profile_is_allowed(const char *profile)
 {
    static const char *profiles[] = {
       "safe",
+      "wide1",
+      "wide2",
+      "wide4",
+      "wide8",
+      "wide10",
+      "wide12",
+      "wide14",
+      "wide16",
+      "wide18",
+      "wide20",
+      "wide22",
+      "wide24",
+      "wide25",
+      "wide37",
       "hs1",
       "uhs12",
       "uhs25",
@@ -483,6 +673,225 @@ static void storage_test_checkpoint_report(const char *report_path,
          report, report_used);
    (void)unifrog_log_flush_force();
    unifrog_platform_set_storage_log_suspended(1);
+}
+
+static unsigned long storage_test_kib_s(unsigned long bytes, uint32_t ms)
+{
+   if (!ms)
+      return 0;
+   return ((bytes / 1024ul) * 1000ul) / (unsigned long)ms;
+}
+
+static int storage_quick_write_file(const char *path, unsigned long bytes,
+   unsigned long *written, uint32_t *write_ms, uint32_t *fsync_ms,
+   uint32_t *total_ms, uint32_t *checksum_out)
+{
+   unsigned char *buffer;
+   uint32_t start_ms;
+   uint32_t before_fsync_ms;
+   uint32_t checksum = 2166136261u;
+   unsigned long done = 0;
+   unsigned sequence = 0;
+   int fd;
+   int ret = 0;
+
+   *written = 0;
+   *write_ms = 0;
+   *fsync_ms = 0;
+   *total_ms = 0;
+   *checksum_out = checksum;
+   buffer = malloc(65536u);
+   if (!buffer)
+      return -ENOMEM;
+
+   start_ms = unifrog_perf_time_ms();
+   fd = open(path, O_CREAT | O_TRUNC | O_WRONLY, 0666);
+   if (fd < 0) {
+      ret = -errno;
+      free(buffer);
+      return ret;
+   }
+
+   while (done < bytes) {
+      size_t want = 65536u;
+
+      if ((unsigned long)want > bytes - done)
+         want = (size_t)(bytes - done);
+      for (size_t i = 0; i < want; i++) {
+         buffer[i] = (unsigned char)(sequence + i + (i >> 8));
+         checksum ^= buffer[i];
+         checksum *= 16777619u;
+      }
+      if (write(fd, buffer, want) != (ssize_t)want) {
+         ret = -errno;
+         break;
+      }
+      sequence++;
+      done += (unsigned long)want;
+   }
+
+   before_fsync_ms = unifrog_perf_time_ms();
+   *write_ms = before_fsync_ms - start_ms;
+   if (ret == 0 && fsync(fd) != 0)
+      ret = -errno;
+   *fsync_ms = unifrog_perf_time_ms() - before_fsync_ms;
+   if (close(fd) != 0 && ret == 0)
+      ret = -errno;
+   *total_ms = unifrog_perf_time_ms() - start_ms;
+   *written = done;
+   *checksum_out = checksum;
+   free(buffer);
+   return ret;
+}
+
+int run_storage_quick_benchmark(struct js2300_frontend *frontend)
+{
+   struct storage_test_case tests[STORAGE_TEST_MAX_CASES];
+   struct storage_test_case read_case;
+   struct storage_test_result read_result;
+   struct storage_test_result reread_result;
+   char unique_paths[4][JS2300_FRONTEND_MAX_PATH];
+   char indexed_path[JS2300_FRONTEND_MAX_PATH];
+   char state_before[384];
+   char state_after[384];
+   char temp_path[JS2300_FRONTEND_MAX_PATH];
+   char report[4096];
+   size_t used = 0;
+   unsigned known_count = 0;
+   unsigned test_count;
+   unsigned long indexed_size = 0;
+   unsigned long written = 0;
+   uint32_t write_ms = 0;
+   uint32_t fsync_ms = 0;
+   uint32_t total_ms = 0;
+   uint32_t write_checksum = 0;
+   int write_ret;
+
+   memset(unique_paths, 0, sizeof(unique_paths));
+   test_count = storage_test_build_cases(tests, STORAGE_TEST_MAX_CASES,
+      unique_paths, &known_count, indexed_path, sizeof(indexed_path),
+      &indexed_size, 0);
+   (void)unifrog_platform_sd_describe(state_before, sizeof(state_before));
+   unifrog_platform_sd_debug_dump("storage_quick_before");
+   storage_test_progress(frontend, "Storage quick bench", "Measuring read",
+      test_count ? tests[0].path : "no source");
+
+   storage_test_append(report, sizeof(report), &used,
+      "show=1\n"
+      "title=STORAGE QUICK BENCH\n"
+      "detail=Short synced benchmark with actual SD host parameters\n"
+      "item|OK|State before|%s|runtime_supported=%d\n",
+      state_before, unifrog_platform_sd_runtime_supported());
+
+   if (test_count == 0) {
+      storage_test_append(report, sizeof(report), &used,
+         "item|FAIL|Read source|No package or ROM source found|known=%u indexed=%s\n",
+         known_count, indexed_path);
+      storage_test_write_file(JS2300_FRONTEND_STORAGE_QUICK_BENCH_REPORT,
+         report, used);
+      storage_test_write_file(JS2300_FRONTEND_SYSTEM_CHECK_REPORT,
+         report, used);
+      return 0;
+   }
+
+   read_case = tests[0];
+   read_case.chunk_size = 65536u;
+   read_case.byte_limit = 4u * 1024u * 1024u;
+   read_case.pause_ms = 0;
+   if (storage_test_read_file(&read_case, &read_result) != 0)
+      unifrog_platform_sd_debug_dump("storage_quick_read_error");
+   storage_test_append(report, sizeof(report), &used,
+      "item|%s|Source read|%lu KiB/s|bytes=%lu ms=%lu chunk=%lu ret=%d errno=%d crc=%08lx path=%s\n",
+      read_result.ret == 0 ? "OK" : "FAIL",
+      storage_test_kib_s(read_result.bytes, read_result.ms),
+      read_result.bytes, (unsigned long)read_result.ms,
+      (unsigned long)read_result.chunk_size, read_result.ret,
+      read_result.err, (unsigned long)read_result.checksum,
+      read_result.path);
+
+   snprintf(temp_path, sizeof(temp_path),
+      UNIFROG_DATA_ROOT "/storage-quick-benchmark.bin");
+   storage_test_progress(frontend, "Storage quick bench", "Measuring write",
+      temp_path);
+   write_ret = storage_quick_write_file(temp_path, 4u * 1024u * 1024u,
+      &written, &write_ms, &fsync_ms, &total_ms, &write_checksum);
+   if (write_ret != 0)
+      unifrog_platform_sd_debug_dump("storage_quick_write_error");
+   storage_test_append(report, sizeof(report), &used,
+      "item|%s|Synced temp write|%lu KiB/s total  %lu KiB/s loop|bytes=%lu write_ms=%lu fsync_ms=%lu total_ms=%lu ret=%d crc=%08lx path=%s\n",
+      write_ret == 0 ? "OK" : "FAIL",
+      storage_test_kib_s(written, total_ms),
+      storage_test_kib_s(written, write_ms),
+      written, (unsigned long)write_ms, (unsigned long)fsync_ms,
+      (unsigned long)total_ms, write_ret, (unsigned long)write_checksum,
+      temp_path);
+
+   storage_test_progress(frontend, "Storage quick bench", "Measuring readback",
+      temp_path);
+   memset(&read_case, 0, sizeof(read_case));
+   read_case.label = "readback";
+   read_case.path = temp_path;
+   read_case.chunk_size = 65536u;
+   read_case.byte_limit = 4u * 1024u * 1024u;
+   if (storage_test_read_file(&read_case, &reread_result) != 0)
+      unifrog_platform_sd_debug_dump("storage_quick_readback_error");
+   storage_test_append(report, sizeof(report), &used,
+      "item|%s|Temp readback|%lu KiB/s|bytes=%lu ms=%lu chunk=%lu ret=%d errno=%d crc=%08lx path=%s\n",
+      reread_result.ret == 0 ? "OK" : "FAIL",
+      storage_test_kib_s(reread_result.bytes, reread_result.ms),
+      reread_result.bytes, (unsigned long)reread_result.ms,
+      (unsigned long)reread_result.chunk_size, reread_result.ret,
+      reread_result.err, (unsigned long)reread_result.checksum,
+      reread_result.path);
+   (void)unlink(temp_path);
+
+   {
+      unsigned long source_kib_s =
+         storage_test_kib_s(read_result.bytes, read_result.ms);
+      unsigned long reread_kib_s =
+         storage_test_kib_s(reread_result.bytes, reread_result.ms);
+      unsigned long sustained_kib_s = source_kib_s;
+      unsigned long window = 524288ul;
+      unsigned slots = 16u;
+      unsigned long prefill = 2097152ul;
+      unsigned long preload = 0ul;
+
+      if (reread_kib_s != 0 &&
+          (sustained_kib_s == 0 || reread_kib_s < sustained_kib_s))
+         sustained_kib_s = reread_kib_s;
+      if (sustained_kib_s < 512ul) {
+         window = 262144ul;
+         prefill = 1048576ul;
+      } else if (sustained_kib_s >= 4096ul) {
+         window = 1048576ul;
+         prefill = 4194304ul;
+         preload = 33554432ul;
+      } else if (sustained_kib_s >= 1536ul) {
+         prefill = 4194304ul;
+         preload = 16777216ul;
+      }
+      storage_test_append(report, sizeof(report), &used,
+         "item|OK|Media buffer suggestion|%lu KiB/s sustained|MEDIA_VIDEO_READAHEAD_SIZE=%lu MEDIA_VIDEO_READAHEAD_SLOTS=%u MEDIA_VIDEO_PREFILL_MAX_BYTES=%lu MEDIA_VIDEO_PRELOAD_MAX_BYTES=%lu\n",
+         sustained_kib_s, window, slots, prefill, preload);
+   }
+
+   (void)unifrog_platform_sd_describe(state_after, sizeof(state_after));
+   unifrog_platform_sd_debug_dump("storage_quick_after");
+   storage_test_append(report, sizeof(report), &used,
+      "item|OK|State after|%s|active=%s\n"
+      "detail=read=%lu KiB/s write_synced=%lu KiB/s readback=%lu KiB/s actual_state=%s\n",
+      state_after, unifrog_platform_sd_active_profile(),
+      storage_test_kib_s(read_result.bytes, read_result.ms),
+      storage_test_kib_s(written, total_ms),
+      storage_test_kib_s(reread_result.bytes, reread_result.ms),
+      state_after);
+
+   storage_test_write_file(JS2300_FRONTEND_STORAGE_QUICK_BENCH_REPORT,
+      report, used);
+   storage_test_write_file(JS2300_FRONTEND_SYSTEM_CHECK_REPORT,
+      report, used);
+   (void)unifrog_log_flush();
+   return 0;
 }
 
 static int storage_test_restore_safe(struct js2300_frontend *frontend,
@@ -583,6 +992,19 @@ static void storage_test_run_profile(struct js2300_frontend *frontend,
 int run_storage_test(struct js2300_frontend *frontend)
 {
    static const char *runtime_profiles[] = {
+      "wide1",
+      "wide2",
+      "wide4",
+      "wide8",
+      "wide10",
+      "wide12",
+      "wide14",
+      "wide16",
+      "wide18",
+      "wide20",
+      "wide22",
+      "wide24",
+      "wide25",
       "hs1",
       "wide50",
       "uhs12",
@@ -636,7 +1058,7 @@ int run_storage_test(struct js2300_frontend *frontend)
          report, report_used);
       (void)unifrog_log_flush();
       free(report);
-      return 0;
+      return -1;
    }
 
    printf("unifrog storage_test begin mode=%s runtime_supported=%d runtime_sweep=%d tests=%u known=%u indexed=%s indexed_bytes=%lu\n",
@@ -773,6 +1195,19 @@ int run_storage_test(struct js2300_frontend *frontend)
 int run_storage_full_test(struct js2300_frontend *frontend)
 {
    static const char *runtime_profiles[] = {
+      "wide1",
+      "wide2",
+      "wide4",
+      "wide8",
+      "wide10",
+      "wide12",
+      "wide14",
+      "wide16",
+      "wide18",
+      "wide20",
+      "wide22",
+      "wide24",
+      "wide25",
       "hs1",
       "uhs12",
       "uhs25",
@@ -1197,4 +1632,237 @@ int run_storage_mode_test(struct js2300_frontend *frontend,
       JS2300_FRONTEND_STORAGE_MODE_TEST_REPORT);
    free(report);
    return 0;
+}
+
+int run_storage_stress_test(struct js2300_frontend *frontend,
+   const char *profile)
+{
+   struct storage_test_case tests[STORAGE_TEST_MAX_CASES];
+   char unique_paths[4][JS2300_FRONTEND_MAX_PATH];
+   char indexed_path[JS2300_FRONTEND_MAX_PATH];
+   struct storage_stress_context ctx;
+   char *report;
+   size_t report_used = 0;
+   size_t old_auto_flush;
+   unsigned known_count = 0;
+   unsigned test_count;
+   unsigned long indexed_size = 0;
+   int runtime_supported;
+   int runtime_sweep;
+   int switch_ret = 0;
+   int restore_ret = 0;
+   int storage_safe = 1;
+   int task_ok = 1;
+   uint32_t start_ms;
+   uint32_t last_ui_ms = 0;
+   char detail[192];
+
+   if (!storage_test_profile_is_allowed(profile))
+      profile = "safe";
+   memset(&ctx, 0, sizeof(ctx));
+
+   storage_test_active_title = "Storage stress";
+   report = malloc(STORAGE_TEST_REPORT_BYTES);
+   if (!report) {
+      storage_test_progress(frontend, storage_test_active_title,
+         "Out of memory", "Cannot allocate report buffer");
+      return -1;
+   }
+   report[0] = '\0';
+
+   memset(unique_paths, 0, sizeof(unique_paths));
+   test_count = storage_test_build_cases(tests, STORAGE_TEST_MAX_CASES,
+      unique_paths, &known_count, indexed_path, sizeof(indexed_path),
+      &indexed_size, 0);
+   if (test_count == 0) {
+      storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+         "show=1\n"
+         "title=STORAGE STRESS\n"
+         "detail=No readable probe source found\n"
+         "item|FAIL|Probe source|Need firmware, cores, /ROMS/test.md, or indexed ROMs|profile=%s\n",
+         profile);
+      storage_test_write_file(JS2300_FRONTEND_STORAGE_STRESS_REPORT,
+         report, report_used);
+      storage_test_write_file(JS2300_FRONTEND_SYSTEM_CHECK_REPORT,
+         report, report_used);
+      free(report);
+      return 0;
+   }
+
+   runtime_supported = unifrog_platform_sd_runtime_supported();
+   runtime_sweep = runtime_supported &&
+      strcmp(UNIFROG_SD_MODE, "safe") == 0;
+   printf("unifrog storage_stress begin profile=%s mode=%s runtime_supported=%d runtime_sweep=%d read=%s indexed=%s indexed_bytes=%lu\n",
+      profile, UNIFROG_SD_MODE, runtime_supported, runtime_sweep,
+      tests[0].path ? tests[0].path : "", indexed_path, indexed_size);
+
+   storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+      "show=1\n"
+      "title=STORAGE STRESS\n"
+      "item|OK|Profile %s|Concurrent read/write for %u ms|boot=%s runtime_supported=%d runtime_sweep=%d\n",
+      profile, STORAGE_STRESS_DURATION_MS, UNIFROG_SD_MODE,
+      runtime_supported, runtime_sweep);
+   storage_test_write_file(JS2300_FRONTEND_STORAGE_STRESS_REPORT,
+      report, report_used);
+   storage_test_write_file(JS2300_FRONTEND_SYSTEM_CHECK_REPORT,
+      report, report_used);
+   (void)unifrog_log_flush();
+
+   if (strcmp(profile, "safe") != 0 && !runtime_sweep) {
+      storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+         "detail=Runtime switching unavailable from SD_MODE=%s\n"
+         "item|FAIL|Profile %s|Build with SD_MODE=safe to sweep runtime profiles|runtime_supported=%d\n",
+         UNIFROG_SD_MODE, profile, runtime_supported);
+      storage_test_write_file(JS2300_FRONTEND_STORAGE_STRESS_REPORT,
+         report, report_used);
+      storage_test_write_file(JS2300_FRONTEND_SYSTEM_CHECK_REPORT,
+         report, report_used);
+      (void)unifrog_log_flush();
+      free(report);
+      return 0;
+   }
+
+   old_auto_flush = unifrog_log_auto_flush_bytes();
+   unifrog_log_set_auto_flush_bytes(0);
+   unifrog_log_defer_begin();
+   unifrog_platform_set_storage_stage_callback(storage_test_platform_stage,
+      frontend);
+   unifrog_platform_set_storage_log_suspended(1);
+   start_ms = unifrog_perf_time_ms();
+
+   detail[0] = '\0';
+   if (strcmp(profile, "safe") != 0) {
+      char progress_line[96];
+
+      snprintf(progress_line, sizeof(progress_line), "Switch to %s", profile);
+      storage_test_progress(frontend, storage_test_active_title, progress_line,
+         "Concurrent read/write next");
+      switch_ret = unifrog_platform_sd_apply_profile(profile,
+         STORAGE_TEST_SWITCH_ATTEMPTS, STORAGE_TEST_SWITCH_DELAY_MS,
+         detail, sizeof(detail));
+      if (switch_ret != 0) {
+         storage_safe = 0;
+         storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+            "item|FAIL|Switch %s|Stress skipped|%s\n", profile, detail);
+      }
+   } else {
+      snprintf(detail, sizeof(detail), "mode %s", UNIFROG_SD_MODE);
+   }
+
+   if (switch_ret == 0) {
+      ctx.read_path = tests[0].path;
+      ctx.duration_ms = STORAGE_STRESS_DURATION_MS;
+      snprintf(ctx.write_path, sizeof(ctx.write_path),
+         UNIFROG_DATA_ROOT "/storage-stress-%s.bin", profile);
+      storage_test_progress(frontend, storage_test_active_title,
+         "Running concurrent read/write", profile);
+      unifrog_platform_storage_diag_note(profile, "stress read/write start");
+      printf("unifrog storage_stress run profile=%s read=%s write=%s duration=%u detail=%s\n",
+         profile, ctx.read_path, ctx.write_path, ctx.duration_ms, detail);
+
+      if (xTaskCreate(storage_stress_reader_task, "sdstress_r",
+          configTASK_STACK_DEPTH, &ctx, portPRI_TASK_NORMAL, NULL) != pdPASS)
+         task_ok = 0;
+      if (xTaskCreate(storage_stress_writer_task, "sdstress_w",
+          configTASK_STACK_DEPTH, &ctx, portPRI_TASK_NORMAL, NULL) != pdPASS)
+         task_ok = 0;
+      if (!task_ok) {
+         ctx.stop = 1;
+         storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+            "item|FAIL|Task create %s|Unable to create reader/writer tasks|read_done=%d write_done=%d\n",
+            profile, ctx.reader_done, ctx.writer_done);
+      } else {
+         ctx.start = 1;
+         while ((unifrog_perf_time_ms() - start_ms) < ctx.duration_ms) {
+            uint32_t now = unifrog_perf_time_ms();
+
+            if (ctx.read_errors || ctx.write_errors)
+               break;
+            if ((now - last_ui_ms) >= 500u) {
+               char line1[96];
+               char line2[96];
+
+               snprintf(line1, sizeof(line1), "%s %lu/%lu ms", profile,
+                  (unsigned long)(now - start_ms),
+                  (unsigned long)ctx.duration_ms);
+               snprintf(line2, sizeof(line2), "R %luK/%lu ops  W %luK/%lu ops",
+                  ctx.read_bytes / 1024ul, ctx.read_ops,
+                  ctx.write_bytes / 1024ul, ctx.write_ops);
+               storage_test_progress(frontend, storage_test_active_title,
+                  line1, line2);
+               printf("unifrog storage_stress progress profile=%s elapsed=%lu read=%lu write=%lu rops=%lu wops=%lu rerr=%u werr=%u\n",
+                  profile, (unsigned long)(now - start_ms),
+                  ctx.read_bytes, ctx.write_bytes, ctx.read_ops,
+                  ctx.write_ops, ctx.read_errors, ctx.write_errors);
+               last_ui_ms = now;
+            }
+            msleep(50);
+         }
+         ctx.stop = 1;
+         for (unsigned i = 0; i < 100u &&
+             (!ctx.reader_done || !ctx.writer_done); i++)
+            msleep(20);
+         storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+            "item|%s|Stress %s|read=%lu bytes %lu ops write=%lu bytes %lu ops %lu ms|rerr=%u errno=%d werr=%u errno=%d rsum=%08lx wsum=%08lx\n",
+            (!ctx.read_errors && !ctx.write_errors &&
+             ctx.reader_done && ctx.writer_done) ? "OK" : "FAIL",
+            profile,
+            ctx.read_bytes, ctx.read_ops, ctx.write_bytes, ctx.write_ops,
+            (unsigned long)(unifrog_perf_time_ms() - start_ms),
+            ctx.read_errors, ctx.read_errno,
+            ctx.write_errors, ctx.write_errno,
+            (unsigned long)ctx.read_checksum,
+            (unsigned long)ctx.write_checksum);
+      }
+      (void)unlink(ctx.write_path);
+   }
+
+   if (strcmp(profile, "safe") != 0) {
+      char restore_detail[192];
+
+      msleep(100);
+      restore_ret = storage_test_restore_safe(frontend,
+         "Restoring boot mode", profile, restore_detail,
+         sizeof(restore_detail));
+      if (restore_ret != 0) {
+         storage_safe = 0;
+         storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+            "item|FAIL|Restore after %s|Final report may stay at start checkpoint|%s\n",
+            profile, restore_detail);
+      } else {
+         storage_safe = 1;
+         storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+            "item|OK|Restore after %s|Ready for report flush|%s\n",
+            profile, restore_detail);
+      }
+   }
+
+   storage_test_append(report, STORAGE_TEST_REPORT_BYTES, &report_used,
+      "detail=stress %s read=%luK write=%luK rerr=%u werr=%u switch=%d restore=%d\n",
+      profile, ctx.read_bytes / 1024ul, ctx.write_bytes / 1024ul,
+      ctx.read_errors, ctx.write_errors, switch_ret, restore_ret);
+
+   unifrog_log_defer_end();
+   unifrog_log_set_auto_flush_bytes(old_auto_flush);
+   unifrog_platform_set_storage_stage_callback(NULL, NULL);
+
+   if (storage_safe) {
+      unifrog_platform_set_storage_log_suspended(0);
+      storage_test_progress(frontend, storage_test_active_title,
+         "Writing final report", profile);
+      storage_test_write_file(JS2300_FRONTEND_STORAGE_STRESS_REPORT,
+         report, report_used);
+      storage_test_write_file(JS2300_FRONTEND_SYSTEM_CHECK_REPORT,
+         report, report_used);
+      (void)unifrog_log_flush();
+   }
+
+   printf("unifrog storage_stress done profile=%s safe=%d switch=%d restore=%d read=%lu write=%lu rerr=%u werr=%u ms=%lu report=%s\n",
+      profile, storage_safe, switch_ret, restore_ret,
+      ctx.read_bytes, ctx.write_bytes, ctx.read_errors, ctx.write_errors,
+      (unsigned long)(unifrog_perf_time_ms() - start_ms),
+      JS2300_FRONTEND_STORAGE_STRESS_REPORT);
+   free(report);
+   return storage_safe && switch_ret == 0 && restore_ret == 0 &&
+      ctx.read_errors == 0 && ctx.write_errors == 0 ? 0 : -1;
 }

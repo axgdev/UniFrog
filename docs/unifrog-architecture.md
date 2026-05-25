@@ -1,7 +1,7 @@
 # UniFrog Architecture
 
-UniFrog is a native SF2000 runtime, an embedded JavaScript layer, an editable
-SD-card frontend, and SD-loaded modules.
+UniFrog is a native SF2000 runtime, a MuOS-inspired native frontend, optional JS2300
+scripts, and SD-loaded modules.
 
 ## Runtime Boundary
 
@@ -20,31 +20,47 @@ bisrv.asd                         Native SF2000 firmware payload
 output/unifrog.bin                Raw firmware binary
 output/libunifrog.a               Runtime archive used by modules
 output/sdcard/bios/bisrv.asd      Fastboot image installed as stock firmware
-output/sdcard/firmware/unifrog.bin  Raw firmware loaded by fastboot
-output/sdcard/unifrog/            SD-card frontend, modules, and cores
+output/sdcard/unifrog/firmware/unifrog.bin
+                                  Raw firmware loaded by fastboot
+output/sdcard/unifrog/            Distribution-managed firmware data and cores
+output/sdcard/unifrog_data/       User-owned state and extensions
 output/sdcard/unifrog/LICENSE.txt UniFrog license notice
 output/sdcard/unifrog/THIRD_PARTY.md
                                   Third-party attribution and source notes
 ```
 
+## Frontend Boundary
+
+`FRONTEND_IMPL=native` is the only boot frontend. It builds UniFrog native
+frontend code in `src/native_frontend.c` and renders through
+`src/frontend_lvgl.c`. The UI keeps MuOS-inspired launcher, explore,
+collection, history, information, and configuration flows without requiring the
+upstream MuOS checkout.
+
+The package keeps distribution files under `/unifrog` and mutable state under
+`/unifrog_data`. Native frontend code uses `unifrog/ui.h` for framebuffer presentation and
+normalized menu input, and calls public runtime services such as content
+launch, media playback, backlight, firmware handoff, and storage diagnostics.
+The in-game quick menu is compiled into the libretro host, so no JavaScript
+frontend files are required on the SD card.
+
 ## JavaScript Boundary
 
-`js2300/` embeds MQuickJS and registers native bindings. `frontend/` contains
-the editable JavaScript UI, quick menu, themes, and diagnostics installed under
-`/unifrog` on the SD card. Native code provides high-throughput bindings; UI
-screens belong in JavaScript.
+`js2300/` embeds MQuickJS and registers native bindings. It is no longer a
+frontend implementation. The native frontend exposes Apps -> JavaScript Scripts
+for optional standalone scripts in `/unifrog_data/scripts`; the native frontend,
+quick menu, themes, and diagnostics stay in C/LVGL-side code.
 
-The native frontend bridge is split by role:
+The JS2300 host bridge is split by role:
 
-- `src/frontend/js2300_frontend.c`: launch loop and JS2300 host wiring
+- `src/frontend/js2300_frontend.c`: JS2300 host wiring and native script entry
 - `src/frontend/js2300_frontend_bindings.c`: drawing, input, battery, and FS
   bindings exposed to JavaScript
 - `src/frontend/js2300_frontend_catalog.c`: fast native game/media indexing
 - `src/frontend/js2300_frontend_actions.c`: launch actions and system checks
 
-Updating JavaScript or themes should not require relinking firmware. Updating
-native bindings, runtime modules, or ABI headers requires a rebuild.
-Packaged JavaScript ships as source plus manifest-verified MQuickJS bytecode.
+Updating optional scripts does not require relinking firmware. Updating native
+bindings, runtime modules, or ABI headers requires a rebuild.
 
 ## Core Boundary
 
@@ -79,6 +95,7 @@ regions live in `memory-layout.md`.
 - `unifrog/input.h`: local and wireless controller input
 - `unifrog/log.h`: buffered device logging
 - `unifrog/path.h`: bounded path helpers
+- `unifrog/paths.h`: canonical SD-card distribution and user-data paths
 - `unifrog/perf.h`: timing, cache, and address helpers
 - `unifrog/platform.h`: board setup and fallback loop
 - `unifrog/png.h`: PNG loading helpers

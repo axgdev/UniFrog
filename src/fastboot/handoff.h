@@ -6,12 +6,22 @@
 #define FASTBOOT_STACK_ADDR 0x87fff000u
 #define FASTBOOT_EXCEPTION_BASE 0x87fff700u
 #define FASTBOOT_TRACE_BASE 0x87fff780u
+#define FASTBOOT_ACTIVITY_BASE 0x87fffdc0u
 #define FASTBOOT_DIAG_BASE 0x87fffe00u
+#define FASTBOOT_REGS_BASE 0x87fffe70u
 #define FASTBOOT_HANDOFF_BASE 0x87ffff00u
 #define FASTBOOT_HANDOFF_MAGIC 0x55464248u
 #define FASTBOOT_DIAG_MAGIC 0x55464244u
 #define FASTBOOT_EXCEPTION_MAGIC 0x55464245u
-#define FASTBOOT_EXCEPTION_VERSION 1u
+#define FASTBOOT_EXCEPTION_VERSION 3u
+#define FASTBOOT_EXCEPTION_EPC_WORDS 4u
+#define FASTBOOT_EXCEPTION_STACK_WORDS 8u
+#define FASTBOOT_ACTIVITY_MAGIC 0x55464241u
+#define FASTBOOT_ACTIVITY_VERSION 1u
+#define FASTBOOT_ACTIVITY_FLAG_ARMED 1u
+#define FASTBOOT_REGS_MAGIC 0x55464252u
+#define FASTBOOT_REGS_VERSION 1u
+#define FASTBOOT_REGS_WORDS 32u
 #define FASTBOOT_TRACE_MAGIC 0x55464254u
 #define FASTBOOT_TRACE_VERSION 1u
 #define FASTBOOT_TRACE_ENTRIES 64u
@@ -57,7 +67,7 @@
 #define FASTBOOT_TRACE_UNIFROG_BOARD_INIT_DONE 106u
 #define FASTBOOT_TRACE_UNIFROG_STORAGE_DONE 107u
 #define FASTBOOT_TRACE_UNIFROG_LOG_RESET_DONE 108u
-#define FASTBOOT_TRACE_UNIFROG_JS_BEGIN 109u
+#define FASTBOOT_TRACE_UNIFROG_FRONTEND_BEGIN 109u
 #define FASTBOOT_TRACE_UNIFROG_FB_OPEN_BEGIN 110u
 #define FASTBOOT_TRACE_UNIFROG_FB_CLEAR_DONE 111u
 #define FASTBOOT_TRACE_UNIFROG_BOOT_LOGO_DONE 112u
@@ -90,6 +100,8 @@
 #define FASTBOOT_DIAG_ADDR ((volatile struct fastboot_diag *)FASTBOOT_DIAG_BASE)
 #define FASTBOOT_HANDOFF_ADDR ((volatile struct fastboot_handoff *)FASTBOOT_HANDOFF_BASE)
 #define FASTBOOT_EXCEPTION_ADDR ((volatile struct fastboot_exception_record *)FASTBOOT_EXCEPTION_BASE)
+#define FASTBOOT_ACTIVITY_ADDR ((volatile struct fastboot_activity_record *)FASTBOOT_ACTIVITY_BASE)
+#define FASTBOOT_REGS_ADDR ((volatile struct fastboot_exception_regs *)FASTBOOT_REGS_BASE)
 
 struct fastboot_handoff {
    uint32_t magic;
@@ -129,7 +141,42 @@ struct fastboot_exception_record {
    uint32_t badvaddr;
    uint32_t ra;
    uint32_t count;
+   uint32_t status;
+   uint32_t sp;
+   uint32_t task;
+   uint32_t irq_nesting;
+   uint32_t phase;
+   uint32_t marker;
+   uint32_t heartbeat;
+   uint32_t detail0;
+   uint32_t detail1;
+   uint32_t epc_section;
+   uint32_t ra_section;
+   uint32_t gp;
+   uint32_t epc_words[FASTBOOT_EXCEPTION_EPC_WORDS];
+   uint32_t stack_words[FASTBOOT_EXCEPTION_STACK_WORDS];
    uint32_t checksum;
+};
+
+struct fastboot_activity_record {
+   uint32_t magic;
+   uint32_t version;
+   uint32_t flags;
+   uint32_t phase;
+   uint32_t marker;
+   uint32_t heartbeat;
+   uint32_t detail0;
+   uint32_t detail1;
+   uint32_t count;
+   uint32_t checksum;
+};
+
+struct fastboot_exception_regs {
+   uint32_t magic;
+   uint32_t version;
+   uint32_t count;
+   uint32_t checksum;
+   uint32_t regs[FASTBOOT_REGS_WORDS];
 };
 
 #endif

@@ -9,13 +9,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <sys/unistd.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#if UNIFROG_FRONTEND_JS2300
 #include <js2300/js2300.h>
+#endif
 
 #include <kernel/lib/zlib.h>
 
@@ -24,15 +27,18 @@
 #include <unifrog/backlight.h>
 #include <unifrog/build_info.h>
 #include <unifrog/diag.h>
+#include <unifrog/exception_record.h>
 #include <unifrog/fb.h>
 #include <unifrog/gfx.h>
 #include <unifrog/input.h>
 #include <unifrog/log.h>
 #include <unifrog/panic.h>
+#include <unifrog/paths.h>
 #include <unifrog/perf.h>
 #include <unifrog/platform.h>
 #include <unifrog/presenter.h>
 #include <unifrog/scpu.h>
+#include <unifrog/surface_alloc.h>
 #include <unifrog/text.h>
 
 #include <libretro.h>
@@ -49,15 +55,18 @@
 #define LIBRETRO_AUDIO_MIN_OUTPUT_RATE 8000u
 #define LIBRETRO_AUDIO_MAX_OUTPUT_RATE 48000u
 #define LIBRETRO_AUDIO_DEFAULT_GAIN 1u
-#define LIBRETRO_AUDIO_VOLUME 75u
-#define LIBRETRO_AUDIO_ROUTE "sf2000_left_only"
+#define LIBRETRO_AUDIO_VOLUME 65u
+#define LIBRETRO_AUDIO_ROUTE "sf2000_audsink_mono_left"
+#define LIBRETRO_AUDIO_BACKEND UNIFROG_AUDIO_BACKEND_AUDSINK
 #define LIBRETRO_AUDIO_GATE_OPEN_LEVEL 256u
 #define LIBRETRO_AUDIO_GATE_CLOSE_LEVEL 96u
 #define LIBRETRO_AUDIO_GATE_CLOSE_BATCHES 45u
 #define LIBRETRO_AUDIO_CHANNELS 1u
+#define LIBRETRO_AUDIO_MAX_CHANNELS 2u
 #define LIBRETRO_AUDIO_PERIOD_BYTES 512u
 #define LIBRETRO_AUDIO_PERIODS 8u
-#define LIBRETRO_AUDIO_WRITE_CHUNK_FRAMES 256u
+#define LIBRETRO_AUDIO_WRITE_CHUNK_FRAMES 512u
+#define LIBRETRO_AUDIO_SAMPLE_BUFFER_FRAMES 512u
 #define LIBRETRO_AUDIO_WRITE_ATTEMPTS 2u
 #define LIBRETRO_AUDIO_WRITE_POLL_MS 1u
 #define LIBRETRO_WIRELESS_POLL_DIVISOR 2u
@@ -72,6 +81,7 @@
 #define LIBRETRO_WATCHDOG_RUN_STALL_POLLS 100u
 #define LIBRETRO_WATCHDOG_PHASE_LOAD 1u
 #define LIBRETRO_WATCHDOG_PHASE_RUN 2u
+#define LIBRETRO_NO_OUTPUT_GRACE_FRAMES 300u
 #define LIBRETRO_SAVE_DIR "/media/mmcblk0/unifrog/saves"
 #define LIBRETRO_CONTENT_CACHE_DIR "/media/mmcblk0/unifrog/cache"
 #define LIBRETRO_QUICK_JS_ROOT "/media/mmcblk0/unifrog"
@@ -81,8 +91,18 @@
 #define LIBRETRO_QUICK_JS_BYTECODE_BYTES (512u * 1024u)
 #define LIBRETRO_MEMORY_AUTOSAVE_FRAMES 600u
 #define LIBRETRO_MEMORY_FILE_MAX (16u * 1024u * 1024u)
+#define LIBRETRO_SAVE_FAST_READ_MIN_BYTES (64u * 1024u)
 #define LIBRETRO_STATE_FILE_MAX (16u * 1024u * 1024u)
 #define LIBRETRO_STATE_SLOT_COUNT 10u
+#define LIBRETRO_STATE_MAGIC 0x55465354u
+#define LIBRETRO_STATE_VERSION 1u
+#define LIBRETRO_STATE_FLAG_COMPRESSED 1u
+#define LIBRETRO_STORAGE_POST_CORE_QUIET_MS 15000u
+#define LIBRETRO_CORE_OPTION_MAX 48u
+#define LIBRETRO_CORE_OPTION_VALUE_MAX 32u
+#define LIBRETRO_CORE_OPTION_KEY_MAX 48u
+#define LIBRETRO_CORE_OPTION_LABEL_MAX 64u
+#define LIBRETRO_CORE_OPTION_VALUE_TEXT_MAX 48u
 #define LIBRETRO_ZIP_MAX_UNCOMPRESSED (64u * 1024u * 1024u)
 #define LIBRETRO_COMPRESSED_MAX_INPUT (64u * 1024u * 1024u)
 #define LIBRETRO_COMPRESSED_MAX_UNCOMPRESSED LIBRETRO_ZIP_MAX_UNCOMPRESSED
@@ -90,6 +110,9 @@
 #define LIBRETRO_COMPRESSED_STREAM_FIRST_INPUT (4u * 1024u * 1024u)
 #define LIBRETRO_CONTENT_READ_CHUNK (512u * 1024u)
 #define LIBRETRO_CONTENT_READ_CHUNK_EXPERIMENTAL (64u * 1024u)
+#define LIBRETRO_FAST_READ_MIN_BYTES_PER_SEC (1024u * 1024u)
+#define LIBRETRO_FAST_READ_MIN_TIMEOUT_MS 1000u
+#define LIBRETRO_FAST_READ_TIMEOUT_GRACE_MS 250u
 #define LIBRETRO_CONTENT_STREAM_IN (64u * 1024u)
 #define LIBRETRO_CONTENT_STREAM_OUT (256u * 1024u)
 #define LIBRETRO_FS_PROBE_MIN_SIZE (512u * 1024u)
@@ -126,6 +149,35 @@ enum quick_js_action {
 struct quick_memory_file {
    unsigned id;
    const char *extension;
+};
+
+struct quick_core_option {
+   char key[LIBRETRO_CORE_OPTION_KEY_MAX];
+   char label[LIBRETRO_CORE_OPTION_LABEL_MAX];
+   char values[LIBRETRO_CORE_OPTION_VALUE_MAX][LIBRETRO_CORE_OPTION_VALUE_TEXT_MAX];
+   char value_labels[LIBRETRO_CORE_OPTION_VALUE_MAX][LIBRETRO_CORE_OPTION_LABEL_MAX];
+   unsigned value_count;
+   unsigned selected;
+   int visible;
+};
+
+struct quick_state_file_header {
+   uint32_t magic;
+   uint32_t version;
+   uint32_t flags;
+   uint32_t raw_size;
+   uint32_t data_size;
+};
+
+struct quick_state_recovery {
+   uint8_t *data;
+   size_t data_size;
+   size_t raw_size;
+   uint32_t flags;
+   unsigned slot;
+   int pending;
+   char path[256];
+   char core_id[24];
 };
 
 struct zip_rom_entry {
@@ -359,15 +411,26 @@ struct libretro_host {
    enum retro_pixel_format pixel_format;
    enum unifrog_ge_clock ge_clock;
    int display_mode;
+   int framebuffer_format;
    unsigned video_width;
    unsigned video_height;
    unsigned video_pitch;
-   uint16_t *video_convert_buffer;
-   size_t video_convert_pixels;
+   unsigned video_max_width;
+   unsigned video_max_height;
+   void *software_framebuffer;
+   size_t software_framebuffer_bytes;
+   unsigned software_framebuffer_width;
+   unsigned software_framebuffer_height;
+   unsigned software_framebuffer_pitch;
+   enum retro_pixel_format software_framebuffer_format;
+   unsigned software_framebuffer_requests;
+   unsigned software_framebuffer_hits;
+   unsigned software_framebuffer_presents;
    unsigned fps;
    int presenter_open;
    int audio_open;
    int audio_enabled;
+   unsigned audio_channels;
    int video_seen;
    unsigned run_frames;
    unsigned video_frames;
@@ -422,8 +485,15 @@ struct libretro_host {
    int backlight_apply_ret;
    unsigned backlight_restore_level;
    struct unifrog_fb loading_fb;
+   TaskHandle_t loading_task;
    int loading_open;
+   volatile int loading_task_running;
+   volatile int loading_task_stop;
+   unsigned loading_anim_tick;
    unsigned loading_percent;
+   unsigned loading_visual_percent;
+   char loading_title[32];
+   char loading_detail[64];
    unsigned loading_log_stage_hash;
    unsigned loading_log_percent_bucket;
    uint32_t memory_hash[QUICK_MEMORY_COUNT];
@@ -437,21 +507,32 @@ struct libretro_host {
    const struct libretro_core_api *quick_core;
    const char *quick_rom_path;
    unsigned quick_state_slot;
+   int quick_state_auto_load;
+   int quick_state_auto_save;
    int quick_js_action;
    int quick_js_frame_open;
    unsigned quick_js_draw_buffer;
+   int quick_combo_armed;
    char quick_status[96];
+   struct quick_core_option core_options[LIBRETRO_CORE_OPTION_MAX];
+   unsigned core_option_count;
+   int core_options_dirty;
+   int core_options_loaded;
+   int input_profile;
+   int input_profile_dirty;
+   int16_t audio_sample_buffer[LIBRETRO_AUDIO_SAMPLE_BUFFER_FRAMES *
+      LIBRETRO_AUDIO_MAX_CHANNELS];
+   unsigned audio_sample_buffer_frames;
 };
 
 static struct libretro_host host;
+static struct quick_state_recovery quick_state_recovery;
 
 static int experimental_sd_log_defer_begin(const char *tag)
 {
-   if (!UNIFROG_SD_EXPERIMENTAL)
-      return 0;
    unifrog_log_defer_begin();
    unifrog_platform_set_storage_log_suspended(1);
-   printf("unifrog log defer begin tag=%s reason=experimental_sd mode=%s pending=%u capacity=%u\n",
+   printf("unifrog log defer begin tag=%s reason=core_session mode=%s pending=%u capacity=%u\n",
       tag ? tag : "", UNIFROG_SD_MODE,
       (unsigned)unifrog_log_pending(), (unsigned)unifrog_log_capacity());
    return 1;
@@ -461,19 +542,25 @@ static void experimental_sd_log_defer_end(int active, const char *tag, int ret)
 {
    if (!active)
       return;
-   printf("unifrog log defer end tag=%s reason=experimental_sd mode=%s ret=%d pending=%u deferred=%d\n",
+   printf("unifrog log defer end tag=%s reason=core_session mode=%s ret=%d pending=%u deferred=%d\n",
       tag ? tag : "", UNIFROG_SD_MODE, ret,
       (unsigned)unifrog_log_pending(), unifrog_log_flush_deferred());
    unifrog_platform_set_storage_log_suspended(0);
+   unifrog_log_note_storage_quiet(3000u);
    unifrog_log_defer_end();
 }
 
-static int16_t audio_mix_buffer[2048 * 2];
-static int16_t audio_silence_buffer[384 * 2];
+static int16_t audio_mix_buffer[2048 * LIBRETRO_AUDIO_MAX_CHANNELS];
+static int16_t audio_silence_buffer[384 * LIBRETRO_AUDIO_MAX_CHANNELS];
 static volatile unsigned watchdog_active;
 static volatile unsigned watchdog_phase;
 static volatile unsigned watchdog_marker;
 static volatile unsigned watchdog_heartbeat;
+static int libretro_fast_read_timeout_enabled;
+static int libretro_read_profile_load_session_active;
+
+#define LIBRETRO_READ_PROFILE_OWNED 1
+#define LIBRETRO_READ_PROFILE_BORROWED 2
 
 static void loading_draw(const char *title, const char *detail,
    unsigned percent);
@@ -483,6 +570,9 @@ static unsigned host_compute_frame_budget(unsigned fps, unsigned *scpu_mhz,
    unsigned *count_hz, unsigned *count_hz_calibrated);
 static int read_file_aligned(FILE *file, const char *path,
    uint8_t **out_data, size_t *out_size, const char *label);
+static int read_file_aligned_timeout(FILE *file, const char *path,
+   uint8_t **out_data, size_t *out_size, const char *label,
+   unsigned timeout_ms);
 static int exit_combo_down(void);
 static int quick_js_run(const struct libretro_core_api *core,
    const char *rom_path);
@@ -508,6 +598,19 @@ static size_t libretro_content_read_chunk(void)
       LIBRETRO_CONTENT_READ_CHUNK;
 }
 
+static unsigned libretro_fast_read_timeout_ms(size_t bytes)
+{
+   uint64_t ms = ((uint64_t)bytes * 1000ull) /
+      LIBRETRO_FAST_READ_MIN_BYTES_PER_SEC;
+
+   if (ms < LIBRETRO_FAST_READ_MIN_TIMEOUT_MS)
+      ms = LIBRETRO_FAST_READ_MIN_TIMEOUT_MS;
+   ms += LIBRETRO_FAST_READ_TIMEOUT_GRACE_MS;
+   if (ms > UINT32_MAX)
+      return UINT32_MAX;
+   return (unsigned)ms;
+}
+
 static unsigned libretro_storage_attempts(void)
 {
    return UNIFROG_SD_EXPERIMENTAL ? 3u : 1u;
@@ -520,10 +623,135 @@ static int libretro_recover_storage(const char *tag)
    return unifrog_platform_recover_storage(tag, 4, 100);
 }
 
+static void quick_state_recovery_clear(void)
+{
+   free(quick_state_recovery.data);
+   memset(&quick_state_recovery, 0, sizeof(quick_state_recovery));
+}
+
+static int quick_state_build_image(const void *raw, size_t raw_size,
+   uint8_t **out_data, size_t *out_size, uint32_t *out_flags)
+{
+   struct quick_state_file_header header;
+   uint8_t *buffer = NULL;
+   uLongf compressed_size;
+   uint8_t *payload;
+   size_t payload_size;
+   int compressed_ok = 0;
+
+   if (!raw || !out_data || !out_size || !out_flags)
+      return -1;
+   *out_data = NULL;
+   *out_size = 0;
+   *out_flags = 0;
+
+   payload_size = raw_size;
+   compressed_size = compressBound((uLong)raw_size);
+   if (compressed_size > 0 && compressed_size < SIZE_MAX - sizeof(header)) {
+      buffer = malloc(sizeof(header) + (size_t)compressed_size);
+      if (buffer) {
+         payload = buffer + sizeof(header);
+         compressed_size = (uLongf)compressed_size;
+         if (compress2(payload, &compressed_size, raw, (uLong)raw_size,
+             Z_BEST_SPEED) == Z_OK && compressed_size > 0 &&
+             compressed_size < (uLongf)raw_size) {
+            compressed_ok = 1;
+            payload_size = (size_t)compressed_size;
+            *out_flags = LIBRETRO_STATE_FLAG_COMPRESSED;
+         }
+      }
+   }
+   if (!compressed_ok) {
+      free(buffer);
+      buffer = malloc(sizeof(header) + raw_size);
+      if (!buffer)
+         return -1;
+      payload = buffer + sizeof(header);
+      memcpy(payload, raw, raw_size);
+      payload_size = raw_size;
+   }
+
+   header.magic = LIBRETRO_STATE_MAGIC;
+   header.version = LIBRETRO_STATE_VERSION;
+   header.flags = *out_flags;
+   header.raw_size = (uint32_t)raw_size;
+   header.data_size = (uint32_t)payload_size;
+   memcpy(buffer, &header, sizeof(header));
+   *out_data = buffer;
+   *out_size = sizeof(header) + payload_size;
+   return 0;
+}
+
+static void quick_state_recovery_store(const char *core_id,
+   const char *path, unsigned slot, const uint8_t *data, size_t size,
+   size_t raw_size, uint32_t flags)
+{
+   uint8_t *copy;
+
+   if (!data || size == 0 || !path || !path[0])
+      return;
+   copy = malloc(size);
+   if (!copy)
+      return;
+   memcpy(copy, data, size);
+   quick_state_recovery_clear();
+   quick_state_recovery.data = copy;
+   quick_state_recovery.data_size = size;
+   quick_state_recovery.raw_size = raw_size;
+   quick_state_recovery.flags = flags;
+   quick_state_recovery.slot = slot;
+   quick_state_recovery.pending = 1;
+   snprintf(quick_state_recovery.path, sizeof(quick_state_recovery.path),
+      "%s", path);
+   snprintf(quick_state_recovery.core_id, sizeof(quick_state_recovery.core_id),
+      "%s", core_id ? core_id : "");
+}
+
+static int quick_state_recovery_try_flush(void)
+{
+   FILE *file;
+   int ok;
+
+   if (!quick_state_recovery.pending || !quick_state_recovery.data ||
+       !quick_state_recovery.path[0])
+      return 0;
+   if (!unifrog_platform_storage_ready())
+      return -1;
+
+   (void)mkdir(UNIFROG_SAVE_ROOT, 0777);
+   file = fopen(quick_state_recovery.path, "wb");
+   if (!file)
+      return -1;
+
+   ok = fwrite(quick_state_recovery.data, 1,
+      quick_state_recovery.data_size, file) ==
+      quick_state_recovery.data_size && fflush(file) == 0;
+   fclose(file);
+   if (!ok)
+      return -1;
+
+   printf("unifrog quick state recovery flushed core=%s path=%s size=%u raw=%u flags=0x%lx slot=%u\n",
+      quick_state_recovery.core_id, quick_state_recovery.path,
+      (unsigned)quick_state_recovery.data_size,
+      (unsigned)quick_state_recovery.raw_size,
+      (unsigned long)quick_state_recovery.flags, quick_state_recovery.slot);
+   quick_state_recovery_clear();
+   return 0;
+}
+
+int unifrog_libretro_recover_saved_state(void)
+{
+   return quick_state_recovery_try_flush();
+}
+
 static int libretro_log_flush_force_if_safe(void)
 {
    if (UNIFROG_SD_EXPERIMENTAL)
       return 0;
+   if (host.quick_core) {
+      unifrog_log_note_storage_quiet(LIBRETRO_STORAGE_POST_CORE_QUIET_MS);
+      return 0;
+   }
    return unifrog_log_flush_force();
 }
 
@@ -541,16 +769,14 @@ static void libretro_storage_quiet_end(const char *tag, int flush)
    printf("unifrog storage quiet end tag=%s pending=%u deferred=%d flush=%d\n",
       tag ? tag : "", (unsigned)unifrog_log_pending(),
       unifrog_log_flush_deferred(), flush ? 1 : 0);
-   unifrog_platform_set_storage_log_suspended(0);
    unifrog_log_defer_end();
    if (flush)
       (void)unifrog_log_flush();
+   unifrog_platform_set_storage_log_suspended(0);
 }
 
-static int libretro_read_profile_enabled(void)
+static int libretro_read_profile_name_enabled(const char *profile)
 {
-   const char *profile = UNIFROG_SD_READ_MODE;
-
    if (!profile || !profile[0])
       return 0;
    if (strcmp(profile, "boot") == 0 || strcmp(profile, "safe") == 0 ||
@@ -559,6 +785,22 @@ static int libretro_read_profile_enabled(void)
    if (strcmp(profile, UNIFROG_SD_MODE) == 0)
       return 0;
    return 1;
+}
+
+static int libretro_read_profile_enabled(void)
+{
+   return libretro_read_profile_name_enabled(UNIFROG_SD_READ_MODE);
+}
+
+static unsigned libretro_read_profile_backoff_windows;
+
+static void libretro_read_profile_backoff(const char *tag)
+{
+   libretro_read_profile_backoff_windows = 6;
+   unifrog_log_note_storage_quiet(5000u);
+   printf("unifrog libretro read_profile backoff windows=%u profile=%s tag=%s\n",
+      libretro_read_profile_backoff_windows, UNIFROG_SD_READ_MODE,
+      tag ? tag : "");
 }
 
 static int libretro_begin_read_profile(const char *tag)
@@ -570,6 +812,18 @@ static int libretro_begin_read_profile(const char *tag)
 
    if (!libretro_read_profile_enabled())
       return 0;
+   if (libretro_read_profile_load_session_active) {
+      printf("unifrog libretro read_profile reuse profile=%s tag=%s session=load\n",
+         UNIFROG_SD_READ_MODE, tag ? tag : "");
+      return LIBRETRO_READ_PROFILE_BORROWED;
+   }
+   if (libretro_read_profile_backoff_windows > 0) {
+      printf("unifrog libretro read_profile skip profile=%s tag=%s reason=backoff remaining=%u\n",
+         UNIFROG_SD_READ_MODE, tag ? tag : "",
+         libretro_read_profile_backoff_windows);
+      libretro_read_profile_backoff_windows--;
+      return 0;
+   }
    if (!unifrog_platform_sd_runtime_supported()) {
       printf("unifrog libretro read_profile skip profile=%s tag=%s reason=no_runtime\n",
          UNIFROG_SD_READ_MODE, tag ? tag : "");
@@ -579,35 +833,101 @@ static int libretro_begin_read_profile(const char *tag)
    detail[0] = '\0';
    restore_detail[0] = '\0';
    libretro_storage_quiet_begin(tag);
+   unifrog_log_sync("read_profile begin profile=%s boot=%s tag=%s",
+      UNIFROG_SD_READ_MODE, UNIFROG_SD_MODE, tag ? tag : "");
    printf("unifrog libretro read_profile begin profile=%s boot=%s tag=%s\n",
       UNIFROG_SD_READ_MODE, UNIFROG_SD_MODE, tag ? tag : "");
    ret = unifrog_platform_sd_apply_profile(UNIFROG_SD_READ_MODE, 4, 100,
       detail, sizeof(detail));
+   unifrog_log_sync("read_profile switch ret=%d profile=%s tag=%s detail=%s",
+      ret, UNIFROG_SD_READ_MODE, tag ? tag : "", detail);
    printf("unifrog libretro read_profile switch ret=%d profile=%s detail=%s\n",
       ret, UNIFROG_SD_READ_MODE, detail);
    if (ret == 0)
-      return 1;
+      return LIBRETRO_READ_PROFILE_OWNED;
 
    restore_ret = unifrog_platform_sd_restore_boot(4, 100, restore_detail,
       sizeof(restore_detail));
+   unifrog_log_sync("read_profile fallback_restore ret=%d profile=%s tag=%s detail=%s",
+      restore_ret, UNIFROG_SD_READ_MODE, tag ? tag : "", restore_detail);
    printf("unifrog libretro read_profile fallback restore_ret=%d detail=%s\n",
       restore_ret, restore_detail);
    libretro_storage_quiet_end(tag, 1);
    return 0;
 }
 
-static void libretro_end_read_profile(int active, const char *tag, int ok)
+static int libretro_read_profile_load_session_begin(const char *tag)
+{
+   int active;
+
+   active = libretro_begin_read_profile(tag);
+   if (active == LIBRETRO_READ_PROFILE_OWNED) {
+      libretro_read_profile_load_session_active = 1;
+      printf("unifrog libretro read_profile load_session begin profile=%s tag=%s\n",
+         UNIFROG_SD_READ_MODE, tag ? tag : "");
+      return active;
+   }
+   return 0;
+}
+
+static unsigned libretro_fast_read_timeout_for_path(const char *path,
+   unsigned floor_ms)
+{
+   struct stat st;
+   unsigned long bytes;
+   unsigned timeout_ms;
+
+   if (!path || stat(path, &st) != 0 || st.st_size <= 0)
+      return floor_ms;
+   bytes = (unsigned long)st.st_size;
+   timeout_ms = (unsigned)((bytes + 1024ul * 1024ul - 1ul) /
+      (1024ul * 1024ul)) * 1000u;
+   timeout_ms += 1500u;
+   if (timeout_ms < floor_ms)
+      timeout_ms = floor_ms;
+   return timeout_ms;
+}
+
+static void libretro_end_read_profile_ex(int active, const char *tag, int ok,
+   int flush)
 {
    char detail[160];
    int ret;
 
    if (!active)
       return;
+   if (active == LIBRETRO_READ_PROFILE_BORROWED) {
+      printf("unifrog libretro read_profile reuse end ok=%d flush=%d profile=%s tag=%s session=load\n",
+         ok ? 1 : 0, flush ? 1 : 0, UNIFROG_SD_READ_MODE,
+         tag ? tag : "");
+      return;
+   }
    detail[0] = '\0';
+   if (libretro_read_profile_load_session_active)
+      libretro_read_profile_load_session_active = 0;
    ret = unifrog_platform_sd_restore_boot(4, 100, detail, sizeof(detail));
-   printf("unifrog libretro read_profile restore ret=%d ok=%d profile=%s tag=%s detail=%s\n",
-      ret, ok ? 1 : 0, UNIFROG_SD_READ_MODE, tag ? tag : "", detail);
-   libretro_storage_quiet_end(tag, 1);
+   unifrog_log_sync("read_profile restore ret=%d ok=%d flush=%d profile=%s tag=%s detail=%s",
+      ret, ok ? 1 : 0, flush ? 1 : 0, UNIFROG_SD_READ_MODE,
+      tag ? tag : "", detail);
+   printf("unifrog libretro read_profile restore ret=%d ok=%d flush=%d profile=%s tag=%s detail=%s\n",
+      ret, ok ? 1 : 0, flush ? 1 : 0, UNIFROG_SD_READ_MODE,
+      tag ? tag : "", detail);
+   libretro_storage_quiet_end(tag, flush);
+}
+
+static void libretro_end_read_profile(int active, const char *tag, int ok)
+{
+   libretro_end_read_profile_ex(active, tag, ok, 1);
+}
+
+static void libretro_read_profile_load_session_end(const char *tag, int ok)
+{
+   if (!libretro_read_profile_load_session_active)
+      return;
+   printf("unifrog libretro read_profile load_session end profile=%s tag=%s ok=%d\n",
+      UNIFROG_SD_READ_MODE, tag ? tag : "", ok ? 1 : 0);
+   libretro_end_read_profile(LIBRETRO_READ_PROFILE_OWNED,
+      tag ? tag : "core_load_session", ok);
 }
 
 void unifrog_libretro_run_options_init(
@@ -623,6 +943,12 @@ void unifrog_libretro_run_options_init(
    options->backlight_level = -1;
    options->frameskip = UNIFROG_LIBRETRO_FRAMESKIP_OFF;
    options->display_mode = UNIFROG_LIBRETRO_DISPLAY_FIT;
+   options->framebuffer_format = UNIFROG_LIBRETRO_FB_RGB565;
+   options->input_profile = UNIFROG_LIBRETRO_INPUT_DEFAULT;
+   options->state_auto_load = 0;
+   options->state_auto_save = 0;
+   options->state_slot = 0;
+   options->max_frames = 0;
    options->core_id[0] = '\0';
    options->core_path[0] = '\0';
 }
@@ -698,6 +1024,98 @@ static const char *display_mode_label(int display_mode)
    }
 }
 
+static int sanitize_framebuffer_format(int framebuffer_format)
+{
+   switch (framebuffer_format) {
+   case UNIFROG_LIBRETRO_FB_RGB565:
+   case UNIFROG_LIBRETRO_FB_XRGB8888:
+      return framebuffer_format;
+   default:
+      return UNIFROG_LIBRETRO_FB_RGB565;
+   }
+}
+
+static const char *framebuffer_format_label(int framebuffer_format)
+{
+   return sanitize_framebuffer_format(framebuffer_format) ==
+      UNIFROG_LIBRETRO_FB_XRGB8888 ? "XRGB8888" : "RGB565";
+}
+
+static const char *framebuffer_format_opt_value(int framebuffer_format)
+{
+   return sanitize_framebuffer_format(framebuffer_format) ==
+      UNIFROG_LIBRETRO_FB_XRGB8888 ? "xrgb8888" : "rgb565";
+}
+
+static int framebuffer_format_from_text(const char *text, int fallback)
+{
+   if (!text || !text[0])
+      return fallback;
+   if (strcasecmp(text, "xrgb8888") == 0 ||
+       strcasecmp(text, "argb8888") == 0 ||
+       strcasecmp(text, "rgb8888") == 0 ||
+       strcasecmp(text, "8888") == 0 ||
+       strcasecmp(text, "32") == 0)
+      return UNIFROG_LIBRETRO_FB_XRGB8888;
+   if (strcasecmp(text, "rgb565") == 0 ||
+       strcasecmp(text, "565") == 0 ||
+       strcasecmp(text, "16") == 0)
+      return UNIFROG_LIBRETRO_FB_RGB565;
+   return fallback;
+}
+
+static int sanitize_input_profile(int input_profile)
+{
+   switch (input_profile) {
+   case UNIFROG_LIBRETRO_INPUT_DEFAULT:
+   case UNIFROG_LIBRETRO_INPUT_RETROARCH:
+   case UNIFROG_LIBRETRO_INPUT_GENESIS:
+   case UNIFROG_LIBRETRO_INPUT_SWAP_AB:
+   case UNIFROG_LIBRETRO_INPUT_SWAP_XY:
+      return input_profile;
+   default:
+      return UNIFROG_LIBRETRO_INPUT_DEFAULT;
+   }
+}
+
+static int input_profile_from_text(const char *text, int fallback)
+{
+   if (!text || !text[0])
+      return sanitize_input_profile(fallback);
+   if (strcasecmp(text, "default") == 0 ||
+       strcasecmp(text, "stock") == 0)
+      return UNIFROG_LIBRETRO_INPUT_DEFAULT;
+   if (strcasecmp(text, "retroarch") == 0 ||
+       strcasecmp(text, "ra") == 0)
+      return UNIFROG_LIBRETRO_INPUT_RETROARCH;
+   if (strcasecmp(text, "genesis") == 0 ||
+       strcasecmp(text, "md") == 0)
+      return UNIFROG_LIBRETRO_INPUT_GENESIS;
+   if (strcasecmp(text, "swap_ab") == 0 ||
+       strcasecmp(text, "swap-ab") == 0)
+      return UNIFROG_LIBRETRO_INPUT_SWAP_AB;
+   if (strcasecmp(text, "swap_xy") == 0 ||
+       strcasecmp(text, "swap-xy") == 0)
+      return UNIFROG_LIBRETRO_INPUT_SWAP_XY;
+   return sanitize_input_profile(fallback);
+}
+
+static const char *input_profile_opt_value(int input_profile)
+{
+   switch (sanitize_input_profile(input_profile)) {
+   case UNIFROG_LIBRETRO_INPUT_RETROARCH:
+      return "retroarch";
+   case UNIFROG_LIBRETRO_INPUT_GENESIS:
+      return "genesis";
+   case UNIFROG_LIBRETRO_INPUT_SWAP_AB:
+      return "swap_ab";
+   case UNIFROG_LIBRETRO_INPUT_SWAP_XY:
+      return "swap_xy";
+   default:
+      return "default";
+   }
+}
+
 static unsigned present_flags_for_display_mode(int display_mode)
 {
    switch (display_mode) {
@@ -727,12 +1145,26 @@ static void host_configure_options(
       host.options.backlight_level = 100;
    host.options.frameskip = sanitize_frameskip(host.options.frameskip);
    host.options.display_mode = sanitize_display_mode(host.options.display_mode);
+   host.options.framebuffer_format =
+      sanitize_framebuffer_format(host.options.framebuffer_format);
+   host.options.input_profile =
+      sanitize_input_profile(host.options.input_profile);
+   if (host.options.state_slot >= LIBRETRO_STATE_SLOT_COUNT)
+      host.options.state_slot = 0;
+   host.options.state_auto_load = host.options.state_auto_load ? 1 : 0;
+   host.options.state_auto_save = host.options.state_auto_save ? 1 : 0;
    host.options.core_id[sizeof(host.options.core_id) - 1] = '\0';
 
    host.audio_enabled = host.options.audio_enabled;
    host.audio_gain = host.options.audio_gain;
    host.scpu_target_mhz = host.options.scpu_mhz;
    host.display_mode = host.options.display_mode;
+   host.framebuffer_format = host.options.framebuffer_format;
+   host.input_profile = host.options.input_profile;
+   host.input_profile_dirty = 0;
+   host.quick_state_slot = host.options.state_slot;
+   host.quick_state_auto_load = host.options.state_auto_load;
+   host.quick_state_auto_save = host.options.state_auto_save;
    host.fast_forward_multiplier = 0;
 }
 
@@ -742,6 +1174,14 @@ static uintptr_t host_read_gp(void)
 
    __asm__ volatile("move %0, $28" : "=r"(gp));
    return gp;
+}
+
+static uintptr_t host_read_sp(void)
+{
+   uintptr_t sp;
+
+   __asm__ volatile("move %0, $29" : "=r"(sp));
+   return sp;
 }
 
 static void host_restore_gp(uintptr_t gp)
@@ -762,6 +1202,40 @@ static void host_force_expected_gp(void)
 static uintptr_t core_call_gp(const struct libretro_core_api *core)
 {
    return core && core->call_gp ? core->call_gp : host_expected_gp();
+}
+
+static void libretro_activity_set(const struct libretro_core_api *core,
+   const char *path, uint32_t phase, uint32_t marker)
+{
+   uint32_t core_hash = unifrog_exception_activity_hash(
+      core && core->id ? core->id : "");
+   uint32_t path_hash = unifrog_exception_activity_hash(path ? path : "");
+
+   unifrog_exception_activity_set(phase, marker, core_hash, path_hash);
+}
+
+static void libretro_activity_set_core_call(
+   const struct libretro_core_api *core, uint32_t phase, uint32_t marker,
+   const void *fn)
+{
+   unifrog_exception_activity_set(phase, marker,
+      (uint32_t)(uintptr_t)fn, (uint32_t)core_call_gp(core));
+}
+
+static void libretro_core_call_probe(const char *stage,
+   const struct libretro_core_api *core, const void *fn)
+{
+   UBaseType_t stack_free_words = uxTaskGetStackHighWaterMark(NULL);
+
+   printf("unifrog libretro core_call stage=%s core=%s fn=0x%08lx call_gp=0x%08lx host_gp=0x%08lx expected_gp=0x%08lx sp=0x%08lx stack_free_words=%lu\n",
+      stage ? stage : "",
+      core && core->id ? core->id : "",
+      (unsigned long)(uintptr_t)fn,
+      (unsigned long)core_call_gp(core),
+      (unsigned long)host_read_gp(),
+      (unsigned long)host_expected_gp(),
+      (unsigned long)host_read_sp(),
+       (unsigned long)stack_free_words);
 }
 
 #define CORE_CALL0_VOID(core, fn) do { \
@@ -1021,6 +1495,9 @@ static int quick_load_memory_file(const struct libretro_core_api *core,
    void *data;
    size_t size;
    size_t read_size;
+   uint64_t start_us;
+   uint64_t open_done_us;
+   uint64_t read_done_us;
    int ok;
 
    if (quick_memory_data(core, id, &data, &size) != 0) {
@@ -1031,26 +1508,52 @@ static int quick_load_memory_file(const struct libretro_core_api *core,
    }
 
    quick_memory_path(core, rom_path, extension, path, sizeof(path));
+   start_us = host_time_us();
    file = fopen(path, "rb");
+   open_done_us = host_time_us();
    if (!file) {
       if (manual)
          snprintf(host.quick_status, sizeof(host.quick_status),
             "NO SAVE RAM FILE");
+      printf("unifrog quick load_memory missing id=%u path=%s size=%u open_ms=%u manual=%d\n",
+         id, path, (unsigned)size,
+         host_elapsed_ms(start_us, open_done_us), manual ? 1 : 0);
       return -1;
    }
    read_size = fread(data, 1, size, file);
+   read_done_us = host_time_us();
    ok = read_size == size && ferror(file) == 0;
    fclose(file);
    if (manual)
       snprintf(host.quick_status, sizeof(host.quick_status),
          ok ? "SAVE RAM LOADED" : "SAVE RAM READ FAILED");
-   printf("unifrog quick load_memory id=%u path=%s size=%u read=%u ok=%d manual=%d\n",
-      id, path, (unsigned)size, (unsigned)read_size, ok, manual ? 1 : 0);
+   printf("unifrog quick load_memory id=%u path=%s size=%u read=%u ok=%d manual=%d open_ms=%u read_ms=%u total_ms=%u\n",
+      id, path, (unsigned)size, (unsigned)read_size, ok, manual ? 1 : 0,
+      host_elapsed_ms(start_us, open_done_us),
+      host_elapsed_ms(open_done_us, read_done_us),
+      host_elapsed_ms(start_us, read_done_us));
    if (ok)
       (void)quick_note_memory_hash(core, id);
    if (manual)
       (void)libretro_log_flush_force_if_safe();
    return ok ? 0 : -1;
+}
+
+static size_t quick_existing_memory_file_bytes(
+   const struct libretro_core_api *core, const char *rom_path)
+{
+   size_t total = 0;
+
+   for (unsigned i = 0; i < ARRAY_SIZE(quick_memory_files); i++) {
+      char path[160];
+      struct stat st;
+
+      quick_memory_path(core, rom_path, quick_memory_files[i].extension,
+         path, sizeof(path));
+      if (stat(path, &st) == 0 && st.st_size > 0)
+         total += (size_t)st.st_size;
+   }
+   return total;
 }
 
 static void quick_load_all_memory_files(const struct libretro_core_api *core,
@@ -1111,6 +1614,11 @@ static int quick_save_state_file(void)
    if (!core || !core->serialize_size || !core->serialize) {
       snprintf(host.quick_status, sizeof(host.quick_status),
          "STATE UNSUPPORTED");
+      printf("unifrog quick save_state unsupported_api core=%s serialize_size=%p serialize=%p slot=%u\n",
+         core && core->id ? core->id : "(none)",
+         core ? (void *)core->serialize_size : NULL,
+         core ? (void *)core->serialize : NULL, slot);
+      (void)libretro_log_flush_force_if_safe();
       return -1;
    }
 
@@ -1176,8 +1684,11 @@ static int quick_load_state_file(void)
    char path[160];
    FILE *file = NULL;
    void *data = NULL;
+   uint8_t *file_data = NULL;
+   struct quick_state_file_header header;
    size_t size;
    size_t read_size;
+   size_t file_size;
    int extra;
    int ok;
    int ret = -1;
@@ -1185,9 +1696,15 @@ static int quick_load_state_file(void)
    if (!core || !core->serialize_size || !core->unserialize) {
       snprintf(host.quick_status, sizeof(host.quick_status),
          "STATE UNSUPPORTED");
+      printf("unifrog quick load_state unsupported_api core=%s serialize_size=%p unserialize=%p slot=%u\n",
+         core && core->id ? core->id : "(none)",
+         core ? (void *)core->serialize_size : NULL,
+         core ? (void *)core->unserialize : NULL, slot);
+      (void)libretro_log_flush_force_if_safe();
       return -1;
    }
 
+   (void)quick_state_recovery_try_flush();
    size = CORE_CALL0_RET(core, core->serialize_size);
    if (size == 0 || size > LIBRETRO_STATE_FILE_MAX) {
       snprintf(host.quick_status, sizeof(host.quick_status),
@@ -1216,17 +1733,74 @@ static int quick_load_state_file(void)
       goto out;
    }
 
-   read_size = fread(data, 1, size, file);
-   extra = fgetc(file);
-   ok = read_size == size && extra == EOF && ferror(file) == 0;
-   fclose(file);
-   file = NULL;
-   if (!ok) {
-      snprintf(host.quick_status, sizeof(host.quick_status),
-         "STATE SIZE MISMATCH");
-      printf("unifrog quick load_state read_failed core=%s path=%s size=%u read=%u slot=%u extra=%d\n",
-         core->id, path, (unsigned)size, (unsigned)read_size, slot, extra);
-      goto out;
+   read_size = fread(&header, 1, sizeof(header), file);
+   if (read_size == sizeof(header) && header.magic == LIBRETRO_STATE_MAGIC &&
+       header.version == LIBRETRO_STATE_VERSION &&
+       header.raw_size == (uint32_t)size &&
+       header.data_size > 0 && header.data_size <= LIBRETRO_STATE_FILE_MAX &&
+       header.data_size <= LIBRETRO_STATE_FILE_MAX - sizeof(header)) {
+      file_size = header.data_size;
+      file_data = malloc(file_size);
+      if (!file_data) {
+         snprintf(host.quick_status, sizeof(host.quick_status),
+            "STATE OUT OF MEMORY");
+         printf("unifrog quick load_state oom compressed core=%s path=%s size=%u slot=%u data=%u\n",
+            core->id, path, (unsigned)size, slot, (unsigned)file_size);
+         goto out;
+      }
+      read_size = fread(file_data, 1, file_size, file);
+      extra = fgetc(file);
+      ok = read_size == file_size && extra == EOF && ferror(file) == 0;
+      fclose(file);
+      file = NULL;
+      if (!ok) {
+         snprintf(host.quick_status, sizeof(host.quick_status),
+            "STATE SIZE MISMATCH");
+         printf("unifrog quick load_state read_failed compressed core=%s path=%s size=%u read=%u slot=%u extra=%d\n",
+            core->id, path, (unsigned)file_size, (unsigned)read_size, slot,
+            extra);
+         goto out;
+      }
+      if (header.flags & LIBRETRO_STATE_FLAG_COMPRESSED) {
+         uLongf raw_size = (uLongf)size;
+
+         ok = uncompress(data, &raw_size, file_data, (uLongf)file_size) == Z_OK &&
+            raw_size == (uLongf)size;
+         if (!ok) {
+            snprintf(host.quick_status, sizeof(host.quick_status),
+               "STATE DECODE FAILED");
+            printf("unifrog quick load_state decode_failed core=%s path=%s size=%u compressed=%u slot=%u\n",
+               core->id, path, (unsigned)size, (unsigned)file_size, slot);
+            goto out;
+         }
+      } else {
+         if (file_size != size) {
+            snprintf(host.quick_status, sizeof(host.quick_status),
+               "STATE SIZE MISMATCH");
+            printf("unifrog quick load_state raw_size_mismatch core=%s path=%s size=%u read=%u slot=%u\n",
+               core->id, path, (unsigned)size, (unsigned)file_size, slot);
+            goto out;
+         }
+         memcpy(data, file_data, size);
+      }
+   } else {
+      if (fseek(file, 0, SEEK_SET) != 0) {
+         snprintf(host.quick_status, sizeof(host.quick_status),
+            "STATE READ FAILED");
+         goto out;
+      }
+      read_size = fread(data, 1, size, file);
+      extra = fgetc(file);
+      ok = read_size == size && extra == EOF && ferror(file) == 0;
+      fclose(file);
+      file = NULL;
+      if (!ok) {
+         snprintf(host.quick_status, sizeof(host.quick_status),
+            "STATE SIZE MISMATCH");
+         printf("unifrog quick load_state read_failed core=%s path=%s size=%u read=%u slot=%u extra=%d\n",
+            core->id, path, (unsigned)size, (unsigned)read_size, slot, extra);
+         goto out;
+      }
    }
 
    ok = CORE_CALL2_RET(core, core->unserialize, data, size);
@@ -1244,6 +1818,7 @@ out:
    if (file)
       fclose(file);
    free(data);
+   free(file_data);
    (void)libretro_log_flush_force_if_safe();
    return ret;
 }
@@ -1398,7 +1973,8 @@ void unifrog_core_load_progress(const char *stage, unsigned current,
    } else {
       snprintf(detail, sizeof(detail), "CORE LOAD");
    }
-   loading_draw("LOADING GAME", detail, percent);
+   loading_draw(host.loading_title[0] ? host.loading_title : "LOADING GAME",
+      detail, percent);
 
    percent_bucket = total ? percent / LIBRETRO_LOAD_LOG_PERCENT_STEP : 0;
    if (stage_hash != host.loading_log_stage_hash ||
@@ -1417,18 +1993,13 @@ void unifrog_core_load_progress(const char *stage, unsigned current,
    }
 }
 
-static void loading_close(void)
+static void loading_draw_frame(const char *title, const char *detail,
+   unsigned percent)
 {
-   if (host.loading_open) {
-      unifrog_fb_close(&host.loading_fb);
-      host.loading_open = 0;
-   }
-}
-
-static void loading_draw(const char *title, const char *detail, unsigned percent)
-{
+   static const char spin[] = "|/-\\";
    struct unifrog_surface surface;
    unsigned buffer = 0;
+   char detail_spin[80];
    int bar_x;
    int bar_y;
    int bar_w;
@@ -1445,18 +2016,23 @@ static void loading_draw(const char *title, const char *detail, unsigned percent
 
    if (percent > 100)
       percent = 100;
-   host.loading_percent = percent;
    libretro_watchdog_load_progress(detail ? detail : title, percent, 100);
    buffer = host.loading_fb.current_buffer;
    if (host.loading_fb.buffer_count > 1)
       buffer = (host.loading_fb.current_buffer + 1) % host.loading_fb.buffer_count;
    surface = unifrog_fb_surface_for_buffer(&host.loading_fb, buffer);
    unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height,
-      UNIFROG_RGB565(8, 10, 14));
+      UNIFROG_RGB565(0, 0, 0));
    unifrog_gfx_draw_text(&surface, 18, 54, title ? title : "LOADING",
       UNIFROG_RGB565(236, 241, 246), 2);
    if (detail && detail[0])
-      unifrog_gfx_draw_text(&surface, 18, 86, detail,
+      snprintf(detail_spin, sizeof(detail_spin), "%c %s",
+         spin[host.loading_anim_tick % 4u], detail);
+   else
+      snprintf(detail_spin, sizeof(detail_spin), "%c",
+         spin[host.loading_anim_tick % 4u]);
+   if (detail_spin[0])
+      unifrog_gfx_draw_text(&surface, 18, 86, detail_spin,
          UNIFROG_RGB565(160, 174, 188), 1);
 
    bar_x = 18;
@@ -1470,6 +2046,70 @@ static void loading_draw(const char *title, const char *detail, unsigned percent
       UNIFROG_RGB565(68, 188, 136));
    unifrog_fb_flush_buffer(&host.loading_fb, buffer);
    unifrog_fb_pan(&host.loading_fb, buffer);
+}
+
+static void loading_task(void *arg)
+{
+   (void)arg;
+   host.loading_task_running = 1;
+   while (!host.loading_task_stop) {
+      vTaskDelay(250 / portTICK_PERIOD_MS);
+      if (host.loading_open) {
+         host.loading_anim_tick++;
+         if (host.loading_visual_percent < 95u &&
+             host.loading_visual_percent <= host.loading_percent + 12u)
+            host.loading_visual_percent++;
+         loading_draw_frame(host.loading_title, host.loading_detail,
+            host.loading_visual_percent);
+      }
+   }
+   host.loading_task_running = 0;
+   vTaskDelete(NULL);
+}
+
+static void loading_start_task(void)
+{
+   if (host.loading_task_running || host.loading_task)
+      return;
+   host.loading_task_stop = 0;
+   if (xTaskCreate(loading_task, (const char *)"lr_load_anim",
+       configTASK_STACK_DEPTH, NULL, portPRI_TASK_NORMAL,
+       &host.loading_task) != pdPASS) {
+      host.loading_task = NULL;
+      host.loading_task_running = 0;
+   }
+}
+
+static void loading_close(void)
+{
+   if (host.loading_task) {
+      host.loading_task_stop = 1;
+      for (unsigned i = 0; host.loading_task_running && i < 20u; i++)
+         vTaskDelay(10 / portTICK_PERIOD_MS);
+      host.loading_task = NULL;
+   }
+   if (host.loading_open) {
+      unifrog_fb_close(&host.loading_fb);
+      host.loading_open = 0;
+   }
+}
+
+static void loading_draw(const char *title, const char *detail, unsigned percent)
+{
+   unsigned old_percent = host.loading_percent;
+
+   if (percent > 100u)
+      percent = 100u;
+   host.loading_percent = percent;
+   if (!host.loading_open || percent < old_percent ||
+       host.loading_visual_percent < percent || percent >= 100u)
+      host.loading_visual_percent = percent;
+   unifrog_text_copy(host.loading_title, sizeof(host.loading_title),
+      title ? title : "LOADING");
+   unifrog_text_copy(host.loading_detail, sizeof(host.loading_detail),
+      detail ? detail : "");
+   loading_start_task();
+   loading_draw_frame(title, detail, percent);
 }
 
 void unifrog_libretro_log_cb(enum retro_log_level level, const char *fmt, ...)
@@ -1491,10 +2131,258 @@ void unifrog_libretro_log_cb(enum retro_log_level level, const char *fmt, ...)
    host_restore_gp(caller_gp);
 }
 
+static void core_option_copy(char *dst, size_t size, const char *src)
+{
+   if (!dst || size == 0)
+      return;
+   if (!src)
+      src = "";
+   snprintf(dst, size, "%s", src);
+}
+
+static int core_option_find(const char *key)
+{
+   if (!key || !key[0])
+      return -1;
+   for (unsigned i = 0; i < host.core_option_count; i++) {
+      if (strcmp(host.core_options[i].key, key) == 0)
+         return (int)i;
+   }
+   return -1;
+}
+
+static void core_option_set_selected(struct quick_core_option *option,
+   const char *value)
+{
+   if (!option || !value)
+      return;
+   for (unsigned i = 0; i < option->value_count; i++) {
+      if (strcmp(option->values[i], value) == 0) {
+         option->selected = i;
+         return;
+      }
+   }
+}
+
+static void core_options_load_opt_file(void)
+{
+   char path[128];
+   FILE *file;
+   char line[160];
+
+   if (host.core_options_loaded || !host.core_id || !host.core_id[0])
+      return;
+   host.core_options_loaded = 1;
+   snprintf(path, sizeof(path), "%s/%s.opt", LIBRETRO_SAVE_DIR,
+      host.core_id);
+   file = fopen(path, "rb");
+   if (!file)
+      return;
+   while (fgets(line, sizeof(line), file)) {
+      char *eq;
+      char *key;
+      char *value;
+      int index;
+
+      key = line;
+      while (*key == ' ' || *key == '\t')
+         key++;
+      if (*key == '#' || *key == '\n' || *key == '\r' || *key == '\0')
+         continue;
+      eq = strchr(key, '=');
+      if (!eq)
+         continue;
+      *eq = '\0';
+      value = eq + 1;
+      while (eq > key && (eq[-1] == ' ' || eq[-1] == '\t'))
+         *--eq = '\0';
+      while (*value == ' ' || *value == '\t')
+         value++;
+      value[strcspn(value, "\r\n")] = '\0';
+      if (strcmp(key, "unifrog_keymap") == 0 ||
+          strcmp(key, "input_profile") == 0) {
+         host.input_profile = input_profile_from_text(value,
+            host.input_profile);
+         host.options.input_profile = host.input_profile;
+         continue;
+      }
+      index = core_option_find(key);
+      if (index >= 0)
+         core_option_set_selected(&host.core_options[index], value);
+   }
+   fclose(file);
+   printf("unifrog core_options opt_load core=%s path=%s count=%u\n",
+      host.core_id, path, host.core_option_count);
+}
+
+static void core_options_save_opt_file(void)
+{
+   char path[128];
+   FILE *file;
+
+   if (!host.core_options_dirty || !host.core_id || !host.core_id[0])
+      return;
+   (void)mkdir("/media/mmcblk0/unifrog", 0777);
+   (void)mkdir(LIBRETRO_SAVE_DIR, 0777);
+   snprintf(path, sizeof(path), "%s/%s.opt", LIBRETRO_SAVE_DIR,
+      host.core_id);
+   file = fopen(path, "wb");
+   if (!file) {
+      printf("unifrog core_options opt_save open_failed core=%s path=%s\n",
+         host.core_id, path);
+      return;
+   }
+   for (unsigned i = 0; i < host.core_option_count; i++) {
+      const struct quick_core_option *option = &host.core_options[i];
+      const char *value = option->selected < option->value_count ?
+         option->values[option->selected] : "";
+      if (option->key[0] && value[0])
+         fprintf(file, "%s=%s\n", option->key, value);
+   }
+   fprintf(file, "unifrog_keymap=%s\n",
+      input_profile_opt_value(host.input_profile));
+   fclose(file);
+   host.core_options_dirty = 0;
+   host.input_profile_dirty = 0;
+   printf("unifrog core_options opt_save core=%s path=%s count=%u\n",
+      host.core_id, path, host.core_option_count);
+}
+
+static void core_options_reset(void)
+{
+   memset(host.core_options, 0, sizeof(host.core_options));
+   host.core_option_count = 0;
+   host.core_options_dirty = 0;
+   host.core_options_loaded = 0;
+   host.input_profile_dirty = 0;
+}
+
+static void core_option_add_value(struct quick_core_option *option,
+   const char *value, const char *label)
+{
+   if (!option || !value || !value[0] ||
+       option->value_count >= LIBRETRO_CORE_OPTION_VALUE_MAX)
+      return;
+   core_option_copy(option->values[option->value_count],
+      sizeof(option->values[0]), value);
+   core_option_copy(option->value_labels[option->value_count],
+      sizeof(option->value_labels[0]), label && label[0] ? label : value);
+   option->value_count++;
+}
+
+static void core_options_register_one(const char *key, const char *label,
+   const struct retro_core_option_value *values, const char *default_value)
+{
+   struct quick_core_option *option;
+
+   if (!key || !key[0] || host.core_option_count >= LIBRETRO_CORE_OPTION_MAX)
+      return;
+   if (core_option_find(key) >= 0)
+      return;
+   option = &host.core_options[host.core_option_count];
+   memset(option, 0, sizeof(*option));
+   core_option_copy(option->key, sizeof(option->key), key);
+   core_option_copy(option->label, sizeof(option->label),
+      label && label[0] ? label : key);
+   option->visible = 1;
+   if (values) {
+      for (unsigned i = 0;
+           i < RETRO_NUM_CORE_OPTION_VALUES_MAX &&
+           values[i].value && option->value_count < LIBRETRO_CORE_OPTION_VALUE_MAX;
+           i++)
+         core_option_add_value(option, values[i].value, values[i].label);
+   }
+   if (option->value_count == 0)
+      core_option_add_value(option, default_value ? default_value : "enabled",
+         default_value ? default_value : "enabled");
+   if (default_value)
+      core_option_set_selected(option, default_value);
+   host.core_option_count++;
+}
+
+static void core_options_register_definitions(
+   const struct retro_core_option_definition *defs)
+{
+   if (!defs)
+      return;
+   for (unsigned i = 0; defs[i].key && i < LIBRETRO_CORE_OPTION_MAX; i++)
+      core_options_register_one(defs[i].key, defs[i].desc,
+         defs[i].values, defs[i].default_value);
+   core_options_load_opt_file();
+   printf("unifrog core_options registered legacy core=%s count=%u\n",
+      host.core_id ? host.core_id : "", host.core_option_count);
+}
+
+static void core_options_register_v2(
+   const struct retro_core_option_v2_definition *defs)
+{
+   if (!defs)
+      return;
+   for (unsigned i = 0; defs[i].key && i < LIBRETRO_CORE_OPTION_MAX; i++)
+      core_options_register_one(defs[i].key,
+         defs[i].desc_categorized && defs[i].desc_categorized[0] ?
+            defs[i].desc_categorized : defs[i].desc,
+         defs[i].values, defs[i].default_value);
+   core_options_load_opt_file();
+   printf("unifrog core_options registered v2 core=%s count=%u\n",
+      host.core_id ? host.core_id : "", host.core_option_count);
+}
+
+static void core_options_register_variables(const struct retro_variable *vars)
+{
+   if (!vars)
+      return;
+   for (unsigned i = 0; vars[i].key && i < LIBRETRO_CORE_OPTION_MAX; i++) {
+      struct retro_core_option_value values[LIBRETRO_CORE_OPTION_VALUE_MAX];
+      char buffer[256];
+      char *semi;
+      char *token;
+      unsigned count = 0;
+
+      memset(values, 0, sizeof(values));
+      core_option_copy(buffer, sizeof(buffer), vars[i].value);
+      semi = strchr(buffer, ';');
+      token = semi ? semi + 1 : buffer;
+      while (*token == ' ')
+         token++;
+      while (token && *token && count < LIBRETRO_CORE_OPTION_VALUE_MAX - 1u) {
+         char *next = strchr(token, '|');
+         if (next)
+            *next++ = '\0';
+         while (*token == ' ')
+            token++;
+         if (*token) {
+            values[count].value = token;
+            values[count].label = token;
+            count++;
+         }
+         token = next;
+      }
+      core_options_register_one(vars[i].key, buffer, values,
+         count ? values[0].value : NULL);
+   }
+   core_options_load_opt_file();
+   printf("unifrog core_options registered variables core=%s count=%u\n",
+      host.core_id ? host.core_id : "", host.core_option_count);
+}
+
 static bool host_get_variable(struct retro_variable *var)
 {
+   int option_index;
+
    if (!var || !var->key)
       return false;
+
+   option_index = core_option_find(var->key);
+   if (option_index >= 0) {
+      struct quick_core_option *option = &host.core_options[option_index];
+      if (option->selected < option->value_count) {
+         var->value = option->values[option->selected];
+         printf("unifrog libretro variable %s=%s source=core_options\n",
+            var->key, var->value);
+         return true;
+      }
+   }
 
    if (strcmp(var->key, "gpsp_drc") == 0) {
       var->value = "enabled";
@@ -1576,11 +2464,17 @@ void unifrog_libretro_input_poll_cb(void)
 
 static int button_down_from_mask(uint32_t buttons, unsigned id)
 {
+   enum unifrog_button mapped;
+
    switch (id) {
    case RETRO_DEVICE_ID_JOYPAD_B:
-      return (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_B)) != 0;
+      mapped = host.input_profile == UNIFROG_LIBRETRO_INPUT_SWAP_AB ?
+         UNIFROG_BUTTON_A : UNIFROG_BUTTON_B;
+      return (buttons & UNIFROG_BUTTON_MASK(mapped)) != 0;
    case RETRO_DEVICE_ID_JOYPAD_Y:
-      return (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_Y)) != 0;
+      mapped = host.input_profile == UNIFROG_LIBRETRO_INPUT_SWAP_XY ?
+         UNIFROG_BUTTON_X : UNIFROG_BUTTON_Y;
+      return (buttons & UNIFROG_BUTTON_MASK(mapped)) != 0;
    case RETRO_DEVICE_ID_JOYPAD_SELECT:
       return (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_SELECT)) != 0;
    case RETRO_DEVICE_ID_JOYPAD_START:
@@ -1594,9 +2488,13 @@ static int button_down_from_mask(uint32_t buttons, unsigned id)
    case RETRO_DEVICE_ID_JOYPAD_RIGHT:
       return (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_RIGHT)) != 0;
    case RETRO_DEVICE_ID_JOYPAD_A:
-      return (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_A)) != 0;
+      mapped = host.input_profile == UNIFROG_LIBRETRO_INPUT_SWAP_AB ?
+         UNIFROG_BUTTON_B : UNIFROG_BUTTON_A;
+      return (buttons & UNIFROG_BUTTON_MASK(mapped)) != 0;
    case RETRO_DEVICE_ID_JOYPAD_X:
-      return (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_X)) != 0;
+      mapped = host.input_profile == UNIFROG_LIBRETRO_INPUT_SWAP_XY ?
+         UNIFROG_BUTTON_Y : UNIFROG_BUTTON_X;
+      return (buttons & UNIFROG_BUTTON_MASK(mapped)) != 0;
    case RETRO_DEVICE_ID_JOYPAD_L:
       return (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_L)) != 0;
    case RETRO_DEVICE_ID_JOYPAD_R:
@@ -1664,15 +2562,22 @@ static int host_audio_scale_sample(int sample)
 
 static unsigned host_audio_write_attempts(void)
 {
+   unsigned attempts = LIBRETRO_AUDIO_WRITE_ATTEMPTS;
+
    if (host.core_id && strcmp(host.core_id, "qpsx") == 0)
-      return 1;
-   return LIBRETRO_AUDIO_WRITE_ATTEMPTS;
+      attempts = 1;
+   if (unifrog_audio_prefers_stereo_output() && attempts < 8u)
+      attempts = 8u;
+   return attempts;
 }
 
 static unsigned host_audio_write_poll_ms(void)
 {
    if (host.core_id && strcmp(host.core_id, "qpsx") == 0)
       return 0;
+   if (unifrog_audio_prefers_stereo_output() &&
+       LIBRETRO_AUDIO_WRITE_POLL_MS < 2u)
+      return 2u;
    return LIBRETRO_AUDIO_WRITE_POLL_MS;
 }
 
@@ -1684,15 +2589,50 @@ static unsigned host_audio_output_rate(unsigned input_rate)
    return DEFAULT_SAMPLE_RATE;
 }
 
-void unifrog_libretro_audio_sample_cb(int16_t left, int16_t right)
+static unsigned host_audio_output_channels(void)
 {
-   int sample = (left + right) / 2;
-   int scaled = host_audio_scale_sample(sample);
-   int16_t frame[LIBRETRO_AUDIO_CHANNELS];
+   return unifrog_audio_output_channels();
+}
 
-   host_force_expected_gp();
-   if (!host.audio_enabled || host.audio_gain == 0 || host.fast_forward)
-      return;
+static const char *host_audio_route_name(void)
+{
+   if (unifrog_audio_prefers_stereo_output())
+      return host.audio_channels > 1u ? "gb300_auto_pcm_stereo" :
+         "gb300_auto_pcm_mono";
+   return LIBRETRO_AUDIO_ROUTE;
+}
+
+static int host_audio_backend(void)
+{
+   if (unifrog_audio_prefers_stereo_output())
+      return UNIFROG_AUDIO_BACKEND_AUTO;
+   return LIBRETRO_AUDIO_BACKEND;
+}
+
+static unsigned host_audio_runtime_volume(void)
+{
+   return unifrog_audio_prefers_stereo_output() ? 90u : LIBRETRO_AUDIO_VOLUME;
+}
+
+static void host_audio_store_mono(int16_t *buffer, unsigned frame,
+   int16_t sample)
+{
+   unsigned channels = host.audio_channels ? host.audio_channels :
+      LIBRETRO_AUDIO_CHANNELS;
+
+   if (channels > LIBRETRO_AUDIO_MAX_CHANNELS)
+      channels = LIBRETRO_AUDIO_MAX_CHANNELS;
+   buffer[frame * channels] = sample;
+   for (unsigned ch = 1; ch < channels; ch++)
+      buffer[frame * channels + ch] = sample;
+}
+
+static int host_audio_scale_mono(int left, int right, unsigned *abs_out)
+{
+   int sample = (left + right) >> 1;
+   int scaled = host_audio_scale_sample(sample);
+   unsigned abs_value;
+
    if (scaled > 32767) {
       scaled = 32767;
       host.audio_clip_count++;
@@ -1700,37 +2640,121 @@ void unifrog_libretro_audio_sample_cb(int16_t left, int16_t right)
       scaled = -32768;
       host.audio_clip_count++;
    }
-   if ((unsigned)(scaled < 0 ? -scaled : scaled) > host.audio_peak_max)
-      host.audio_peak_max = (unsigned)(scaled < 0 ? -scaled : scaled);
-   frame[0] = (int16_t)scaled;
-   if (host.audio_open) {
-      uint32_t start = unifrog_perf_count();
-      unsigned count;
-      unsigned abs_out = scaled < 0 ? (unsigned)-scaled : (unsigned)scaled;
+   abs_value = scaled < 0 ? (unsigned)-scaled : (unsigned)scaled;
+   if (abs_value > host.audio_peak_max)
+      host.audio_peak_max = abs_value;
+   if (abs_out)
+      *abs_out = abs_value;
+   if (abs_value < LIBRETRO_AUDIO_GATE_CLOSE_LEVEL)
+      scaled = 0;
+   return scaled;
+}
 
-      if (abs_out >= LIBRETRO_AUDIO_GATE_OPEN_LEVEL &&
-          !host.audio_gate_open) {
+static void host_audio_update_gate(unsigned peak_out)
+{
+   if (peak_out >= LIBRETRO_AUDIO_GATE_OPEN_LEVEL) {
+      if (!host.audio_gate_open) {
          (void)unifrog_audio_set_output_enabled(&host.audio, 1);
          host.audio_gate_open = 1;
-         host.audio_quiet_batches = 0;
       }
-      (void)unifrog_audio_write_timeout(&host.audio, frame, 1,
-         host_audio_write_attempts(), host_audio_write_poll_ms());
-      count = unifrog_perf_elapsed(start, unifrog_perf_count());
-      host.audio_write_total_count += count;
-      if (count > host.audio_write_max_count)
-         host.audio_write_max_count = count;
-      host.audio_write_count++;
-      host.audio_batches++;
-      host.audio_frames++;
+      host.audio_quiet_batches = 0;
+   } else if (peak_out <= LIBRETRO_AUDIO_GATE_CLOSE_LEVEL) {
+      if (host.audio_quiet_batches < UINT32_MAX)
+         host.audio_quiet_batches++;
+      if (host.audio_gate_open &&
+          host.audio_quiet_batches >= LIBRETRO_AUDIO_GATE_CLOSE_BATCHES) {
+         (void)unifrog_audio_set_output_enabled(&host.audio, 0);
+         host.audio_gate_open = 0;
+      }
+   } else {
+      host.audio_quiet_batches = 0;
    }
+}
+
+static int host_audio_write_frames(const int16_t *frames, unsigned frame_count,
+   unsigned batch_index)
+{
+   uint32_t write_start;
+   unsigned write_count;
+   int write_ret;
+
+   if (!frame_count)
+      return 0;
+   write_start = unifrog_perf_count();
+   write_ret = unifrog_audio_write_timeout(&host.audio, frames, frame_count,
+      host_audio_write_attempts(), host_audio_write_poll_ms());
+   write_count = unifrog_perf_elapsed(write_start, unifrog_perf_count());
+
+   host.audio_write_total_count += write_count;
+   if (write_count > host.audio_write_max_count)
+      host.audio_write_max_count = write_count;
+   host.audio_write_count++;
+   if (write_ret != 0) {
+      if (host.audio_failures < 8) {
+         printf("unifrog libretro audio_write_fail batch=%u frames=%u count=%u\n",
+            batch_index, frame_count, write_count);
+         (void)unifrog_log_flush();
+      }
+      host.audio_failures++;
+   }
+   return write_ret;
+}
+
+static int host_audio_flush_sample_buffer(void)
+{
+   unsigned peak_out = 0;
+   unsigned channels = host.audio_channels ? host.audio_channels :
+      LIBRETRO_AUDIO_CHANNELS;
+
+   if (!host.audio_sample_buffer_frames)
+      return 0;
+   if (!host.audio_open) {
+      host.audio_frames += host.audio_sample_buffer_frames;
+      host.audio_sample_buffer_frames = 0;
+      return 0;
+   }
+   if (channels > LIBRETRO_AUDIO_MAX_CHANNELS)
+      channels = LIBRETRO_AUDIO_MAX_CHANNELS;
+   for (unsigned i = 0; i < host.audio_sample_buffer_frames; i++) {
+      int16_t sample = host.audio_sample_buffer[i * channels];
+      unsigned abs_out = sample < 0 ? (unsigned)-sample : (unsigned)sample;
+
+      if (abs_out > peak_out)
+         peak_out = abs_out;
+   }
+   host_audio_update_gate(peak_out);
+   if (host_audio_write_frames(host.audio_sample_buffer,
+       host.audio_sample_buffer_frames, host.audio_batches) != 0) {
+      host.audio_sample_buffer_frames = 0;
+      return -1;
+   }
+   host.audio_frames += host.audio_sample_buffer_frames;
+   host.audio_batches++;
+   host.audio_sample_buffer_frames = 0;
+   return 0;
+}
+
+void unifrog_libretro_audio_sample_cb(int16_t left, int16_t right)
+{
+   unsigned abs_out = 0;
+   int scaled;
+
+   host_force_expected_gp();
+   if (!host.audio_enabled || host.audio_gain == 0 || host.fast_forward)
+      return;
+   scaled = host_audio_scale_mono(left, right, &abs_out);
+   (void)abs_out;
+   host_audio_store_mono(host.audio_sample_buffer,
+      host.audio_sample_buffer_frames, (int16_t)scaled);
+   host.audio_sample_buffer_frames++;
+   if (host.audio_sample_buffer_frames >= LIBRETRO_AUDIO_SAMPLE_BUFFER_FRAMES)
+      (void)host_audio_flush_sample_buffer();
 }
 
 size_t unifrog_libretro_audio_batch_cb(const int16_t *data, size_t frames)
 {
    size_t offset = 0;
    size_t input_offset = 0;
-   unsigned peak_out = 0;
    unsigned input_rate;
    unsigned output_rate;
 
@@ -1753,13 +2777,13 @@ size_t unifrog_libretro_audio_batch_cb(const int16_t *data, size_t frames)
 
    while (input_offset < frames) {
       size_t out_frames = 0;
+      unsigned peak_out = 0;
 
       while (input_offset < frames &&
              out_frames < LIBRETRO_AUDIO_WRITE_CHUNK_FRAMES) {
          int left = data[input_offset * 2];
          int right = data[input_offset * 2 + 1];
-         int sample = (left + right) / 2;
-         int scaled = host_audio_scale_sample(sample);
+         int scaled;
          unsigned abs_out;
 
          input_offset++;
@@ -1767,64 +2791,19 @@ size_t unifrog_libretro_audio_batch_cb(const int16_t *data, size_t frames)
          if (host.audio_resample_accum < input_rate)
             continue;
          host.audio_resample_accum -= input_rate;
-         if (scaled > 32767) {
-            scaled = 32767;
-            host.audio_clip_count++;
-         } else if (scaled < -32768) {
-            scaled = -32768;
-            host.audio_clip_count++;
-         }
-         abs_out = scaled < 0 ? (unsigned)-scaled : (unsigned)scaled;
-         if (abs_out > host.audio_peak_max)
-            host.audio_peak_max = abs_out;
+         scaled = host_audio_scale_mono(left, right, &abs_out);
          if (abs_out > peak_out)
             peak_out = abs_out;
-         if (abs_out < LIBRETRO_AUDIO_GATE_CLOSE_LEVEL)
-            scaled = 0;
-         audio_mix_buffer[out_frames] = (int16_t)scaled;
+         host_audio_store_mono(audio_mix_buffer, (unsigned)out_frames,
+            (int16_t)scaled);
          out_frames++;
       }
       if (out_frames == 0)
          continue;
-      if (peak_out >= LIBRETRO_AUDIO_GATE_OPEN_LEVEL) {
-         if (!host.audio_gate_open) {
-            (void)unifrog_audio_set_output_enabled(&host.audio, 1);
-            host.audio_gate_open = 1;
-         }
-         host.audio_quiet_batches = 0;
-      } else if (peak_out <= LIBRETRO_AUDIO_GATE_CLOSE_LEVEL) {
-         if (host.audio_quiet_batches < UINT32_MAX)
-            host.audio_quiet_batches++;
-         if (host.audio_gate_open &&
-             host.audio_quiet_batches >= LIBRETRO_AUDIO_GATE_CLOSE_BATCHES) {
-            (void)unifrog_audio_set_output_enabled(&host.audio, 0);
-            host.audio_gate_open = 0;
-         }
-      } else {
-         host.audio_quiet_batches = 0;
-      }
-      {
-         uint32_t write_start = unifrog_perf_count();
-         int write_ret = unifrog_audio_write_timeout(&host.audio,
-            audio_mix_buffer, (unsigned)out_frames,
-            host_audio_write_attempts(), host_audio_write_poll_ms());
-         unsigned write_count = unifrog_perf_elapsed(write_start,
-            unifrog_perf_count());
-
-         host.audio_write_total_count += write_count;
-         if (write_count > host.audio_write_max_count)
-            host.audio_write_max_count = write_count;
-         host.audio_write_count++;
-         if (write_ret != 0) {
-            if (host.audio_failures < 8) {
-               printf("unifrog libretro audio_write_fail batch=%u frames=%u count=%u\n",
-                  host.audio_batches, (unsigned)out_frames, write_count);
-               (void)unifrog_log_flush();
-            }
-            host.audio_failures++;
-            break;
-         }
-      }
+      host_audio_update_gate(peak_out);
+      if (host_audio_write_frames(audio_mix_buffer, (unsigned)out_frames,
+          host.audio_batches) != 0)
+         break;
       offset += out_frames;
    }
 
@@ -1834,50 +2813,9 @@ size_t unifrog_libretro_audio_batch_cb(const int16_t *data, size_t frames)
    return input_offset ? input_offset : frames;
 }
 
-static uint16_t *host_convert_xrgb8888_to_rgb565(const void *data,
-   unsigned width, unsigned height, size_t pitch)
-{
-   size_t pixels;
-
-   if (pitch < (size_t)width * 4u)
-      return NULL;
-   pixels = (size_t)width * (size_t)height;
-   if (width != 0 && pixels / width != height)
-      return NULL;
-
-   if (pixels > host.video_convert_pixels) {
-      uint16_t *buffer = malloc(pixels * sizeof(*buffer));
-
-      if (!buffer)
-         return NULL;
-      free(host.video_convert_buffer);
-      host.video_convert_buffer = buffer;
-      host.video_convert_pixels = pixels;
-   }
-
-   for (unsigned y = 0; y < height; y++) {
-      const uint8_t *src = (const uint8_t *)data + (size_t)y * pitch;
-      uint16_t *dst = host.video_convert_buffer + (size_t)y * width;
-
-      for (unsigned x = 0; x < width; x++) {
-         unsigned b = src[x * 4u + 0u];
-         unsigned g = src[x * 4u + 1u];
-         unsigned r = src[x * 4u + 2u];
-
-         dst[x] = (uint16_t)(((r & 0xf8u) << 8) |
-            ((g & 0xfcu) << 3) | (b >> 3));
-      }
-   }
-
-   return host.video_convert_buffer;
-}
-
 void unifrog_libretro_video_refresh_cb(const void *data, unsigned width,
    unsigned height, size_t pitch)
 {
-   const void *present_data = data;
-   unsigned present_pitch = (unsigned)pitch;
-
    host_force_expected_gp();
    if (!data || width == 0 || height == 0)
       return;
@@ -1894,12 +2832,12 @@ void unifrog_libretro_video_refresh_cb(const void *data, unsigned width,
    }
 
    if (host.pixel_format == RETRO_PIXEL_FORMAT_XRGB8888) {
-      present_data = host_convert_xrgb8888_to_rgb565(data, width, height,
-         pitch);
-      if (!present_data)
+      if (pitch < (size_t)width * 4u)
          return;
-      present_pitch = width * 2u;
-   } else if (host.pixel_format != RETRO_PIXEL_FORMAT_RGB565) {
+   } else if (host.pixel_format == RETRO_PIXEL_FORMAT_RGB565) {
+      if (pitch < (size_t)width * 2u)
+         return;
+   } else {
       return;
    }
 
@@ -1911,11 +2849,100 @@ void unifrog_libretro_video_refresh_cb(const void *data, unsigned width,
    }
    host.video_width = width;
    host.video_height = height;
-   host.video_pitch = present_pitch;
+   host.video_pitch = (unsigned)pitch;
    host.video_frames++;
-   if (host.presenter_open)
-      (void)unifrog_presenter_present_rgb565(&host.presenter,
-         present_data, width, height, present_pitch);
+   if (data == host.software_framebuffer &&
+       pitch == host.software_framebuffer_pitch)
+      host.software_framebuffer_presents++;
+   if (host.presenter_open) {
+      if (host.pixel_format == RETRO_PIXEL_FORMAT_XRGB8888)
+         (void)unifrog_presenter_present_xrgb8888(&host.presenter,
+            data, width, height, (unsigned)pitch);
+      else
+         (void)unifrog_presenter_present_rgb565(&host.presenter,
+            data, width, height, (unsigned)pitch);
+   }
+}
+
+static unsigned host_pixel_format_bytes(enum retro_pixel_format format)
+{
+   switch (format) {
+   case RETRO_PIXEL_FORMAT_RGB565:
+      return 2u;
+   case RETRO_PIXEL_FORMAT_XRGB8888:
+      return 4u;
+   default:
+      return 0;
+   }
+}
+
+static int host_software_framebuffer_ensure(unsigned width, unsigned height,
+   enum retro_pixel_format format)
+{
+   unsigned bpp = host_pixel_format_bytes(format);
+   unsigned pitch;
+   size_t bytes;
+   void *buffer;
+
+   if (!width || !height || !bpp)
+      return -1;
+   if (width > 640u || height > 480u)
+      return -1;
+   pitch = width * bpp;
+   if (pitch & 63u)
+      pitch = (pitch + 63u) & ~63u;
+   bytes = (size_t)pitch * height;
+   if (host.software_framebuffer &&
+       host.software_framebuffer_bytes >= bytes &&
+       host.software_framebuffer_width == width &&
+       host.software_framebuffer_height == height &&
+       host.software_framebuffer_pitch == pitch &&
+       host.software_framebuffer_format == format)
+      return 0;
+
+   buffer = unifrog_surface_memalign(64u, bytes);
+   if (!buffer)
+      return -1;
+   unifrog_surface_free(host.software_framebuffer);
+   host.software_framebuffer = buffer;
+   host.software_framebuffer_bytes = bytes;
+   host.software_framebuffer_width = width;
+   host.software_framebuffer_height = height;
+   host.software_framebuffer_pitch = pitch;
+   host.software_framebuffer_format = format;
+   printf("unifrog libretro software_fb alloc width=%u height=%u pitch=%u fmt=%u bytes=%u mmz=%d\n",
+      width, height, pitch, format, (unsigned)bytes,
+      unifrog_surface_is_mmz(buffer));
+   return 0;
+}
+
+static bool host_get_current_software_framebuffer(struct retro_framebuffer *fb)
+{
+   unsigned width;
+   unsigned height;
+   enum retro_pixel_format format;
+
+   if (!fb)
+      return false;
+   host.software_framebuffer_requests++;
+   width = fb->width ? fb->width : host.video_max_width;
+   height = fb->height ? fb->height : host.video_max_height;
+   if (!width)
+      width = 320u;
+   if (!height)
+      height = 240u;
+   format = host.pixel_format == RETRO_PIXEL_FORMAT_XRGB8888 ?
+      RETRO_PIXEL_FORMAT_XRGB8888 : RETRO_PIXEL_FORMAT_RGB565;
+   if (host_software_framebuffer_ensure(width, height, format) != 0)
+      return false;
+   fb->data = host.software_framebuffer;
+   fb->width = width;
+   fb->height = height;
+   fb->pitch = host.software_framebuffer_pitch;
+   fb->format = format;
+   fb->memory_flags = RETRO_MEMORY_TYPE_CACHED;
+   host.software_framebuffer_hits++;
+   return true;
 }
 
 bool unifrog_libretro_environment_cb(unsigned cmd, void *data)
@@ -1980,14 +3007,51 @@ bool unifrog_libretro_environment_cb(unsigned cmd, void *data)
       return true;
    case RETRO_ENVIRONMENT_GET_VARIABLE:
       return host_get_variable((struct retro_variable *)data);
+   case RETRO_ENVIRONMENT_GET_CURRENT_SOFTWARE_FRAMEBUFFER:
+      return host_get_current_software_framebuffer(
+         (struct retro_framebuffer *)data);
    case RETRO_ENVIRONMENT_SET_VARIABLE:
       return false;
    case RETRO_ENVIRONMENT_SET_VARIABLES:
+      core_options_register_variables((const struct retro_variable *)data);
+      return true;
    case RETRO_ENVIRONMENT_SET_CORE_OPTIONS:
+      core_options_register_definitions(
+         (const struct retro_core_option_definition *)data);
+      return true;
    case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_INTL:
+      if (data) {
+         const struct retro_core_options_intl *intl =
+            (const struct retro_core_options_intl *)data;
+         core_options_register_definitions(intl->us ? intl->us : intl->local);
+      }
+      return true;
    case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2:
+      if (data) {
+         const struct retro_core_options_v2 *options =
+            (const struct retro_core_options_v2 *)data;
+         core_options_register_v2(options->definitions);
+      }
+      return true;
    case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL:
+      if (data) {
+         const struct retro_core_options_v2_intl *intl =
+            (const struct retro_core_options_v2_intl *)data;
+         const struct retro_core_options_v2 *options =
+            intl->us ? intl->us : intl->local;
+         if (options)
+            core_options_register_v2(options->definitions);
+      }
+      return true;
    case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY:
+      if (data) {
+         const struct retro_core_option_display *display =
+            (const struct retro_core_option_display *)data;
+         int index = core_option_find(display->key);
+         if (index >= 0)
+            host.core_options[index].visible = display->visible ? 1 : 0;
+      }
+      return true;
    case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_UPDATE_DISPLAY_CALLBACK:
    case RETRO_ENVIRONMENT_SET_CONTROLLER_INFO:
    case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME:
@@ -2027,12 +3091,16 @@ bool unifrog_libretro_environment_cb(unsigned cmd, void *data)
          return false;
       *(unsigned *)data = RETRO_LANGUAGE_ENGLISH;
       return true;
-   case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
    case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
    case RETRO_ENVIRONMENT_GET_CONTENT_DIRECTORY:
       if (!data)
          return false;
       *(const char **)data = "/media/mmcblk0";
+      return true;
+   case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
+      if (!data)
+         return false;
+      *(const char **)data = UNIFROG_BIOS_ROOT;
       return true;
    case RETRO_ENVIRONMENT_GET_MESSAGE_INTERFACE_VERSION:
       if (!data)
@@ -2223,6 +3291,46 @@ static int quick_js_cycle_backlight(void)
    return quick_js_status_value();
 }
 
+static unsigned quick_muos_current_backlight(void)
+{
+   unsigned current = 0;
+
+   if (unifrog_backlight_get(&current) != 0)
+      current = host.options.backlight_level >= 0 ?
+         (unsigned)host.options.backlight_level : 50u;
+   if (current > 100u)
+      current = 100u;
+   return current;
+}
+
+static unsigned quick_muos_cycle_backlight(int delta)
+{
+   unsigned current = quick_muos_current_backlight();
+   unsigned next = delta < 0 ?
+      quick_backlight_levels[ARRAY_SIZE(quick_backlight_levels) - 1u] :
+      quick_backlight_levels[0];
+
+   if (delta < 0) {
+      for (unsigned i = ARRAY_SIZE(quick_backlight_levels); i > 0; i--) {
+         if (quick_backlight_levels[i - 1u] < current) {
+            next = quick_backlight_levels[i - 1u];
+            break;
+         }
+      }
+   } else {
+      for (unsigned i = 0; i < ARRAY_SIZE(quick_backlight_levels); i++) {
+         if (quick_backlight_levels[i] > current) {
+            next = quick_backlight_levels[i];
+            break;
+         }
+      }
+   }
+   (void)unifrog_backlight_set(next);
+   host.options.backlight_level = (int)next;
+   printf("unifrog quick_muos backlight=%u\n", next);
+   return next;
+}
+
 static int quick_js_state_slot(void)
 {
    if (host.quick_state_slot >= LIBRETRO_STATE_SLOT_COUNT)
@@ -2298,6 +3406,94 @@ static int quick_js_cycle_scpu(int delta)
    return host.scpu_apply_ret == 0 ? (int)next : -1;
 }
 
+static const char *quick_muos_ge_label(enum unifrog_ge_clock clock)
+{
+   switch (clock) {
+   case UNIFROG_GE_CLOCK_148MHZ:
+      return "148";
+   case UNIFROG_GE_CLOCK_225MHZ:
+      return "225";
+   case UNIFROG_GE_CLOCK_238MHZ:
+      return "238";
+   default:
+      return "198";
+   }
+}
+
+static int quick_muos_cycle_ge_clock(int delta)
+{
+   static const enum unifrog_ge_clock clocks[] = {
+      UNIFROG_GE_CLOCK_148MHZ,
+      UNIFROG_GE_CLOCK_198MHZ,
+      UNIFROG_GE_CLOCK_225MHZ,
+      UNIFROG_GE_CLOCK_238MHZ,
+   };
+   unsigned index = 1;
+
+   for (unsigned i = 0; i < ARRAY_SIZE(clocks); i++) {
+      if (clocks[i] == host.ge_clock) {
+         index = i;
+         break;
+      }
+   }
+   if (delta < 0) {
+      if (index == 0)
+         index = ARRAY_SIZE(clocks) - 1u;
+      else
+         index--;
+   } else {
+      index++;
+      if (index >= ARRAY_SIZE(clocks))
+         index = 0;
+   }
+   host.ge_clock = clocks[index];
+   host.options.ge_clock = (int)host.ge_clock;
+   if (host.presenter_open)
+      (void)unifrog_ge_set_clock(&host.presenter.ge, host.ge_clock);
+   printf("unifrog quick_muos ge_clock=%s enum=%d\n",
+      quick_muos_ge_label(host.ge_clock), host.options.ge_clock);
+   return host.options.ge_clock;
+}
+
+static int quick_muos_cycle_input_profile(int delta)
+{
+   static const int profiles[] = {
+      UNIFROG_LIBRETRO_INPUT_DEFAULT,
+      UNIFROG_LIBRETRO_INPUT_RETROARCH,
+      UNIFROG_LIBRETRO_INPUT_GENESIS,
+      UNIFROG_LIBRETRO_INPUT_SWAP_AB,
+      UNIFROG_LIBRETRO_INPUT_SWAP_XY,
+   };
+   unsigned index = 0;
+
+   host.input_profile = sanitize_input_profile(host.input_profile);
+   for (unsigned i = 0; i < ARRAY_SIZE(profiles); i++) {
+      if (profiles[i] == host.input_profile) {
+         index = i;
+         break;
+      }
+   }
+   if (delta < 0) {
+      if (index == 0)
+         index = ARRAY_SIZE(profiles) - 1u;
+      else
+         index--;
+   } else {
+      index++;
+      if (index >= ARRAY_SIZE(profiles))
+         index = 0;
+   }
+   host.input_profile = profiles[index];
+   host.options.input_profile = host.input_profile;
+   host.input_profile_dirty = 1;
+   host.core_options_dirty = 1;
+   core_options_save_opt_file();
+   printf("unifrog quick_muos keymap=%s\n",
+      input_profile_opt_value(host.input_profile));
+   return host.input_profile;
+}
+
+#if UNIFROG_FRONTEND_JS2300
 static struct unifrog_surface quick_js_surface(void)
 {
    return unifrog_fb_surface_for_buffer(&host.presenter.fb,
@@ -2599,6 +3795,647 @@ static int quick_js_run(const struct libretro_core_api *core,
       host.fast_forward_force_present = 1;
    return host.quick_js_action == QUICK_JS_ACTION_RETURN_MENU ? 1 : 0;
 }
+#else
+static void quick_muos_draw_row(struct unifrog_surface *surface, int y,
+   const char *label, const char *detail, int focused)
+{
+   uint16_t bg = focused ? UNIFROG_RGB565(45, 95, 110) :
+      UNIFROG_RGB565(22, 29, 39);
+   uint16_t fg = focused ? UNIFROG_RGB565(255, 255, 255) :
+      UNIFROG_RGB565(230, 238, 240);
+   uint16_t muted = focused ? UNIFROG_RGB565(205, 240, 235) :
+      UNIFROG_RGB565(139, 154, 160);
+   int w = (int)surface->width - 20;
+
+   unifrog_gfx_fill_rect(surface, 10, y - 3, w, 22, bg);
+   if (focused)
+      unifrog_gfx_fill_rect(surface, 10, y - 3, 4, 22,
+         UNIFROG_RGB565(120, 214, 189));
+   unifrog_gfx_draw_text(surface, 14, y + 2, label ? label : "", fg, 1);
+   if (detail && detail[0])
+      unifrog_gfx_draw_text(surface, 216, y + 2, detail, muted, 1);
+}
+
+static void quick_muos_draw_tab(struct unifrog_surface *surface, int x, int y,
+   int w, const char *label, int focused)
+{
+   uint16_t bg = focused ? UNIFROG_RGB565(52, 104, 132) :
+      UNIFROG_RGB565(22, 29, 39);
+   uint16_t fg = focused ? UNIFROG_RGB565(255, 255, 255) :
+      UNIFROG_RGB565(205, 240, 235);
+
+   unifrog_gfx_fill_rect(surface, x, y, w, 20, bg);
+   if (focused)
+      unifrog_gfx_fill_rect(surface, x, y, w, 2,
+         UNIFROG_RGB565(120, 214, 189));
+   unifrog_gfx_draw_text(surface, x + 8, y + 6, label ? label : "", fg, 1);
+}
+
+static void quick_muos_detail(char *dst, size_t size, unsigned value)
+{
+   if (!dst || size == 0)
+      return;
+   snprintf(dst, size, "< %u >", value);
+}
+
+static void quick_muos_fast_forward_detail(char *dst, size_t size)
+{
+   unsigned multiplier;
+
+   if (!dst || size == 0)
+      return;
+   multiplier = sanitize_fast_forward_multiplier(host.fast_forward_multiplier);
+   if (multiplier == 0)
+      snprintf(dst, size, "< Off >");
+   else
+      snprintf(dst, size, "< %ux >", multiplier);
+}
+
+static unsigned quick_muos_visible_core_option_count(void)
+{
+   unsigned count = 0;
+
+   for (unsigned i = 0; i < host.core_option_count; i++) {
+      if (host.core_options[i].visible && host.core_options[i].value_count)
+         count++;
+   }
+   return count;
+}
+
+static int quick_muos_visible_core_option_index(unsigned visible_index)
+{
+   unsigned count = 0;
+
+   for (unsigned i = 0; i < host.core_option_count; i++) {
+      if (!host.core_options[i].visible || !host.core_options[i].value_count)
+         continue;
+      if (count == visible_index)
+         return (int)i;
+      count++;
+   }
+   return -1;
+}
+
+static void quick_muos_core_option_detail(char *dst, size_t size,
+   const struct quick_core_option *option)
+{
+   const char *value;
+
+   if (!dst || size == 0)
+      return;
+   if (!option || option->selected >= option->value_count) {
+      dst[0] = '\0';
+      return;
+   }
+   value = option->value_labels[option->selected][0] ?
+      option->value_labels[option->selected] : option->values[option->selected];
+   snprintf(dst, size, "< %.18s >", value);
+}
+
+static void quick_muos_cycle_core_option(unsigned visible_index, int delta)
+{
+   int actual = quick_muos_visible_core_option_index(visible_index);
+   struct quick_core_option *option;
+
+   if (actual < 0)
+      return;
+   option = &host.core_options[actual];
+   if (option->value_count == 0)
+      return;
+   if (delta < 0) {
+      if (option->selected == 0)
+         option->selected = option->value_count - 1u;
+      else
+         option->selected--;
+   } else {
+      option->selected++;
+      if (option->selected >= option->value_count)
+         option->selected = 0;
+   }
+   host.variables_dirty = 1;
+   host.core_options_dirty = 1;
+   printf("unifrog quick_muos core_option key=%s value=%s index=%u/%u\n",
+      option->key, option->values[option->selected],
+      option->selected + 1u, option->value_count);
+   core_options_save_opt_file();
+}
+
+static void quick_muos_present(unsigned buffer)
+{
+   unifrog_fb_flush_buffer(&host.presenter.fb, buffer);
+   if (unifrog_fb_pan(&host.presenter.fb, buffer) == 0)
+      host.presenter.active_buffer = buffer;
+}
+
+static int quick_muos_run(const struct libretro_core_api *core,
+   const char *rom_path)
+{
+   enum quick_muos_page {
+      QUICK_MUOS_PAGE_MAIN = 0,
+      QUICK_MUOS_PAGE_CORE = 1,
+      QUICK_MUOS_PAGE_UNIFROG = 2,
+      QUICK_MUOS_PAGE_CONFIRM = 3,
+   };
+   enum quick_muos_main_row {
+      QUICK_MUOS_MAIN_RESUME,
+      QUICK_MUOS_MAIN_SAVE,
+      QUICK_MUOS_MAIN_LOAD,
+      QUICK_MUOS_MAIN_CORE,
+      QUICK_MUOS_MAIN_UNIFROG,
+      QUICK_MUOS_MAIN_RETURN,
+      QUICK_MUOS_MAIN_COUNT,
+   };
+   enum quick_muos_core_row {
+      QUICK_MUOS_CORE_BACK,
+      QUICK_MUOS_CORE_FIXED_COUNT,
+   };
+   enum quick_muos_unifrog_row {
+      QUICK_MUOS_UNIFROG_BACK,
+      QUICK_MUOS_UNIFROG_FAST_FORWARD,
+      QUICK_MUOS_UNIFROG_FRAMESKIP,
+      QUICK_MUOS_UNIFROG_AUDIO,
+      QUICK_MUOS_UNIFROG_DISPLAY,
+      QUICK_MUOS_UNIFROG_KEYMAP,
+      QUICK_MUOS_UNIFROG_CPU,
+      QUICK_MUOS_UNIFROG_GE,
+      QUICK_MUOS_UNIFROG_BACKLIGHT,
+      QUICK_MUOS_UNIFROG_COUNT,
+   };
+   enum quick_muos_confirm_row {
+      QUICK_MUOS_CONFIRM_YES,
+      QUICK_MUOS_CONFIRM_CANCEL,
+      QUICK_MUOS_CONFIRM_COUNT,
+   };
+   enum quick_muos_confirm_action {
+      QUICK_MUOS_CONFIRM_NONE,
+      QUICK_MUOS_CONFIRM_SAVE,
+      QUICK_MUOS_CONFIRM_LOAD,
+   };
+   static const char *main_labels[] = {
+      "Resume", "Save state", "Load state", "Core Options",
+      "UniFrog Settings", "Return to UniFrog",
+   };
+   static const char *core_labels[] = {
+      "Back",
+   };
+   static const char *unifrog_labels[] = {
+      "Back", "Fast forward", "Frameskip", "Audio", "Display", "Keymap",
+      "CPU", "GE", "Backlight",
+   };
+   static const char *confirm_labels[] = {
+      "Confirm", "Cancel",
+   };
+   unsigned selected = 0;
+   unsigned page = QUICK_MUOS_PAGE_MAIN;
+   unsigned previous_page = QUICK_MUOS_PAGE_MAIN;
+   unsigned previous_selected = QUICK_MUOS_MAIN_SAVE;
+   unsigned confirm_action = QUICK_MUOS_CONFIRM_NONE;
+   unsigned save_slot;
+   unsigned load_slot;
+   uint32_t previous = 0;
+   uint32_t repeat_button = 0;
+   uint32_t next_repeat_ms = 0;
+   int input_ready = 0;
+   int entry_combo_released = 0;
+   const uint32_t entry_combo =
+      UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_SELECT) |
+      UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_START);
+   const uint32_t action_buttons =
+      entry_combo |
+      UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_A) |
+      UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_B);
+   static const char *labels[QUICK_MUOS_CORE_FIXED_COUNT +
+      LIBRETRO_CORE_OPTION_MAX];
+   static char label_storage[LIBRETRO_CORE_OPTION_MAX]
+      [LIBRETRO_CORE_OPTION_LABEL_MAX];
+   static char detail[QUICK_MUOS_CORE_FIXED_COUNT +
+      LIBRETRO_CORE_OPTION_MAX][28];
+
+   (void)core;
+   (void)rom_path;
+
+   if (!host.presenter_open)
+      return 0;
+   if (host.audio_open)
+      (void)unifrog_audio_set_output_enabled(&host.audio, 0);
+   host.audio_gate_open = 0;
+   host.quick_js_action = QUICK_JS_ACTION_RESUME;
+   host.quick_combo_armed = 0;
+   host.quick_status[0] = '\0';
+   host.quick_core = core;
+   host.quick_rom_path = rom_path;
+   if (host.quick_state_slot >= LIBRETRO_STATE_SLOT_COUNT)
+      host.quick_state_slot = 0;
+   save_slot = host.quick_state_slot;
+   load_slot = host.quick_state_slot;
+
+   printf("unifrog quick_muos start entry_buttons=0x%08lx\n",
+      (unsigned long)unifrog_input_menu_buttons());
+
+   for (;;) {
+      uint32_t buttons;
+      uint32_t pressed;
+      uint32_t now_ms;
+      unsigned draw_buffer;
+      struct unifrog_surface surface;
+      unsigned row_count;
+      unsigned visible_rows;
+      unsigned first_row;
+      const char *footer;
+
+      draw_buffer = host.presenter.active_buffer;
+      if (host.presenter.buffer_count > 1)
+         draw_buffer = (host.presenter.active_buffer + 1u) %
+            host.presenter.buffer_count;
+      surface = unifrog_fb_surface_for_buffer(&host.presenter.fb,
+         draw_buffer);
+
+      memset(detail, 0, sizeof(detail));
+      if (page == QUICK_MUOS_PAGE_MAIN) {
+         for (unsigned i = 0; i < QUICK_MUOS_MAIN_COUNT; i++)
+            labels[i] = main_labels[i];
+         row_count = QUICK_MUOS_MAIN_COUNT;
+         quick_muos_detail(detail[QUICK_MUOS_MAIN_SAVE],
+            sizeof(detail[QUICK_MUOS_MAIN_SAVE]), save_slot + 1u);
+         quick_muos_detail(detail[QUICK_MUOS_MAIN_LOAD],
+            sizeof(detail[QUICK_MUOS_MAIN_LOAD]), load_slot + 1u);
+         snprintf(detail[QUICK_MUOS_MAIN_CORE],
+            sizeof(detail[QUICK_MUOS_MAIN_CORE]), "%u options",
+            quick_muos_visible_core_option_count());
+      } else {
+         if (page == QUICK_MUOS_PAGE_CORE) {
+            unsigned visible_core_options = quick_muos_visible_core_option_count();
+
+            for (unsigned i = 0; i < QUICK_MUOS_CORE_FIXED_COUNT; i++)
+               labels[i] = core_labels[i];
+            row_count = QUICK_MUOS_CORE_FIXED_COUNT + visible_core_options;
+            for (unsigned i = 0; i < visible_core_options; i++) {
+               int actual = quick_muos_visible_core_option_index(i);
+               unsigned row = QUICK_MUOS_CORE_FIXED_COUNT + i;
+               if (actual < 0)
+                  continue;
+               snprintf(label_storage[i], sizeof(label_storage[i]), "%.25s",
+                  host.core_options[actual].label);
+               labels[row] = label_storage[i];
+               quick_muos_core_option_detail(detail[row], sizeof(detail[row]),
+                  &host.core_options[actual]);
+            }
+         } else if (page == QUICK_MUOS_PAGE_UNIFROG) {
+            for (unsigned i = 0; i < QUICK_MUOS_UNIFROG_COUNT; i++)
+               labels[i] = unifrog_labels[i];
+            row_count = QUICK_MUOS_UNIFROG_COUNT;
+            quick_muos_fast_forward_detail(
+               detail[QUICK_MUOS_UNIFROG_FAST_FORWARD],
+               sizeof(detail[QUICK_MUOS_UNIFROG_FAST_FORWARD]));
+            snprintf(detail[QUICK_MUOS_UNIFROG_FRAMESKIP],
+               sizeof(detail[QUICK_MUOS_UNIFROG_FRAMESKIP]), "< %s >",
+               quick_js_frameskip_label());
+            snprintf(detail[QUICK_MUOS_UNIFROG_AUDIO],
+               sizeof(detail[QUICK_MUOS_UNIFROG_AUDIO]), "< %s >",
+               host.audio_enabled ? "on" : "off");
+            snprintf(detail[QUICK_MUOS_UNIFROG_DISPLAY],
+               sizeof(detail[QUICK_MUOS_UNIFROG_DISPLAY]), "< %s >",
+               display_mode_label(host.display_mode));
+            snprintf(detail[QUICK_MUOS_UNIFROG_KEYMAP],
+               sizeof(detail[QUICK_MUOS_UNIFROG_KEYMAP]), "< %s >",
+               input_profile_opt_value(host.input_profile));
+            snprintf(detail[QUICK_MUOS_UNIFROG_CPU],
+               sizeof(detail[QUICK_MUOS_UNIFROG_CPU]), "< %u >",
+               quick_js_current_scpu_mhz());
+            snprintf(detail[QUICK_MUOS_UNIFROG_GE],
+               sizeof(detail[QUICK_MUOS_UNIFROG_GE]), "< %s >",
+               quick_muos_ge_label(host.ge_clock));
+            quick_muos_detail(detail[QUICK_MUOS_UNIFROG_BACKLIGHT],
+               sizeof(detail[QUICK_MUOS_UNIFROG_BACKLIGHT]),
+               quick_muos_current_backlight());
+         } else {
+            for (unsigned i = 0; i < QUICK_MUOS_CONFIRM_COUNT; i++)
+               labels[i] = confirm_labels[i];
+            row_count = QUICK_MUOS_CONFIRM_COUNT;
+            snprintf(detail[QUICK_MUOS_CONFIRM_YES],
+               sizeof(detail[QUICK_MUOS_CONFIRM_YES]), "< slot %u >",
+               confirm_action == QUICK_MUOS_CONFIRM_LOAD ?
+                  load_slot + 1u : save_slot + 1u);
+         }
+      }
+      footer = page == QUICK_MUOS_PAGE_CONFIRM ?
+         "A confirm  B cancel" : "A choose  Left/Right adjust  B back";
+      visible_rows = page == QUICK_MUOS_PAGE_CONFIRM ? 2u : 8u;
+      if (visible_rows > row_count)
+         visible_rows = row_count;
+      first_row = 0;
+      if (selected >= visible_rows)
+         first_row = selected - visible_rows + 1u;
+
+      unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height,
+         UNIFROG_RGB565(8, 10, 14));
+      unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, 36,
+         UNIFROG_RGB565(22, 29, 39));
+      unifrog_gfx_fill_rect(&surface, 0, 36, surface.width, 1,
+         UNIFROG_RGB565(120, 214, 189));
+      unifrog_gfx_draw_text(&surface, 12, 10, "Pause Menu",
+         UNIFROG_RGB565(230, 238, 240), 1);
+      unifrog_gfx_draw_text(&surface, (int)surface.width - 58, 10,
+         page == QUICK_MUOS_PAGE_MAIN ? "paused" :
+            page == QUICK_MUOS_PAGE_CORE ? "core" :
+            page == QUICK_MUOS_PAGE_UNIFROG ? "settings" : "sure?",
+         UNIFROG_RGB565(139, 154, 160), 1);
+      quick_muos_draw_tab(&surface, 10, 38, 70, "Pause",
+         page == QUICK_MUOS_PAGE_MAIN);
+      quick_muos_draw_tab(&surface, 84, 38, 70, "Core",
+         page == QUICK_MUOS_PAGE_CORE);
+      quick_muos_draw_tab(&surface, 158, 38, 78, "UniFrog",
+         page == QUICK_MUOS_PAGE_UNIFROG);
+      quick_muos_draw_tab(&surface, 240, 38, 70, "State",
+         page == QUICK_MUOS_PAGE_CONFIRM);
+      if (page == QUICK_MUOS_PAGE_CONFIRM)
+         unifrog_gfx_draw_text(&surface, 14, 64,
+            confirm_action == QUICK_MUOS_CONFIRM_LOAD ?
+               "Load selected state?" : "Save selected state?",
+            UNIFROG_RGB565(230, 238, 240), 1);
+      for (unsigned i = 0; i < visible_rows; i++) {
+         unsigned row = first_row + i;
+         quick_muos_draw_row(&surface,
+            (page == QUICK_MUOS_PAGE_CONFIRM ? 90 : 66) + (int)i * 18,
+            labels[row], detail[row], row == selected);
+      }
+      if (host.quick_status[0])
+         unifrog_gfx_draw_text(&surface, 12, (int)surface.height - 34,
+            host.quick_status, UNIFROG_RGB565(205, 240, 235), 1);
+      unifrog_gfx_fill_rect(&surface, 0, (int)surface.height - 22,
+         surface.width, 22, UNIFROG_RGB565(22, 29, 39));
+      unifrog_gfx_fill_rect(&surface, 0, (int)surface.height - 23,
+         surface.width, 1, UNIFROG_RGB565(120, 214, 189));
+      unifrog_gfx_draw_text(&surface, 12, (int)surface.height - 15,
+         footer, UNIFROG_RGB565(139, 154, 160), 1);
+      quick_muos_present(draw_buffer);
+
+      unifrog_input_save_previous();
+      unifrog_input_poll_with_wireless_divisor(1);
+      host.buttons = unifrog_input_buttons();
+      buttons = unifrog_input_menu_buttons();
+      now_ms = unifrog_perf_time_ms();
+
+      if (!input_ready) {
+         previous = buttons;
+         if ((buttons & action_buttons) == 0) {
+            input_ready = 1;
+            entry_combo_released = 1;
+            repeat_button = 0;
+            next_repeat_ms = 0;
+            printf("unifrog quick_muos input_ready ms=%lu\n",
+               (unsigned long)now_ms);
+         }
+         usleep(16000);
+         continue;
+      }
+
+      pressed = buttons & ~previous;
+
+      if ((buttons & entry_combo) != entry_combo)
+         entry_combo_released = 1;
+
+      if (!(buttons & (UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_UP) |
+                       UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_DOWN)))) {
+         repeat_button = 0;
+         next_repeat_ms = 0;
+      }
+      if ((pressed & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_UP)) ||
+          (repeat_button == UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_UP) &&
+           now_ms >= next_repeat_ms)) {
+         selected = selected == 0 ? row_count - 1u : selected - 1u;
+         repeat_button = UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_UP);
+         next_repeat_ms = now_ms + ((pressed & repeat_button) ? 320u : 90u);
+      }
+      if ((pressed & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_DOWN)) ||
+          (repeat_button == UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_DOWN) &&
+           now_ms >= next_repeat_ms)) {
+         selected++;
+         if (selected >= row_count)
+            selected = 0;
+         repeat_button = UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_DOWN);
+         next_repeat_ms = now_ms + ((pressed & repeat_button) ? 320u : 90u);
+      }
+      if (pressed & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_LEFT)) {
+         if (page == QUICK_MUOS_PAGE_CONFIRM &&
+             selected == QUICK_MUOS_CONFIRM_YES) {
+            if (confirm_action == QUICK_MUOS_CONFIRM_LOAD)
+               load_slot = load_slot == 0 ? LIBRETRO_STATE_SLOT_COUNT - 1u :
+                  load_slot - 1u;
+            else
+               save_slot = save_slot == 0 ? LIBRETRO_STATE_SLOT_COUNT - 1u :
+                  save_slot - 1u;
+         } else if (page == QUICK_MUOS_PAGE_MAIN) {
+            if (selected == QUICK_MUOS_MAIN_SAVE)
+               save_slot = save_slot == 0 ? LIBRETRO_STATE_SLOT_COUNT - 1u :
+                  save_slot - 1u;
+            else if (selected == QUICK_MUOS_MAIN_LOAD)
+               load_slot = load_slot == 0 ? LIBRETRO_STATE_SLOT_COUNT - 1u :
+                  load_slot - 1u;
+         } else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_FAST_FORWARD)
+            (void)quick_js_cycle_fast_forward_multiplier(-1);
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_FRAMESKIP)
+            (void)quick_js_cycle_frameskip(-1);
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_AUDIO)
+            (void)quick_js_toggle_audio();
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_DISPLAY)
+            (void)quick_js_cycle_display();
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_KEYMAP)
+            (void)quick_muos_cycle_input_profile(-1);
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_CPU)
+            (void)quick_js_cycle_scpu(-1);
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_GE)
+            (void)quick_muos_cycle_ge_clock(-1);
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_BACKLIGHT)
+            (void)quick_muos_cycle_backlight(-1);
+         else if (page == QUICK_MUOS_PAGE_CORE &&
+               selected >= QUICK_MUOS_CORE_FIXED_COUNT)
+            quick_muos_cycle_core_option(
+               selected - QUICK_MUOS_CORE_FIXED_COUNT, -1);
+      }
+      if (pressed & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_RIGHT)) {
+         if (page == QUICK_MUOS_PAGE_CONFIRM &&
+             selected == QUICK_MUOS_CONFIRM_YES) {
+            unsigned *slot = confirm_action == QUICK_MUOS_CONFIRM_LOAD ?
+               &load_slot : &save_slot;
+            (*slot)++;
+            if (*slot >= LIBRETRO_STATE_SLOT_COUNT)
+               *slot = 0;
+         } else if (page == QUICK_MUOS_PAGE_MAIN) {
+            if (selected == QUICK_MUOS_MAIN_SAVE) {
+               save_slot++;
+               if (save_slot >= LIBRETRO_STATE_SLOT_COUNT)
+                  save_slot = 0;
+            } else if (selected == QUICK_MUOS_MAIN_LOAD) {
+               load_slot++;
+               if (load_slot >= LIBRETRO_STATE_SLOT_COUNT)
+                  load_slot = 0;
+            }
+         } else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_FAST_FORWARD)
+            (void)quick_js_cycle_fast_forward_multiplier(1);
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_FRAMESKIP)
+            (void)quick_js_cycle_frameskip(1);
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_AUDIO)
+            (void)quick_js_toggle_audio();
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_DISPLAY)
+            (void)quick_js_cycle_display();
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_KEYMAP)
+            (void)quick_muos_cycle_input_profile(1);
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_CPU)
+            (void)quick_js_cycle_scpu(1);
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_GE)
+            (void)quick_muos_cycle_ge_clock(1);
+         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
+               selected == QUICK_MUOS_UNIFROG_BACKLIGHT)
+            (void)quick_muos_cycle_backlight(1);
+         else if (page == QUICK_MUOS_PAGE_CORE &&
+               selected >= QUICK_MUOS_CORE_FIXED_COUNT)
+            quick_muos_cycle_core_option(
+               selected - QUICK_MUOS_CORE_FIXED_COUNT, 1);
+      }
+      if (entry_combo_released &&
+          (pressed & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_SELECT)) &&
+          (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_START)))
+         break;
+      if (pressed & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_B)) {
+         if (page != QUICK_MUOS_PAGE_MAIN) {
+            page = previous_page;
+            selected = previous_selected;
+            confirm_action = QUICK_MUOS_CONFIRM_NONE;
+            previous = buttons;
+            usleep(16000);
+            continue;
+         }
+         break;
+      }
+      if (pressed & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_A)) {
+         if (page == QUICK_MUOS_PAGE_MAIN) {
+            if (selected == QUICK_MUOS_MAIN_RESUME) {
+               break;
+            } else if (selected == QUICK_MUOS_MAIN_SAVE) {
+               previous_page = page;
+               previous_selected = selected;
+               confirm_action = QUICK_MUOS_CONFIRM_SAVE;
+               page = QUICK_MUOS_PAGE_CONFIRM;
+               selected = QUICK_MUOS_CONFIRM_YES;
+               snprintf(host.quick_status, sizeof(host.quick_status),
+                  "Save to slot %u", save_slot + 1u);
+            } else if (selected == QUICK_MUOS_MAIN_LOAD) {
+               previous_page = page;
+               previous_selected = selected;
+               confirm_action = QUICK_MUOS_CONFIRM_LOAD;
+               page = QUICK_MUOS_PAGE_CONFIRM;
+               selected = QUICK_MUOS_CONFIRM_YES;
+               snprintf(host.quick_status, sizeof(host.quick_status),
+                  "Load from slot %u", load_slot + 1u);
+            } else if (selected == QUICK_MUOS_MAIN_CORE) {
+               previous_page = page;
+               previous_selected = selected;
+               page = QUICK_MUOS_PAGE_CORE;
+               selected = QUICK_MUOS_CORE_FIXED_COUNT;
+               if (selected >= QUICK_MUOS_CORE_FIXED_COUNT +
+                   quick_muos_visible_core_option_count())
+                  selected = QUICK_MUOS_CORE_BACK;
+            } else if (selected == QUICK_MUOS_MAIN_UNIFROG) {
+               previous_page = page;
+               previous_selected = selected;
+               page = QUICK_MUOS_PAGE_UNIFROG;
+               selected = QUICK_MUOS_UNIFROG_FAST_FORWARD;
+            } else if (selected == QUICK_MUOS_MAIN_RETURN) {
+               host.quick_js_action = QUICK_JS_ACTION_RETURN_MENU;
+               break;
+            }
+         } else if (page == QUICK_MUOS_PAGE_CORE) {
+            if (selected == QUICK_MUOS_CORE_BACK) {
+               page = QUICK_MUOS_PAGE_MAIN;
+               selected = QUICK_MUOS_MAIN_CORE;
+            } else if (selected >= QUICK_MUOS_CORE_FIXED_COUNT) {
+               quick_muos_cycle_core_option(
+                  selected - QUICK_MUOS_CORE_FIXED_COUNT, 1);
+            }
+         } else if (page == QUICK_MUOS_PAGE_UNIFROG) {
+            if (selected == QUICK_MUOS_UNIFROG_BACK) {
+               page = QUICK_MUOS_PAGE_MAIN;
+               selected = QUICK_MUOS_MAIN_UNIFROG;
+            } else if (selected == QUICK_MUOS_UNIFROG_FAST_FORWARD) {
+               (void)quick_js_cycle_fast_forward_multiplier(1);
+            } else if (selected == QUICK_MUOS_UNIFROG_FRAMESKIP) {
+               (void)quick_js_cycle_frameskip(1);
+            } else if (selected == QUICK_MUOS_UNIFROG_AUDIO) {
+               (void)quick_js_toggle_audio();
+            } else if (selected == QUICK_MUOS_UNIFROG_DISPLAY) {
+               (void)quick_js_cycle_display();
+            } else if (selected == QUICK_MUOS_UNIFROG_KEYMAP) {
+               (void)quick_muos_cycle_input_profile(1);
+            } else if (selected == QUICK_MUOS_UNIFROG_CPU) {
+               (void)quick_js_cycle_scpu(1);
+            } else if (selected == QUICK_MUOS_UNIFROG_GE) {
+               (void)quick_muos_cycle_ge_clock(1);
+            } else if (selected == QUICK_MUOS_UNIFROG_BACKLIGHT) {
+               (void)quick_muos_cycle_backlight(1);
+            }
+         } else {
+            if (selected == QUICK_MUOS_CONFIRM_CANCEL) {
+               page = previous_page;
+               selected = previous_selected;
+               confirm_action = QUICK_MUOS_CONFIRM_NONE;
+            } else if (confirm_action == QUICK_MUOS_CONFIRM_SAVE) {
+               int ret;
+
+               host.quick_state_slot = save_slot;
+               printf("unifrog quick_muos confirm save slot=%u\n",
+                  save_slot);
+               ret = quick_save_state_file();
+               if (ret >= 0)
+                  break;
+               page = previous_page;
+               selected = previous_selected;
+            } else if (confirm_action == QUICK_MUOS_CONFIRM_LOAD) {
+               int ret;
+
+               host.quick_state_slot = load_slot;
+               printf("unifrog quick_muos confirm load slot=%u\n",
+                  load_slot);
+               ret = quick_load_state_file();
+               if (ret >= 0)
+                  break;
+               page = previous_page;
+               selected = previous_selected;
+            }
+         }
+      }
+      previous = buttons;
+      usleep(16000);
+   }
+
+   host.presenter.cleared_buffer_mask = 0;
+   if (host.fast_forward)
+      host.fast_forward_force_present = 1;
+   printf("unifrog quick_muos done action=%d\n", host.quick_js_action);
+   return host.quick_js_action == QUICK_JS_ACTION_RETURN_MENU ? 1 : 0;
+}
+
+static int quick_js_run(const struct libretro_core_api *core,
+   const char *rom_path)
+{
+   return quick_muos_run(core, rom_path);
+}
+#endif
 
 static unsigned host_calibrate_count_hz(void)
 {
@@ -2865,7 +4702,7 @@ static void host_report_perf(const char *core_id, int final)
       host.pace_reset_frames,
       host.memory_autosaves);
 
-   printf("unifrog perf_cpu core=%s slow=%u scpu=%u count_hz=%u count_cal=%u budget=%u run_avg=%u run_max=%u active_avg=%u active_max=%u video=%u present_frames=%u present_avg=%u present_max=%u ge=%u sync=%u vsync=%u pan=%u dst=%d,%d %dx%d\n",
+   printf("unifrog perf_cpu core=%s slow=%u scpu=%u count_hz=%u count_cal=%u budget=%u run_avg=%u run_max=%u active_avg=%u active_max=%u video=%u present_frames=%u present_avg=%u present_max=%u ge=%u sync=%u vsync=%u pan=%u blit=%u stretch=%u swfb_req=%u swfb_hit=%u swfb_present=%u dst=%d,%d %dx%d\n",
       core_id ? core_id : "?",
       host.slow_frames,
       host.scpu_mhz_est, host.count_hz_est,
@@ -2883,6 +4720,11 @@ static void host_report_perf(const char *core_id, int final)
       host_avg_count(present.sync_count, present.frames),
       host_avg_count(present.vsync_count, present.frames),
       host_avg_count(present.pan_count, present.frames),
+      present.blits,
+      present.stretches,
+      host.software_framebuffer_requests,
+      host.software_framebuffer_hits,
+      host.software_framebuffer_presents,
       present.dst_x, present.dst_y, present.dst_w, present.dst_h);
 
    printf("unifrog perf_audio core=%s batches=%u frames=%u delay_ret=%d delay=%lu fail=%u write_avg=%u write_max=%u gain=%u peak=%u clip=%u gate=%d quiet=%u status=%u status_active=%u status_under=%u occ_avg=%u occ_min=%u occ_max=%u\n",
@@ -2908,6 +4750,9 @@ static void host_report_perf(const char *core_id, int final)
    host.audio_report_batches = host.audio_batches;
    host.audio_report_frames = host.audio_frames;
    host.audio_report_failures = host.audio_failures;
+   host.software_framebuffer_requests = 0;
+   host.software_framebuffer_hits = 0;
+   host.software_framebuffer_presents = 0;
    host.slow_frames = 0;
    host.run_total_count = 0;
    host.run_max_count = 0;
@@ -3060,12 +4905,13 @@ static int zip_select_rom_entry_stream(FILE *file, const char *zip_path,
    size_t zip_size, const char *valid_extensions,
    struct zip_rom_entry *selected)
 {
-   uint8_t fixed[46];
    uint8_t *tail = NULL;
+   uint8_t *cd = NULL;
    size_t tail_size;
    size_t tail_eocd;
    uint32_t cd_offset;
    uint32_t cd_size;
+   size_t cursor = 0;
    uint16_t entries;
    int out_ret = -1;
 
@@ -3086,11 +4932,17 @@ static int zip_select_rom_entry_stream(FILE *file, const char *zip_path,
    cd_offset = read_le32(tail + tail_eocd + 16);
    if ((size_t)cd_offset + cd_size > zip_size)
       goto out;
-   if (fseek(file, (long)cd_offset, SEEK_SET) != 0)
+   if (cd_size == 0 || cd_size > 4u * 1024u * 1024u)
+      goto out;
+   cd = malloc(cd_size);
+   if (!cd)
+      goto out;
+   if (fseek(file, (long)cd_offset, SEEK_SET) != 0 ||
+       fread(cd, 1, cd_size, file) != cd_size)
       goto out;
 
    memset(selected, 0, sizeof(*selected));
-   for (uint16_t i = 0; i < entries; i++) {
+   for (uint16_t i = 0; i < entries && cursor + 46u <= cd_size; i++) {
       uint16_t name_len;
       uint16_t extra_len;
       uint16_t comment_len;
@@ -3101,33 +4953,29 @@ static int zip_select_rom_entry_stream(FILE *file, const char *zip_path,
       uint32_t local_offset;
       char name[sizeof(selected->name)];
       size_t copy_len;
+      size_t record_len;
 
-      if (fread(fixed, 1, sizeof(fixed), file) != sizeof(fixed))
+      if (read_le32(cd + cursor) != 0x02014b50u)
          goto out;
-      if (read_le32(fixed) != 0x02014b50u)
-         goto out;
-      flags = read_le16(fixed + 8);
-      method = read_le16(fixed + 10);
-      compressed_size = read_le32(fixed + 20);
-      uncompressed_size = read_le32(fixed + 24);
-      name_len = read_le16(fixed + 28);
-      extra_len = read_le16(fixed + 30);
-      comment_len = read_le16(fixed + 32);
-      local_offset = read_le32(fixed + 42);
+      flags = read_le16(cd + cursor + 8);
+      method = read_le16(cd + cursor + 10);
+      compressed_size = read_le32(cd + cursor + 20);
+      uncompressed_size = read_le32(cd + cursor + 24);
+      name_len = read_le16(cd + cursor + 28);
+      extra_len = read_le16(cd + cursor + 30);
+      comment_len = read_le16(cd + cursor + 32);
+      local_offset = read_le32(cd + cursor + 42);
       if ((size_t)local_offset >= zip_size)
+         goto out;
+      record_len = 46u + (size_t)name_len + extra_len + comment_len;
+      if (record_len > cd_size - cursor)
          goto out;
       copy_len = name_len;
       if (copy_len >= sizeof(name))
          copy_len = sizeof(name) - 1u;
-      if (fread(name, 1, copy_len, file) != copy_len)
-         goto out;
+      memcpy(name, cd + cursor + 46u, copy_len);
       name[copy_len] = '\0';
-      if ((size_t)name_len > copy_len &&
-          fseek(file, (long)((size_t)name_len - copy_len), SEEK_CUR) != 0)
-         goto out;
-      if (fseek(file, (long)((size_t)extra_len + comment_len),
-          SEEK_CUR) != 0)
-         goto out;
+      cursor += record_len;
 
       if (!zip_entry_name_is_dir(name) &&
           (method == 0 || method == 8) &&
@@ -3138,7 +4986,7 @@ static int zip_select_rom_entry_stream(FILE *file, const char *zip_path,
          unifrog_text_copy(selected->name, sizeof(selected->name), name);
          selected->flags = flags;
          selected->method = method;
-         selected->crc32 = read_le32(fixed + 16);
+         selected->crc32 = read_le32(cd + cursor - record_len + 16);
          selected->compressed_size = compressed_size;
          selected->uncompressed_size = uncompressed_size;
          selected->local_offset = local_offset;
@@ -3148,6 +4996,7 @@ static int zip_select_rom_entry_stream(FILE *file, const char *zip_path,
    }
 
 out:
+   free(cd);
    free(tail);
    if (out_ret != 0)
       printf("unifrog libretro zip stream select failed path=%s\n",
@@ -3226,6 +5075,9 @@ static int zip_inflate_raw_stream(FILE *file, const char *zip_path,
    size_t remaining;
    int zret = Z_OK;
    int out_ret = -1;
+   unsigned last_percent = 0xffu;
+   size_t old_auto_flush = 0;
+   int storage_quiet = 0;
 
    if (!file || !entry || !out || out_size == 0)
       return -1;
@@ -3238,9 +5090,19 @@ static int zip_inflate_raw_stream(FILE *file, const char *zip_path,
       goto out;
 
    remaining = entry->compressed_size;
-   loading_draw("LOADING ZIP", "INFLATE", 36);
+   loading_draw("LOADING ZIP", "INFLATE 0%", 36);
+   unifrog_log_sync("zip_inflate begin path=%s entry=%s compressed=%u uncompressed=%u",
+      zip_path, entry->name, entry->compressed_size,
+      entry->uncompressed_size);
+   old_auto_flush = unifrog_log_auto_flush_bytes();
+   unifrog_log_set_auto_flush_bytes(0);
+   unifrog_log_defer_begin();
+   unifrog_platform_set_storage_log_suspended(1);
+   storage_quiet = 1;
+   unifrog_platform_sd_debug_dump("zip_inflate_start");
    while (remaining > 0 && zret != Z_STREAM_END) {
       size_t chunk = remaining;
+      unsigned percent;
 
       if (chunk > LIBRETRO_CONTENT_STREAM_IN)
          chunk = LIBRETRO_CONTENT_STREAM_IN;
@@ -3261,16 +5123,43 @@ static int zip_inflate_raw_stream(FILE *file, const char *zip_path,
          if (zret != Z_OK && zret != Z_STREAM_END)
             goto out_inflate;
       }
-      loading_draw("LOADING ZIP", "INFLATE",
-         36u + (unsigned)(((entry->compressed_size - remaining) * 30u) /
-         (entry->compressed_size ? entry->compressed_size : 1u)));
+      percent = entry->compressed_size ?
+         (unsigned)(((entry->compressed_size - remaining) * 100u) /
+         entry->compressed_size) : 100u;
+      if (percent / 10u != last_percent / 10u || remaining == 0) {
+         char detail[32];
+         unsigned mapped_percent = 36u + (unsigned)(((uint64_t)percent * 30u) /
+            100u);
+
+         last_percent = percent;
+         snprintf(detail, sizeof(detail), "INFLATE %u%%", percent);
+         loading_draw("LOADING ZIP", detail, mapped_percent);
+         libretro_watchdog_load_progress("zip inflate", percent, 100);
+         unifrog_log_sync("zip_inflate progress path=%s entry=%s percent=%u in=%u out=%u",
+            zip_path, entry->name, percent,
+            (unsigned)(entry->compressed_size - remaining),
+            (unsigned)stream.total_out);
+      }
+      usleep(1000);
    }
 
    if (zret != Z_STREAM_END || stream.total_out != out_size)
       goto out_inflate;
    out_ret = 0;
+   unifrog_platform_sd_debug_dump("zip_inflate_done");
+   unifrog_log_sync("zip_inflate done path=%s entry=%s out=%u",
+      zip_path, entry->name, (unsigned)stream.total_out);
 
 out_inflate:
+   if (out_ret != 0)
+      unifrog_platform_sd_debug_dump("zip_inflate_fail");
+   if (storage_quiet) {
+      unifrog_platform_set_storage_log_suspended(0);
+      unifrog_log_defer_end();
+      unifrog_log_set_auto_flush_bytes(old_auto_flush);
+      if (out_ret == 0)
+         (void)libretro_log_flush_force_if_safe();
+   }
    (void)inflateEnd(&stream);
 out:
    if (out_ret != 0)
@@ -3402,8 +5291,11 @@ static int read_path_memory_with_fallback(const char *path,
    FILE *file;
    int ret;
 
+   errno = 0;
    if (read_path_aligned_direct(path, out_data, out_size, label) == 0)
       return 0;
+   if (errno == ETIMEDOUT)
+      return -1;
 
    file = fopen(path, "rb");
    if (!file) {
@@ -3419,8 +5311,16 @@ static int read_path_memory_with_fallback(const char *path,
 static int read_file_aligned(FILE *file, const char *path, uint8_t **out_data,
    size_t *out_size, const char *label)
 {
+   return read_file_aligned_timeout(file, path, out_data, out_size, label, 0);
+}
+
+static int read_file_aligned_timeout(FILE *file, const char *path,
+   uint8_t **out_data, size_t *out_size, const char *label,
+   unsigned timeout_ms)
+{
    uint8_t *data = NULL;
    size_t size;
+   uint64_t read_start_us;
 
    if (!file || !out_data || !out_size)
       return -1;
@@ -3432,9 +5332,11 @@ static int read_file_aligned(FILE *file, const char *path, uint8_t **out_data,
          path ? path : "", (unsigned)size, label ? label : "");
       return -1;
    }
+   read_start_us = host_time_us();
    for (size_t done = 0; done < size;) {
       size_t chunk = size - done;
       size_t max_chunk = libretro_content_read_chunk();
+      uint64_t now_us;
 
       if (chunk > max_chunk)
          chunk = max_chunk;
@@ -3442,15 +5344,37 @@ static int read_file_aligned(FILE *file, const char *path, uint8_t **out_data,
          printf("unifrog libretro rom read failed path=%s size=%u done=%u label=%s\n",
             path ? path : "", (unsigned)size, (unsigned)done,
             label ? label : "");
+         unifrog_log_sync("content_stdio_read fail path=%s size=%u done=%u label=%s",
+            path ? path : "", (unsigned)size, (unsigned)done,
+            label ? label : "");
          rom_free_aligned(data);
          return -1;
       }
       done += chunk;
+      now_us = host_time_us();
+      if (timeout_ms &&
+          host_elapsed_ms(read_start_us, now_us) > timeout_ms) {
+         printf("unifrog libretro rom read timeout path=%s size=%u done=%u elapsed=%u timeout=%u label=%s\n",
+            path ? path : "", (unsigned)size, (unsigned)done,
+            host_elapsed_ms(read_start_us, now_us), timeout_ms,
+            label ? label : "");
+         unifrog_log_sync("content_stdio_read timeout path=%s size=%u done=%u elapsed=%u timeout=%u label=%s",
+            path ? path : "", (unsigned)size, (unsigned)done,
+            host_elapsed_ms(read_start_us, now_us), timeout_ms,
+            label ? label : "");
+         unifrog_platform_sd_debug_dump("content_stdio_read_timeout");
+         rom_free_aligned(data);
+         errno = ETIMEDOUT;
+         return -1;
+      }
       loading_draw("LOADING ROM", label ? label : "READING",
          12u + (unsigned)((done * 58u) / (size ? size : 1u)));
    }
    *out_data = data;
    *out_size = size;
+   unifrog_log_sync("content_stdio_read done path=%s size=%u elapsed=%u label=%s",
+      path ? path : "", (unsigned)size,
+      host_elapsed_ms(read_start_us, host_time_us()), label ? label : "");
    return 0;
 }
 
@@ -4879,11 +6803,32 @@ static int zip_extract_rom_to_cache(FILE *file, const char *zip_path,
    const struct retro_system_info *info, char *cache_path,
    size_t cache_path_size)
 {
+   struct zip_rom_entry entry;
    char entry_name[256];
    uint8_t *rom = NULL;
    size_t rom_size = 0;
+   size_t zip_size = 0;
    FILE *out = NULL;
    int ret = -1;
+
+   if (file_size(file, &zip_size) == 0 &&
+       zip_select_rom_entry_stream(file, zip_path, zip_size,
+       info->valid_extensions, &entry) == 0 &&
+       content_cache_path(zip_path, entry.name, info->valid_extensions,
+       cache_path, cache_path_size) == 0) {
+      struct stat st;
+
+      if (stat(cache_path, &st) == 0 &&
+          st.st_size == (off_t)entry.uncompressed_size) {
+         printf("unifrog libretro zip cache hit entry=%s cache=%s size=%u\n",
+            entry.name, cache_path, entry.uncompressed_size);
+         unifrog_log_sync("zip_cache hit path=%s entry=%s cache=%s size=%u",
+            zip_path, entry.name, cache_path, entry.uncompressed_size);
+         loading_draw("LOADING ZIP", "CACHE HIT", 58);
+         return 0;
+      }
+      (void)fseek(file, 0, SEEK_SET);
+   }
 
    if (zip_load_rom_data(file, zip_path, info, &rom, &rom_size,
        entry_name, sizeof(entry_name)) != 0)
@@ -4951,10 +6896,20 @@ static int run_core(const struct libretro_core_api *core, const char *path,
    int content_prepare_failed = 0;
    int read_profile_retry_safe = 0;
    int read_profile_active = 0;
+   int save_read_profile_active = 0;
+   int retro_read_profile_active = 0;
+   int content_retry_log_quiet = 0;
+   size_t content_retry_old_auto_flush = 0;
+   size_t save_existing_bytes = 0;
 
    if (!libretro_core_available(core) || !path || !path[0])
       return -1;
 
+   unifrog_log_sync("libretro run enter core=%s path=%s external=%d gp=0x%08lx",
+      core->id ? core->id : "", path, core->external,
+      (unsigned long)core_call_gp(core));
+   libretro_activity_set(core, path, UNIFROG_ACTIVITY_PHASE_LIBRETRO_BEGIN,
+      core->external ? 1u : 0u);
    total_start_us = host_time_us();
    old_log_auto_flush = unifrog_log_auto_flush_bytes();
    unifrog_log_set_auto_flush_bytes(LIBRETRO_LOG_AUTO_FLUSH_BYTES);
@@ -4963,6 +6918,7 @@ static int run_core(const struct libretro_core_api *core, const char *path,
    host.pixel_format = RETRO_PIXEL_FORMAT_RGB565;
    host.core_id = core->id;
    host.core_gp = core_call_gp(core);
+   core_options_reset();
    host_configure_options(options);
    initial_gp = host_read_gp();
    host_force_expected_gp();
@@ -4973,16 +6929,29 @@ static int run_core(const struct libretro_core_api *core, const char *path,
    printf("unifrog libretro build commit=%s dirty=%d sdk=%s cores=%s\n",
       UNIFROG_GIT_COMMIT, UNIFROG_GIT_DIRTY,
       UNIFROG_SDK_GIT_COMMIT, UNIFROG_CORES_GIT_COMMIT);
-   printf("unifrog libretro options audio=%d gain=%u scpu=%u ge_clock=%d backlight=%d frameskip=%d display=%s\n",
+   printf("unifrog libretro options audio=%d gain=%u scpu=%u ge_clock=%d backlight=%d frameskip=%d display=%s framebuffer=%s keymap=%s\n",
       host.audio_enabled, host.audio_gain, host.scpu_target_mhz,
       host.options.ge_clock, host.options.backlight_level,
-      host.options.frameskip, display_mode_label(host.display_mode));
+      host.options.frameskip, display_mode_label(host.display_mode),
+      framebuffer_format_label(host.framebuffer_format),
+      input_profile_opt_value(host.input_profile));
+   if (host.options.max_frames)
+      printf("unifrog libretro bounded_run core=%s max_frames=%u\n",
+         core->id, host.options.max_frames);
    unifrog_diag_memory_snapshot("libretro.run_start");
    (void)unifrog_log_flush();
    host_apply_runtime_options();
    (void)unifrog_log_flush();
    loading_draw("LOADING GAME", "START", 2);
+   unifrog_log_sync("libretro api_version begin core=%s gp=0x%08lx fn=0x%08lx",
+      core->id ? core->id : "",
+      (unsigned long)core_call_gp(core),
+      (unsigned long)(uintptr_t)core->api_version);
+   libretro_activity_set_core_call(core,
+      UNIFROG_ACTIVITY_PHASE_LIBRETRO_API, 1u, core->api_version);
    api_version = CORE_CALL0_RET(core, core->api_version);
+   unifrog_log_sync("libretro api_version done core=%s api=%u",
+      core->id ? core->id : "", api_version);
    printf("unifrog libretro %s api=%u\n", core->id, api_version);
    unifrog_diag_memory_snapshot("libretro.after_api_version");
    (void)unifrog_log_flush();
@@ -5031,6 +7000,7 @@ retry_content_prepare:
    if (!read_profile_retry_safe && !info.need_fullpath &&
        !path_is_wrapped_compressed(path)) {
       read_profile_active = libretro_begin_read_profile("content_prepare");
+      libretro_fast_read_timeout_enabled = read_profile_active ? 1 : 0;
    } else if (!read_profile_retry_safe && libretro_read_profile_enabled()) {
       printf("unifrog libretro read_profile skip profile=%s reason=%s path=%s\n",
          UNIFROG_SD_READ_MODE,
@@ -5123,7 +7093,12 @@ retry_content_prepare:
 out_content_prepare:
    if (content_prepare_failed && read_profile_active &&
        !read_profile_retry_safe) {
-      libretro_end_read_profile(read_profile_active, "content_prepare", 0);
+      content_retry_old_auto_flush = unifrog_log_auto_flush_bytes();
+      unifrog_log_set_auto_flush_bytes(0);
+      content_retry_log_quiet = 1;
+      libretro_end_read_profile_ex(read_profile_active, "content_prepare",
+         0, 0);
+      libretro_fast_read_timeout_enabled = 0;
       read_profile_active = 0;
       read_profile_retry_safe = 1;
       content_prepare_failed = 0;
@@ -5141,7 +7116,12 @@ out_content_prepare:
    }
    libretro_end_read_profile(read_profile_active, "content_prepare",
       !content_prepare_failed);
+   libretro_fast_read_timeout_enabled = 0;
    read_profile_active = 0;
+   if (content_retry_log_quiet) {
+      unifrog_log_set_auto_flush_bytes(content_retry_old_auto_flush);
+      content_retry_log_quiet = 0;
+   }
    if (content_prepare_failed)
       goto out_finish;
    host.content_alloc_appmem = 0;
@@ -5178,6 +7158,10 @@ out_content_prepare:
    CORE_CALL1_VOID(core, core->get_system_av_info, &av);
    host.fps = av.timing.fps > 1.0 ? (unsigned)(av.timing.fps + 0.5) :
       (CORE_CALL0_RET(core, core->get_region) == RETRO_REGION_PAL ? 50u : 60u);
+   host.video_max_width = av.geometry.max_width ? av.geometry.max_width :
+      av.geometry.base_width;
+   host.video_max_height = av.geometry.max_height ? av.geometry.max_height :
+      av.geometry.base_height;
    if (av.timing.sample_rate > 1.0)
       sample_rate = (unsigned)(av.timing.sample_rate + 0.5);
    host.frame_budget_count = host_compute_frame_budget(host.fps,
@@ -5199,7 +7183,15 @@ out_content_prepare:
    (void)unifrog_log_flush();
    libretro_watchdog_enter(LIBRETRO_WATCHDOG_PHASE_LOAD, 0);
    retro_load_start_us = host_time_us();
+   if (info.need_fullpath) {
+      (void)unifrog_log_flush();
+      retro_read_profile_active =
+         libretro_begin_read_profile("retro_load_game_fullpath");
+   }
    if (!CORE_CALL1_RET(core, core->load_game, &game)) {
+      libretro_end_read_profile(retro_read_profile_active,
+         "retro_load_game_fullpath", 0);
+      retro_read_profile_active = 0;
       libretro_watchdog_leave();
       retro_load_done_us = host_time_us();
       printf("unifrog load_time core=%s stage=retro_load_game ms=%u ok=0\n",
@@ -5210,6 +7202,9 @@ out_content_prepare:
       goto out_unload;
    }
    retro_load_done_us = host_time_us();
+   libretro_end_read_profile(retro_read_profile_active,
+      "retro_load_game_fullpath", 1);
+   retro_read_profile_active = 0;
    libretro_watchdog_leave();
    game_loaded = 1;
    printf("unifrog libretro step=retro_load_game_ok\n");
@@ -5217,11 +7212,22 @@ out_content_prepare:
       core->id, host_elapsed_ms(retro_load_start_us, retro_load_done_us));
    unifrog_diag_memory_snapshot("libretro.after_retro_load_game");
    save_load_start_us = host_time_us();
+   save_existing_bytes = quick_existing_memory_file_bytes(core, path);
+   printf("unifrog libretro save_memory_probe core=%s bytes=%u fast_min=%u\n",
+      core->id, (unsigned)save_existing_bytes,
+      (unsigned)LIBRETRO_SAVE_FAST_READ_MIN_BYTES);
+   if (save_existing_bytes >= LIBRETRO_SAVE_FAST_READ_MIN_BYTES) {
+      (void)unifrog_log_flush();
+      save_read_profile_active = libretro_begin_read_profile("save_memory_load");
+   }
    quick_load_all_memory_files(core, path);
+   libretro_end_read_profile(save_read_profile_active, "save_memory_load", 1);
+   save_read_profile_active = 0;
    save_load_done_us = host_time_us();
    printf("unifrog load_time core=%s stage=save_memory_load ms=%u\n",
       core->id, host_elapsed_ms(save_load_start_us, save_load_done_us));
    unifrog_diag_memory_snapshot("libretro.after_save_memory_load");
+   libretro_read_profile_load_session_end("load_complete", 1);
 
    loading_draw("LOADING GAME", "READY", 100);
    loading_close();
@@ -5242,14 +7248,16 @@ out_content_prepare:
    (void)unifrog_log_flush();
    host.audio_input_rate = sample_rate;
    host.audio_output_rate = host_audio_output_rate(sample_rate);
+   host.audio_channels = host_audio_output_channels();
    host.audio_gate_open = 0;
    host.audio_quiet_batches = 0;
    if (!host.audio_enabled) {
-      printf("unifrog libretro audio disabled rate=%u/%u\n",
-         host.audio_input_rate, host.audio_output_rate);
-   } else if (unifrog_audio_open(&host.audio, host.audio_output_rate,
-       LIBRETRO_AUDIO_CHANNELS, LIBRETRO_AUDIO_PERIOD_BYTES,
-       LIBRETRO_AUDIO_PERIODS) == 0) {
+      printf("unifrog libretro audio disabled rate=%u/%u channels=%u route=%s\n",
+         host.audio_input_rate, host.audio_output_rate, host.audio_channels,
+         host_audio_route_name());
+   } else if (unifrog_audio_open_backend(&host.audio, host.audio_output_rate,
+       host.audio_channels, LIBRETRO_AUDIO_PERIOD_BYTES,
+       LIBRETRO_AUDIO_PERIODS, host_audio_backend()) == 0) {
       int volume_ret;
       int mute_ret;
       int silence_ret = 0;
@@ -5257,9 +7265,11 @@ out_content_prepare:
       int unmute_ret;
       int output_ret;
       unsigned silence_frames;
+      unsigned audio_volume;
 
       host.audio_open = 1;
-      volume_ret = unifrog_audio_set_volume(&host.audio, LIBRETRO_AUDIO_VOLUME);
+      audio_volume = host_audio_runtime_volume();
+      volume_ret = unifrog_audio_set_volume(&host.audio, audio_volume);
       mute_ret = unifrog_audio_set_mute(&host.audio, 1);
       silence_frames = LIBRETRO_AUDIO_WRITE_CHUNK_FRAMES;
       if (host.audio.frame_bytes && host.audio.period_bytes < silence_frames)
@@ -5277,13 +7287,14 @@ out_content_prepare:
       printf("unifrog libretro audio_open ok rate=%u/%u channels=%u period=%u periods=%u volume=%u gain=%u route=%s volume_ret=%d mute_ret=%d silence_ret=%d start_ret=%d unmute_ret=%d output_ret=%d\n",
          host.audio_input_rate, host.audio_output_rate,
          host.audio.channels, host.audio.period_bytes, host.audio.periods,
-         LIBRETRO_AUDIO_VOLUME, host.audio_gain, LIBRETRO_AUDIO_ROUTE,
+         audio_volume, host.audio_gain, host_audio_route_name(),
          volume_ret, mute_ret, silence_ret, start_ret, unmute_ret,
          output_ret);
       unifrog_diag_memory_snapshot("libretro.after_audio_open");
       (void)unifrog_log_flush();
    } else {
-      printf("unifrog libretro audio open failed\n");
+      printf("unifrog libretro audio open failed rate=%u channels=%u route=%s\n",
+         host.audio_output_rate, host.audio_channels, host_audio_route_name());
    }
 
    CORE_CALL2_VOID(core, core->set_controller_port_device, 0,
@@ -5300,8 +7311,10 @@ out_content_prepare:
    unifrog_diag_memory_snapshot("libretro.before_run_loop");
    (void)unifrog_log_flush();
    host_pace_begin();
-   unifrog_log_defer_begin();
-   run_loop_log_defer = 1;
+   if (UNIFROG_SD_EXPERIMENTAL) {
+      unifrog_log_defer_begin();
+      run_loop_log_defer = 1;
+   }
 
    for (;;) {
       uint32_t run_start = unifrog_perf_count();
@@ -5313,7 +7326,10 @@ out_content_prepare:
       unifrog_input_save_previous();
       unifrog_input_poll_with_wireless_divisor(LIBRETRO_WIRELESS_POLL_DIVISOR);
       host.buttons = unifrog_input_buttons();
-      if (exit_combo_down()) {
+      if (!exit_combo_down())
+         host.quick_combo_armed = 1;
+      if (host.quick_combo_armed && exit_combo_down()) {
+         host.quick_combo_armed = 0;
          printf("unifrog libretro quick_js core=%s frame=%u\n",
             core->id, host.run_frames);
          (void)libretro_log_flush_force_if_safe();
@@ -5332,6 +7348,7 @@ out_content_prepare:
          host.run_frames + 1u);
       CORE_CALL0_VOID(core, core->run);
       libretro_watchdog_leave();
+      (void)host_audio_flush_sample_buffer();
       run_count = unifrog_perf_elapsed(run_start, unifrog_perf_count());
       vsync_count = host.presenter_open && host.video_frames != video_before ?
          host.presenter.last_vsync_count : 0;
@@ -5352,6 +7369,25 @@ out_content_prepare:
          host.active_max_count = active_count;
       if (host.frame_budget_count && active_count > host.frame_budget_count)
          host.slow_frames++;
+      if (host.run_frames >= LIBRETRO_NO_OUTPUT_GRACE_FRAMES &&
+          host.video_frames == 0 && host.audio_batches == 0) {
+         printf("unifrog libretro no_output_abort core=%s path=%s frames=%u video=%u audio=%u\n",
+            core->id, path, host.run_frames, host.video_frames,
+            host.audio_batches);
+         unifrog_log_sync("libretro no_output_abort core=%s path=%s frames=%u video=%u audio=%u",
+            core->id, path, host.run_frames, host.video_frames,
+            host.audio_batches);
+         ret = -1;
+         break;
+      }
+      if (host.options.max_frames &&
+          host.run_frames >= host.options.max_frames) {
+         printf("unifrog libretro max_frames_return core=%s frames=%u max=%u\n",
+            core->id, host.run_frames, host.options.max_frames);
+         unifrog_log_sync("libretro max_frames_return core=%s path=%s frames=%u max=%u",
+            core->id, path, host.run_frames, host.options.max_frames);
+         break;
+      }
       if (!host.fast_forward)
          host_pace_frame();
       if ((host.run_frames - host.run_report_frames) >=
@@ -5371,6 +7407,7 @@ out_unload:
 out_deinit:
    unifrog_diag_memory_snapshot("libretro.out_deinit");
    libretro_watchdog_stop();
+   (void)host_audio_flush_sample_buffer();
    host_report_perf(core->id, 1);
    if (run_loop_log_defer)
       unifrog_log_defer_end();
@@ -5378,10 +7415,12 @@ out_deinit:
       unifrog_audio_close(&host.audio);
    if (host.presenter_open)
       unifrog_presenter_close(&host.presenter);
-   free(host.video_convert_buffer);
+   unifrog_surface_free(host.software_framebuffer);
+   host.software_framebuffer = NULL;
    if (core_initialized)
       CORE_CALL0_VOID(core, core->deinit);
 out_finish:
+   libretro_read_profile_load_session_end("out_finish", ret == 0);
    libretro_watchdog_stop();
    host.content_alloc_appmem = 0;
    rom_free_aligned(rom_data);
@@ -5391,6 +7430,7 @@ out_finish:
    unifrog_input_recover_after_core();
    printf("unifrog libretro %s end ret=%d video=%ux%u pitch=%u\n",
       core->id, ret, host.video_width, host.video_height, host.video_pitch);
+   unifrog_exception_activity_clear();
    unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
    (void)unifrog_log_flush();
    return ret;
@@ -5436,6 +7476,10 @@ static int libretro_load_external_core(const char *id, const char *core_path,
 {
    char path[256];
    const struct unifrog_core_module_exports *exports;
+   uint64_t load_start_us;
+   uint64_t load_done_us;
+   size_t old_log_auto_flush;
+   int ret = -1;
 
    if (!id || !id[0] || !loaded || !api)
       return -1;
@@ -5444,12 +7488,76 @@ static int libretro_load_external_core(const char *id, const char *core_path,
       unifrog_text_copy(path, sizeof(path), core_path);
    else
       snprintf(path, sizeof(path), "/media/mmcblk0/unifrog/cores/%s.bin", id);
+   old_log_auto_flush = unifrog_log_auto_flush_bytes();
+   loading_draw("LOADING CORE", id, 4);
+   unifrog_log_sync("external_core begin core=%s path=%s", id, path);
+   (void)unifrog_log_flush();
+   unifrog_log_set_auto_flush_bytes(0);
    unifrog_diag_memory_snapshot("libretro.before_external_core_load");
-   if (unifrog_core_module_load_file(path, id, loaded) != 0)
-      return -1;
-   unifrog_diag_memory_snapshot("libretro.after_external_core_load");
+   load_start_us = host_time_us();
+   if (libretro_read_profile_enabled()) {
+      unsigned timeout_ms = libretro_fast_read_timeout_for_path(path, 2500u);
+      int read_profile_active;
+
+      loading_draw("LOADING CORE", "FAST READ", 8);
+      read_profile_active = libretro_begin_read_profile("external_core_load");
+      unifrog_log_sync("external_core fast_read core=%s path=%s active=%d timeout=%u",
+         id, path, read_profile_active, timeout_ms);
+      printf("unifrog libretro external_core fast_read core=%s path=%s active=%d timeout=%u\n",
+         id, path, read_profile_active, timeout_ms);
+      if (read_profile_active) {
+         if (unifrog_core_module_load_file_timeout(path, id, loaded,
+             timeout_ms) == 0) {
+            libretro_end_read_profile(read_profile_active,
+               "external_core_load", 1);
+         } else {
+            libretro_end_read_profile_ex(read_profile_active,
+               "external_core_load", 0, 0);
+            if (read_profile_active == LIBRETRO_READ_PROFILE_BORROWED)
+               libretro_read_profile_load_session_end(
+                  "external_core_timeout", 0);
+            libretro_read_profile_backoff("external_core_load");
+            loading_draw("LOADING CORE", "SAFE RETRY", 16);
+            printf("unifrog libretro external_core safe_retry core=%s path=%s\n",
+               id, path);
+            unifrog_log_sync("external_core safe_retry core=%s path=%s",
+               id, path);
+            if (unifrog_core_module_load_file(path, id, loaded) != 0)
+               goto out_restore_log;
+         }
+      } else {
+         loading_draw("LOADING CORE", "BOOT READ", 8);
+         printf("unifrog libretro external_core boot_read core=%s path=%s reason=read_profile_inactive\n",
+            id, path);
+         unifrog_log_sync("external_core boot_read core=%s path=%s reason=read_profile_inactive",
+            id, path);
+         if (unifrog_core_module_load_file(path, id, loaded) != 0)
+            goto out_restore_log;
+      }
+   } else {
+      loading_draw("LOADING CORE", "BOOT READ", 8);
+      printf("unifrog libretro external_core boot_read core=%s path=%s reason=no_runtime_sd_profile\n",
+         id, path);
+      unifrog_log_sync("external_core boot_read core=%s path=%s reason=no_runtime_sd_profile",
+         id, path);
+      if (unifrog_core_module_load_file(path, id, loaded) != 0)
+         goto out_restore_log;
+   }
+   load_done_us = host_time_us();
+   printf("unifrog load_time core=%s stage=external_core_load ms=%u path=%s\n",
+      id, host_elapsed_ms(load_start_us, load_done_us), path);
+   unifrog_log_sync("external_core done core=%s path=%s ms=%u",
+      id, path, host_elapsed_ms(load_start_us, load_done_us));
+   (void)unifrog_log_flush();
 
    exports = loaded->exports;
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_EXTERNAL_CORE_API,
+      unifrog_exception_activity_hash(id), (uint32_t)(uintptr_t)exports,
+      (uint32_t)loaded->gp_addr);
+   unifrog_log_sync("external_core api begin core=%s exports=0x%08lx size=%u gp=0x%08lx image=%u memory=%u",
+      id, (unsigned long)(uintptr_t)exports,
+      exports ? exports->size : 0u, (unsigned long)loaded->gp_addr,
+      (unsigned)loaded->image_size, (unsigned)loaded->memory_size);
    memset(api, 0, sizeof(*api));
    api->id = exports->core_id;
    api->call_gp = loaded->gp_addr;
@@ -5486,11 +7594,33 @@ static int libretro_load_external_core(const char *id, const char *core_path,
    }
    if (!libretro_core_available(api)) {
       printf("unifrog libretro external_core incomplete id=%s\n", id);
+      unifrog_log_sync("external_core api incomplete core=%s exports=0x%08lx id=0x%08lx init=0x%08lx api=0x%08lx load=0x%08lx run=0x%08lx",
+         id, (unsigned long)(uintptr_t)exports,
+         (unsigned long)(uintptr_t)api->id,
+         (unsigned long)(uintptr_t)api->init,
+         (unsigned long)(uintptr_t)api->api_version,
+         (unsigned long)(uintptr_t)api->load_game,
+         (unsigned long)(uintptr_t)api->run);
       unifrog_core_module_unload(loaded);
       unifrog_diag_memory_snapshot("libretro.external_core_unloaded_incomplete");
-      return -1;
+      goto out_restore_log;
    }
-   return 0;
+   unifrog_log_sync("external_core api ready core=%s id=%s gp=0x%08lx api=0x%08lx init=0x%08lx load=0x%08lx run=0x%08lx",
+      id, api->id ? api->id : "",
+      (unsigned long)api->call_gp,
+      (unsigned long)(uintptr_t)api->api_version,
+      (unsigned long)(uintptr_t)api->init,
+      (unsigned long)(uintptr_t)api->load_game,
+      (unsigned long)(uintptr_t)api->run);
+   ret = 0;
+
+out_restore_log:
+   unifrog_log_set_auto_flush_bytes(old_log_auto_flush);
+   if (ret != 0) {
+      unifrog_log_sync("external_core fail core=%s path=%s", id, path);
+      (void)unifrog_log_flush();
+   }
+   return ret;
 }
 
 static int run_core_id(const char *id, const char *path,
@@ -5501,6 +7631,7 @@ static int run_core_id(const char *id, const char *path,
    const struct libretro_core_api *core;
    const char *canonical = libretro_canonical_core_id(id);
    int loaded_external = 0;
+   int load_session_active = 0;
    int ret;
 
    if (!canonical)
@@ -5508,6 +7639,8 @@ static int run_core_id(const char *id, const char *path,
 
    unifrog_diag_memory_snapshot("libretro.core_id_start");
    unifrog_input_recover_core_transition("core_load");
+   load_session_active =
+      libretro_read_profile_load_session_begin("core_load_session");
    core = libretro_builtin_core_for_id(canonical);
    if (!core &&
        libretro_load_external_core(canonical,
@@ -5517,10 +7650,13 @@ static int run_core_id(const char *id, const char *path,
    }
    if (!core) {
       printf("unifrog libretro core unavailable id=%s\n", canonical);
+      libretro_read_profile_load_session_end("core_unavailable", 0);
       return -1;
    }
 
    ret = run_core(core, path, options);
+   if (load_session_active)
+      libretro_read_profile_load_session_end("core_return", ret == 0);
    if (loaded_external) {
       unifrog_core_module_unload(&loaded);
       unifrog_diag_memory_snapshot("libretro.after_external_core_unload");
@@ -5550,6 +7686,33 @@ static int path_has_any_suffix(const char *path, const char *const *suffixes,
    return 0;
 }
 
+static int path_has_dir_component_ci(const char *path, const char *component)
+{
+   const char *p = path;
+   size_t component_len;
+
+   if (!path || !component || !component[0])
+      return 0;
+   component_len = strlen(component);
+   while (*p) {
+      const char *start;
+      size_t len;
+
+      while (*p == '/')
+         p++;
+      if (!*p)
+         break;
+      start = p;
+      while (*p && *p != '/')
+         p++;
+      len = (size_t)(p - start);
+      if (len == component_len &&
+          strncasecmp(start, component, component_len) == 0)
+         return 1;
+   }
+   return 0;
+}
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 static const char *libretro_default_core_id_for_path(const char *path)
@@ -5569,6 +7732,30 @@ static const char *libretro_default_core_id_for_path(const char *path)
 
    if (!path)
       return NULL;
+   if (path_is_zip(path)) {
+      if (path_has_dir_component_ci(path, "SFC") ||
+          path_has_dir_component_ci(path, "SNES"))
+         return "snes9x2005";
+      if (path_has_dir_component_ci(path, "MD") ||
+          path_has_dir_component_ci(path, "GENESIS") ||
+          path_has_dir_component_ci(path, "MEGADRIVE") ||
+          path_has_dir_component_ci(path, "MS") ||
+          path_has_dir_component_ci(path, "SMS") ||
+          path_has_dir_component_ci(path, "GG") ||
+          path_has_dir_component_ci(path, "32X"))
+         return "picodrive";
+      if (path_has_dir_component_ci(path, "FC") ||
+          path_has_dir_component_ci(path, "NES"))
+         return "fceumm";
+      if (path_has_dir_component_ci(path, "GB") ||
+          path_has_dir_component_ci(path, "GBC"))
+         return "gambatte";
+      if (path_has_dir_component_ci(path, "GBA"))
+         return "gpsp";
+      if (path_has_dir_component_ci(path, "PCE") ||
+          path_has_dir_component_ci(path, "TG16"))
+         return "pce-fast";
+   }
    if (path_is_wrapped_compressed(path) &&
        copy_path_without_last_extension(path, stripped, sizeof(stripped)) == 0)
       detect_path = stripped;
@@ -5590,6 +7777,84 @@ static const char *libretro_default_core_id_for_path(const char *path)
    return NULL;
 }
 
+static long libretro_min_content_size_for_path(const char *path,
+   const char *core_id)
+{
+   (void)core_id;
+
+   if (unifrog_text_ends_with_ci(path, ".md") ||
+       unifrog_text_ends_with_ci(path, ".gen") ||
+       unifrog_text_ends_with_ci(path, ".smd") ||
+       unifrog_text_ends_with_ci(path, ".bin"))
+      return 512;
+   if (unifrog_text_ends_with_ci(path, ".nes") ||
+       unifrog_text_ends_with_ci(path, ".fds"))
+      return 16;
+   if (unifrog_text_ends_with_ci(path, ".gb") ||
+       unifrog_text_ends_with_ci(path, ".gbc") ||
+       unifrog_text_ends_with_ci(path, ".gba") ||
+       unifrog_text_ends_with_ci(path, ".sfc") ||
+       unifrog_text_ends_with_ci(path, ".smc") ||
+       unifrog_text_ends_with_ci(path, ".pce"))
+      return 512;
+   return 1;
+}
+
+static int libretro_validate_content_file(const char *path,
+   const char *core_id)
+{
+   unsigned char sample;
+   struct stat st;
+   FILE *file;
+   long min_size;
+   int stat_errno;
+   int read_errno;
+
+   errno = 0;
+   if (stat(path, &st) != 0) {
+      stat_errno = errno;
+      printf("unifrog libretro content invalid path=%s core=%s reason=stat errno=%d\n",
+         path ? path : "", core_id ? core_id : "", stat_errno);
+      unifrog_log_sync("libretro dispatch fail invalid_file path=%s core=%s reason=stat errno=%d",
+         path ? path : "", core_id ? core_id : "", stat_errno);
+      return -1;
+   }
+
+   min_size = libretro_min_content_size_for_path(path, core_id);
+   if (!S_ISREG(st.st_mode) || st.st_size < min_size) {
+      printf("unifrog libretro content invalid path=%s core=%s mode=0x%lx size=%ld min=%ld\n",
+         path, core_id ? core_id : "", (unsigned long)st.st_mode,
+         (long)st.st_size, min_size);
+      unifrog_log_sync("libretro dispatch fail invalid_file path=%s core=%s mode=0x%lx size=%ld min=%ld",
+         path, core_id ? core_id : "", (unsigned long)st.st_mode,
+         (long)st.st_size, min_size);
+      return -1;
+   }
+
+   errno = 0;
+   file = fopen(path, "rb");
+   read_errno = errno;
+   if (!file) {
+      printf("unifrog libretro content invalid path=%s core=%s reason=open errno=%d\n",
+         path, core_id ? core_id : "", read_errno);
+      unifrog_log_sync("libretro dispatch fail invalid_file path=%s core=%s reason=open errno=%d",
+         path, core_id ? core_id : "", read_errno);
+      return -1;
+   }
+   errno = 0;
+   if (fread(&sample, 1, 1, file) != 1) {
+      read_errno = errno;
+      fclose(file);
+      printf("unifrog libretro content invalid path=%s core=%s reason=read_first errno=%d\n",
+         path, core_id ? core_id : "", read_errno);
+      unifrog_log_sync("libretro dispatch fail invalid_file path=%s core=%s reason=read_first errno=%d",
+         path, core_id ? core_id : "", read_errno);
+      return -1;
+   }
+   fclose(file);
+   return 0;
+}
+
 int unifrog_libretro_run_path_ex(const char *path,
    const struct unifrog_libretro_run_options *options)
 {
@@ -5602,6 +7867,7 @@ int unifrog_libretro_run_path_ex(const char *path,
       (void)unifrog_log_flush();
       return -1;
    }
+   unifrog_log_set_disk_suspended(0);
    log_defer = experimental_sd_log_defer_begin("libretro_dispatch");
    if (UNIFROG_SD_EXPERIMENTAL)
       printf("unifrog libretro dispatch storage_precheck=skipped mode=%s path=%s\n",
@@ -5614,6 +7880,11 @@ int unifrog_libretro_run_path_ex(const char *path,
    unifrog_diag_memory_snapshot("libretro.dispatch");
    (void)unifrog_log_flush();
    if (core_id) {
+      if (libretro_validate_content_file(path, core_id) != 0) {
+         (void)unifrog_log_flush();
+         experimental_sd_log_defer_end(log_defer, "libretro_dispatch", -1);
+         return -1;
+      }
       ret = run_core_id(core_id, path, options);
       printf("unifrog libretro dispatch core=%s ret=%d\n", core_id, ret);
       (void)unifrog_log_flush();

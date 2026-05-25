@@ -18,6 +18,7 @@
 #include <unifrog/build_info.h>
 #include <unifrog/boot_logo.h>
 #include <unifrog/boot_trace.h>
+#include <unifrog/exception_record.h>
 #include <unifrog/log.h>
 #include <unifrog/perf.h>
 #include <unifrog/runtime.h>
@@ -30,10 +31,21 @@
 extern unsigned long PINMUXL;
 extern unsigned long PINMUXR;
 
+#define GPIO_R_OUTPUT_REG ((volatile uint32_t *)0xb88000f4u)
+#define GPIO_R_DIR_REG ((volatile uint32_t *)0xb88000f8u)
+#define GPIO_R07_MASK (1u << 7)
+
 #define STORAGE_STABLE_SAMPLES 1
 #define STORAGE_MAX_POLLS 100
 #define STORAGE_POLL_MS 100
+#define STORAGE_ACTIVITY_MOUNT_VFAT 0x5101u
+#define STORAGE_ACTIVITY_MOUNT_NTFS 0x5102u
+#define STORAGE_ACTIVITY_MOUNT_DONE 0x5103u
+#define STORAGE_ACTIVITY_WAIT_DEFERRED 0x5104u
 #define SD_RUNTIME_QUIESCE_MS 100u
+#define SD_RUNTIME_FILEUART_FAULT_TICKS 5000u
+#define SD_RUNTIME_LOG_QUIET_MS 2000u
+#define SD_RUNTIME_LOG_FAULT_MS 5000u
 
 struct storage_mount {
    const char *dev;
@@ -47,6 +59,7 @@ static const struct storage_mount storage_mounts[] = {
 };
 static unsigned storage_mounted_mask;
 static unsigned storage_mount_attempts;
+static unsigned storage_log_suspend_depth;
 
 int mount(const char *source, const char *target,
    const char *filesystemtype, unsigned long mountflags, const void *data);
@@ -66,6 +79,7 @@ extern int bus_for_each_dev(struct bus_type *bus, struct device *start,
    void *data, int (*fn)(struct device *dev, void *data));
 extern const char hc_mmc_host_hw_ops[];
 extern void fileuart_set_storage_suspended(int suspended);
+extern void fileuart_note_storage_unstable(unsigned ticks);
 
 #ifndef MNT_FORCE
 #define MNT_FORCE 1u
@@ -85,15 +99,37 @@ extern void fileuart_set_storage_suspended(int suspended);
 #define SD_MMC_HOST_BUS_OPS_OFFSET 472u
 #define SD_MMC_HOST_ACTUAL_CLOCK_OFFSET 532u
 #define SD_HC_HOST_OFFSET 576u
+#define SD_HC_HOST_IOBASE_OFFSET (SD_HC_HOST_OFFSET + 4u)
 #define SD_HC_HOST_PDATA_OFFSET (SD_HC_HOST_OFFSET + 16u)
 #define SD_HC_HOST_OPS_OFFSET (SD_HC_HOST_OFFSET + 20u)
 #define SD_HC_HOST_MMC_OFFSET (SD_HC_HOST_OFFSET + 24u)
+#define SD_HC_HOST_CURRENT_MRQ_OFFSET (SD_HC_HOST_OFFSET + 28u)
+#define SD_HC_HOST_CURRENT_CMD_OFFSET (SD_HC_HOST_OFFSET + 32u)
+#define SD_HC_HOST_USE_PIO_OFFSET (SD_HC_HOST_OFFSET + 36u)
 #define SD_HC_PDATA_BUS_HZ_OFFSET 8u
 #define SD_HC_PDATA_MAX_FREQUENCY_OFFSET 16u
 #define SD_HC_PDATA_CAPS_OFFSET 20u
 #define SD_MMC_CARD_STATE_OFFSET 204u
 #define SD_MMC_BUS_OP_SUSPEND_OFFSET 12u
 #define SD_MMC_BUS_OP_RESUME_OFFSET 16u
+#define SD_MMC_REQUEST_CMD_OFFSET 4u
+#define SD_MMC_REQUEST_DATA_OFFSET 8u
+#define SD_MMC_REQUEST_STOP_OFFSET 12u
+#define SD_MMC_COMMAND_OPCODE_OFFSET 0u
+#define SD_MMC_COMMAND_ARG_OFFSET 4u
+#define SD_MMC_COMMAND_FLAGS_OFFSET 24u
+#define SD_MMC_COMMAND_RETRIES_OFFSET 28u
+#define SD_MMC_COMMAND_ERROR_OFFSET 32u
+#define SD_MMC_DATA_TIMEOUT_NS_OFFSET 0u
+#define SD_MMC_DATA_TIMEOUT_CLKS_OFFSET 4u
+#define SD_MMC_DATA_BLKSZ_OFFSET 8u
+#define SD_MMC_DATA_BLOCKS_OFFSET 12u
+#define SD_MMC_DATA_ERROR_OFFSET 16u
+
+#define SD_HC_REG_CLKDIV_LO 0x03u
+#define SD_HC_REG_BUS_WIDTH 0x0bu
+#define SD_HC_REG_CLKDIV_HI 0x34u
+#define SD_HC_REG_TIMING 0x50u
 
 #define SD_MMC_CAP_4_BIT_DATA (1u << 0)
 #define SD_MMC_CAP_MMC_HIGHSPEED (1u << 1)
@@ -139,8 +175,126 @@ static struct sd_runtime_boot_state sd_runtime_boot;
 static unifrog_platform_storage_stage_cb storage_stage_cb;
 static void *storage_stage_userdata;
 typedef int (*sd_runtime_bus_op_fn)(void *host);
+static uintptr_t sd_runtime_find_host(void);
+
+static void storage_update_log_disk_available(void)
+{
+   unifrog_log_set_disk_available(storage_mounted_mask != 0);
+}
 
 static const struct sd_runtime_profile sd_runtime_profiles[] = {
+   {
+      "wide1",
+      1000000u,
+      SD_MMC_CAP_4_BIT_DATA,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide2",
+      2000000u,
+      SD_MMC_CAP_4_BIT_DATA,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide4",
+      4000000u,
+      SD_MMC_CAP_4_BIT_DATA,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide8",
+      8000000u,
+      SD_MMC_CAP_4_BIT_DATA,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide10",
+      10000000u,
+      SD_MMC_CAP_4_BIT_DATA,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide12",
+      12000000u,
+      SD_MMC_CAP_4_BIT_DATA,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide14",
+      14000000u,
+      SD_MMC_CAP_4_BIT_DATA,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide16",
+      16000000u,
+      SD_MMC_CAP_4_BIT_DATA,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide18",
+      18000000u,
+      SD_MMC_CAP_4_BIT_DATA,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide20",
+      20000000u,
+      SD_MMC_CAP_4_BIT_DATA,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide22",
+      22000000u,
+      SD_MMC_CAP_4_BIT_DATA,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide24",
+      24000000u,
+      SD_MMC_CAP_4_BIT_DATA,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide25",
+      25000000u,
+      SD_MMC_CAP_4_BIT_DATA,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
+   {
+      "wide37",
+      37000000u,
+      SD_MMC_CAP_4_BIT_DATA | SD_MMC_CAP_SD_HIGHSPEED,
+      SD_MMC_CAP_SPEED_MASK,
+      SD_MMC_CAP2_NO_1_8V,
+      0u,
+   },
    {
       "hs1",
       198000000u,
@@ -201,6 +355,16 @@ static uint32_t sd_read_u32(uintptr_t base, size_t offset)
 
    memcpy(&value, (const void *)(base + offset), sizeof(value));
    return value;
+}
+
+static uint32_t sd_mmio_read32(uintptr_t base, size_t offset)
+{
+   return *(volatile const uint32_t *)(base + offset);
+}
+
+static uint8_t sd_mmio_read8(uintptr_t base, size_t offset)
+{
+   return *(volatile const uint8_t *)(base + offset);
 }
 
 static uint32_t sd_runtime_hash(const char *text)
@@ -275,6 +439,71 @@ static uintptr_t sd_read_ptr(uintptr_t base, size_t offset)
    return value;
 }
 
+static int sd_runtime_ptr_valid(uintptr_t ptr)
+{
+   return ptr >= 0x80000000u && ptr < 0x90000000u && (ptr & 3u) == 0;
+}
+
+static int sd_runtime_mmio_valid(uintptr_t ptr)
+{
+   return ptr >= 0xb8000000u && ptr < 0xc0000000u && (ptr & 3u) == 0;
+}
+
+static void sd_runtime_log_registers(const char *tag, uintptr_t host)
+{
+   uintptr_t iobase;
+   uint32_t div;
+
+   if (!host)
+      return;
+
+   iobase = sd_read_ptr(host, SD_HC_HOST_IOBASE_OFFSET);
+   if (!sd_runtime_mmio_valid(iobase)) {
+      unifrog_log("unifrog sd regs tag=%s host=0x%08lx iobase=0x%08lx invalid=1\n",
+         tag ? tag : "", (unsigned long)host, (unsigned long)iobase);
+      return;
+   }
+
+   div = (uint32_t)sd_mmio_read8(iobase, SD_HC_REG_CLKDIV_LO) |
+      ((uint32_t)sd_mmio_read8(iobase, SD_HC_REG_CLKDIV_HI) << 8);
+   unifrog_log("unifrog sd regs tag=%s host=0x%08lx iobase=0x%08lx "
+          "clkdiv=%lu clklo=0x%02lx clkhi=0x%02lx bus=0x%02lx timing=0x%02lx "
+          "r00=0x%08lx r04=0x%08lx r08=0x%08lx r0c=0x%08lx "
+          "r10=0x%08lx r14=0x%08lx r18=0x%08lx r1c=0x%08lx "
+          "r20=0x%08lx r24=0x%08lx r28=0x%08lx r2c=0x%08lx "
+          "r30=0x%08lx r34=0x%08lx r38=0x%08lx r3c=0x%08lx "
+          "r40=0x%08lx r44=0x%08lx r48=0x%08lx r4c=0x%08lx r50=0x%08lx\n",
+      tag ? tag : "",
+      (unsigned long)host,
+      (unsigned long)iobase,
+      (unsigned long)div,
+      (unsigned long)sd_mmio_read8(iobase, SD_HC_REG_CLKDIV_LO),
+      (unsigned long)sd_mmio_read8(iobase, SD_HC_REG_CLKDIV_HI),
+      (unsigned long)sd_mmio_read8(iobase, SD_HC_REG_BUS_WIDTH),
+      (unsigned long)sd_mmio_read8(iobase, SD_HC_REG_TIMING),
+      (unsigned long)sd_mmio_read32(iobase, 0x00u),
+      (unsigned long)sd_mmio_read32(iobase, 0x04u),
+      (unsigned long)sd_mmio_read32(iobase, 0x08u),
+      (unsigned long)sd_mmio_read32(iobase, 0x0cu),
+      (unsigned long)sd_mmio_read32(iobase, 0x10u),
+      (unsigned long)sd_mmio_read32(iobase, 0x14u),
+      (unsigned long)sd_mmio_read32(iobase, 0x18u),
+      (unsigned long)sd_mmio_read32(iobase, 0x1cu),
+      (unsigned long)sd_mmio_read32(iobase, 0x20u),
+      (unsigned long)sd_mmio_read32(iobase, 0x24u),
+      (unsigned long)sd_mmio_read32(iobase, 0x28u),
+      (unsigned long)sd_mmio_read32(iobase, 0x2cu),
+      (unsigned long)sd_mmio_read32(iobase, 0x30u),
+      (unsigned long)sd_mmio_read32(iobase, 0x34u),
+      (unsigned long)sd_mmio_read32(iobase, 0x38u),
+      (unsigned long)sd_mmio_read32(iobase, 0x3cu),
+      (unsigned long)sd_mmio_read32(iobase, 0x40u),
+      (unsigned long)sd_mmio_read32(iobase, 0x44u),
+      (unsigned long)sd_mmio_read32(iobase, 0x48u),
+      (unsigned long)sd_mmio_read32(iobase, 0x4cu),
+      (unsigned long)sd_mmio_read32(iobase, 0x50u));
+}
+
 static const struct sd_runtime_profile *sd_runtime_profile_by_name(
    const char *name)
 {
@@ -287,6 +516,65 @@ static const struct sd_runtime_profile *sd_runtime_profile_by_name(
          return &sd_runtime_profiles[i];
    }
    return NULL;
+}
+
+int unifrog_platform_sd_profile_allowed(const char *profile)
+{
+   return sd_runtime_profile_by_name(profile) ? 1 : 0;
+}
+
+const char *unifrog_platform_sd_active_profile(void)
+{
+   if (sd_runtime_boot.saved &&
+       strcmp(sd_runtime_boot.active_profile, "boot") != 0)
+      return sd_runtime_boot.active_profile;
+   return UNIFROG_SD_MODE;
+}
+
+int unifrog_platform_sd_describe(char *detail, size_t detail_size)
+{
+   uintptr_t host;
+   uintptr_t pdata;
+   uint32_t ios_clock;
+
+   if (!detail || detail_size == 0)
+      return -1;
+   detail[0] = '\0';
+   host = sd_runtime_find_host();
+   if (!host) {
+      snprintf(detail, detail_size,
+         "active=%s build=%s host=missing", unifrog_platform_sd_active_profile(),
+         UNIFROG_SD_MODE);
+      return -1;
+   }
+
+   pdata = sd_read_ptr(host, SD_HC_HOST_PDATA_OFFSET);
+   ios_clock = sd_read_u32(host, SD_MMC_HOST_IOS_OFFSET);
+   snprintf(detail, detail_size,
+      "active=%s build=%s fmax=%lu actual=%lu ios_clock=%lu "
+      "bus_width=%u timing=%u signal=%u caps=%08lx caps2=%08lx "
+      "pm_caps=%08lx pdata_bus=%lu pdata_max=%lu pdata_caps=%08lx "
+      "claim=0x%02lx count=%lu",
+      unifrog_platform_sd_active_profile(),
+      UNIFROG_SD_MODE,
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_F_MAX_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_ACTUAL_CLOCK_OFFSET),
+      (unsigned long)ios_clock,
+      (unsigned)sd_read_u8(host, SD_MMC_HOST_IOS_OFFSET + 9u),
+      (unsigned)sd_read_u8(host, SD_MMC_HOST_IOS_OFFSET + 10u),
+      (unsigned)sd_read_u8(host, SD_MMC_HOST_IOS_OFFSET + 11u),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS2_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_PM_CAPS_OFFSET),
+      (unsigned long)(pdata ? sd_read_u32(pdata,
+         SD_HC_PDATA_BUS_HZ_OFFSET) : 0u),
+      (unsigned long)(pdata ? sd_read_u32(pdata,
+         SD_HC_PDATA_MAX_FREQUENCY_OFFSET) : 0u),
+      (unsigned long)(pdata ? sd_read_u32(pdata,
+         SD_HC_PDATA_CAPS_OFFSET) : 0u),
+      (unsigned long)sd_read_u8(host, SD_MMC_HOST_CLAIMED_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CLAIM_COUNT_OFFSET));
+   return 0;
 }
 
 static int sd_runtime_host_valid(uintptr_t host, struct device *dev)
@@ -399,6 +687,66 @@ static void sd_runtime_format_detail(const char *name, uintptr_t host,
       (unsigned long)ms);
 }
 
+static int sd_runtime_sanity_read_one(const char *profile, const char *path)
+{
+   unsigned char buf[512];
+   unsigned long checksum = 5381u;
+   size_t got;
+   FILE *file;
+   int open_errno;
+
+   errno = 0;
+   file = fopen(path, "rb");
+   open_errno = errno;
+   if (!file) {
+      unifrog_log("unifrog sd sanity profile=%s path=%s ret=-1 errno=%d stage=open\n",
+         profile ? profile : "", path, open_errno);
+      return -1;
+   }
+
+   errno = 0;
+   got = fread(buf, 1, sizeof(buf), file);
+   open_errno = errno;
+   for (size_t i = 0; i < got; i++)
+      checksum = ((checksum << 5) + checksum) ^ buf[i];
+   fclose(file);
+
+   if (got == 0) {
+      unifrog_log("unifrog sd sanity profile=%s path=%s ret=-1 errno=%d stage=read got=0\n",
+         profile ? profile : "", path, open_errno);
+      return -1;
+   }
+
+   unifrog_log("unifrog sd sanity profile=%s path=%s ret=0 bytes=%lu checksum=0x%08lx\n",
+      profile ? profile : "", path, (unsigned long)got, checksum);
+   return 0;
+}
+
+static int sd_runtime_sanity_check(const char *profile)
+{
+   static const char *const paths[] = {
+      "/media/mmcblk0/unifrog/settings.ini",
+      "/media/mmcblk0/unifrog/bytecode-manifest.txt",
+      "/media/mmcblk0/firmware/unifrog.bin",
+      "/media/mmcblk0/bios/bisrv.asd",
+   };
+   unsigned pass = 0;
+   unsigned fail = 0;
+
+   for (unsigned i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+      if (sd_runtime_sanity_read_one(profile, paths[i]) == 0)
+         pass++;
+      else
+         fail++;
+      if (pass >= 2)
+         break;
+   }
+
+   unifrog_log_sync("sd_profile sanity profile=%s pass=%lu fail=%lu",
+      profile ? profile : "", (unsigned long)pass, (unsigned long)fail);
+   return pass >= 2 ? 0 : -1;
+}
+
 static int sd_runtime_unmount_storage(const char *tag)
 {
    int ret = 0;
@@ -420,6 +768,7 @@ static int sd_runtime_unmount_storage(const char *tag)
           (unmount_ret != 0 && unmount_errno == EINVAL) ||
           (unmount_ret != 0 && unmount_errno == ENOENT)) {
          storage_mounted_mask &= ~(1u << i);
+         storage_update_log_disk_available();
       } else {
          ret = -1;
       }
@@ -495,6 +844,7 @@ static void sd_runtime_write_boot(uintptr_t host)
 static int sd_runtime_call_bus_op(const char *operation, const char *stage,
    uintptr_t host, size_t op_offset)
 {
+   char reg_tag[64];
    uintptr_t ops = sd_read_ptr(host, SD_MMC_HOST_BUS_OPS_OFFSET);
    uintptr_t card = sd_read_ptr(host, SD_MMC_HOST_CARD_OFFSET);
    uintptr_t fn = ops ? sd_read_ptr(ops, op_offset) : 0;
@@ -503,6 +853,9 @@ static int sd_runtime_call_bus_op(const char *operation, const char *stage,
    uint32_t before_actual =
       sd_read_u32(host, SD_MMC_HOST_ACTUAL_CLOCK_OFFSET);
    int ret;
+
+   snprintf(reg_tag, sizeof(reg_tag), "%s_%s_begin",
+      operation ? operation : "", stage ? stage : "");
 
    unifrog_log("unifrog sd runtime bus_op begin operation=%s stage=%s "
           "host=0x%08lx ops=0x%08lx fn=0x%08lx card=0x%08lx "
@@ -521,6 +874,7 @@ static int sd_runtime_call_bus_op(const char *operation, const char *stage,
       (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS_OFFSET),
       (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS2_OFFSET),
       (unsigned long)before_actual);
+   sd_runtime_log_registers(reg_tag, host);
 
    if (!fn) {
       unifrog_log("unifrog sd runtime bus_op missing operation=%s stage=%s "
@@ -533,6 +887,9 @@ static int sd_runtime_call_bus_op(const char *operation, const char *stage,
 
    ret = ((sd_runtime_bus_op_fn)fn)((void *)host);
    card = sd_read_ptr(host, SD_MMC_HOST_CARD_OFFSET);
+   snprintf(reg_tag, sizeof(reg_tag), "%s_%s_done",
+      operation ? operation : "", stage ? stage : "");
+   sd_runtime_log_registers(reg_tag, host);
    unifrog_log("unifrog sd runtime bus_op done operation=%s stage=%s ret=%d "
           "card=0x%08lx card_state=0x%08lx caps=0x%08lx caps2=0x%08lx "
           "actual=%lu\n",
@@ -552,12 +909,14 @@ static int sd_runtime_reconfigure_host(const char *operation, uintptr_t host,
 {
    int ret;
 
+   sd_runtime_log_registers("reconfigure_begin", host);
    sd_runtime_stage(operation, "bus suspend begin", 0);
    ret = sd_runtime_call_bus_op(operation, "suspend", host,
       SD_MMC_BUS_OP_SUSPEND_OFFSET);
    sd_runtime_stage(operation, "bus suspend done", ret);
    if (ret != 0)
       return ret;
+   sd_runtime_log_registers("after_suspend", host);
 
    if (profile) {
       sd_runtime_write_profile(host, profile);
@@ -566,6 +925,7 @@ static int sd_runtime_reconfigure_host(const char *operation, uintptr_t host,
       sd_runtime_write_boot(host);
       sd_runtime_stage(operation, "boot profile written", 0);
    }
+   sd_runtime_log_registers("after_profile_write", host);
 
    sd_runtime_stage(operation, "bus resume begin", 0);
    ret = sd_runtime_call_bus_op(operation, "resume", host,
@@ -575,7 +935,135 @@ static int sd_runtime_reconfigure_host(const char *operation, uintptr_t host,
       return ret;
 
    msleep(100);
+   sd_runtime_log_registers("after_resume_settle", host);
    return 0;
+}
+
+void unifrog_platform_sd_debug_dump(const char *tag)
+{
+   uintptr_t host = sd_runtime_find_host();
+   uintptr_t card;
+   uintptr_t pdata;
+   uintptr_t mrq;
+   uintptr_t cmd;
+   uintptr_t req_cmd;
+   uintptr_t data;
+   uintptr_t stop;
+   uint32_t ios_clock;
+   uint32_t cmd_opcode = 0;
+   uint32_t cmd_arg = 0;
+   uint32_t cmd_flags = 0;
+   uint32_t cmd_retries = 0;
+   uint32_t cmd_error = 0;
+   uint32_t data_timeout_ns = 0;
+   uint32_t data_timeout_clks = 0;
+   uint32_t data_blksz = 0;
+   uint32_t data_blocks = 0;
+   uint32_t data_error = 0;
+
+   if (!host) {
+      unifrog_log("unifrog sd debug tag=%s host=missing\n",
+         tag ? tag : "");
+      return;
+   }
+   sd_runtime_log_registers(tag ? tag : "debug", host);
+
+   card = sd_read_ptr(host, SD_MMC_HOST_CARD_OFFSET);
+   pdata = sd_read_ptr(host, SD_HC_HOST_PDATA_OFFSET);
+   mrq = sd_read_ptr(host, SD_HC_HOST_CURRENT_MRQ_OFFSET);
+   cmd = sd_read_ptr(host, SD_HC_HOST_CURRENT_CMD_OFFSET);
+   req_cmd = sd_runtime_ptr_valid(mrq) ?
+      sd_read_ptr(mrq, SD_MMC_REQUEST_CMD_OFFSET) : 0u;
+   data = sd_runtime_ptr_valid(mrq) ?
+      sd_read_ptr(mrq, SD_MMC_REQUEST_DATA_OFFSET) : 0u;
+   stop = sd_runtime_ptr_valid(mrq) ?
+      sd_read_ptr(mrq, SD_MMC_REQUEST_STOP_OFFSET) : 0u;
+   if (!sd_runtime_ptr_valid(cmd))
+      cmd = req_cmd;
+   if (sd_runtime_ptr_valid(cmd)) {
+      cmd_opcode = sd_read_u32(cmd, SD_MMC_COMMAND_OPCODE_OFFSET);
+      cmd_arg = sd_read_u32(cmd, SD_MMC_COMMAND_ARG_OFFSET);
+      cmd_flags = sd_read_u32(cmd, SD_MMC_COMMAND_FLAGS_OFFSET);
+      cmd_retries = sd_read_u32(cmd, SD_MMC_COMMAND_RETRIES_OFFSET);
+      cmd_error = sd_read_u32(cmd, SD_MMC_COMMAND_ERROR_OFFSET);
+   }
+   if (sd_runtime_ptr_valid(data)) {
+      data_timeout_ns = sd_read_u32(data, SD_MMC_DATA_TIMEOUT_NS_OFFSET);
+      data_timeout_clks = sd_read_u32(data, SD_MMC_DATA_TIMEOUT_CLKS_OFFSET);
+      data_blksz = sd_read_u32(data, SD_MMC_DATA_BLKSZ_OFFSET);
+      data_blocks = sd_read_u32(data, SD_MMC_DATA_BLOCKS_OFFSET);
+      data_error = sd_read_u32(data, SD_MMC_DATA_ERROR_OFFSET);
+   }
+   ios_clock = sd_read_u32(host, SD_MMC_HOST_IOS_OFFSET);
+
+   unifrog_log("unifrog sd debug tag=%s active=%s host=0x%08lx card=0x%08lx "
+          "card_state=0x%08lx fmax=%lu actual=%lu caps=0x%08lx "
+          "caps2=0x%08lx pm_caps=0x%08lx ios_clock=%lu ios=%u/%u/%u/%u/%u "
+          "claim=0x%02lx owner=0x%08lx count=%lu pdata=0x%08lx "
+          "pdata_bus=%lu pdata_max=%lu pdata_caps=0x%08lx "
+          "mrq=0x%08lx cmd=0x%08lx req_cmd=0x%08lx data=0x%08lx stop=0x%08lx "
+          "cmd_op=%lu cmd_arg=0x%08lx cmd_flags=0x%08lx cmd_retries=%lu "
+          "cmd_error=%ld data_blksz=%lu data_blocks=%lu "
+          "data_timeout=%lu/%lu data_error=%ld "
+          "mount_mask=0x%lx attempts=%lu\n",
+      tag ? tag : "",
+      sd_runtime_boot.active_profile,
+      (unsigned long)host,
+      (unsigned long)card,
+      (unsigned long)(card ? sd_read_u32(card, SD_MMC_CARD_STATE_OFFSET) : 0u),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_F_MAX_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_ACTUAL_CLOCK_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS2_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_PM_CAPS_OFFSET),
+      (unsigned long)ios_clock,
+      (unsigned)sd_read_u8(host, SD_MMC_HOST_IOS_OFFSET + 9u),
+      (unsigned)sd_read_u8(host, SD_MMC_HOST_IOS_OFFSET + 10u),
+      (unsigned)sd_read_u8(host, SD_MMC_HOST_IOS_OFFSET + 11u),
+      (unsigned)sd_read_u8(host, SD_MMC_HOST_IOS_OFFSET + 12u),
+      (unsigned)sd_read_u8(host, SD_MMC_HOST_IOS_OFFSET + 13u),
+      (unsigned long)sd_read_u8(host, SD_MMC_HOST_CLAIMED_OFFSET),
+      (unsigned long)sd_read_ptr(host, SD_MMC_HOST_CLAIMED_TASK_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CLAIM_COUNT_OFFSET),
+      (unsigned long)pdata,
+      (unsigned long)(pdata ? sd_read_u32(pdata,
+         SD_HC_PDATA_BUS_HZ_OFFSET) : 0u),
+      (unsigned long)(pdata ? sd_read_u32(pdata,
+         SD_HC_PDATA_MAX_FREQUENCY_OFFSET) : 0u),
+      (unsigned long)(pdata ? sd_read_u32(pdata,
+         SD_HC_PDATA_CAPS_OFFSET) : 0u),
+      (unsigned long)mrq,
+      (unsigned long)cmd,
+      (unsigned long)req_cmd,
+      (unsigned long)data,
+      (unsigned long)stop,
+      (unsigned long)cmd_opcode,
+      (unsigned long)cmd_arg,
+      (unsigned long)cmd_flags,
+      (unsigned long)cmd_retries,
+      (long)(int32_t)cmd_error,
+      (unsigned long)data_blksz,
+      (unsigned long)data_blocks,
+      (unsigned long)data_timeout_ns,
+      (unsigned long)data_timeout_clks,
+      (long)(int32_t)data_error,
+      (unsigned long)storage_mounted_mask,
+      (unsigned long)storage_mount_attempts);
+   unifrog_log_sync("sd_debug tag=%s active=%s actual=%lu claim=0x%02lx count=%lu mrq=0x%08lx cmd_op=%lu cmd_arg=0x%08lx cmd_error=%ld data_blksz=%lu data_blocks=%lu data_error=%ld mount_mask=0x%lx attempts=%lu",
+      tag ? tag : "",
+      sd_runtime_boot.active_profile,
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_ACTUAL_CLOCK_OFFSET),
+      (unsigned long)sd_read_u8(host, SD_MMC_HOST_CLAIMED_OFFSET),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_CLAIM_COUNT_OFFSET),
+      (unsigned long)mrq,
+      (unsigned long)cmd_opcode,
+      (unsigned long)cmd_arg,
+      (long)(int32_t)cmd_error,
+      (unsigned long)data_blksz,
+      (unsigned long)data_blocks,
+      (long)(int32_t)data_error,
+      (unsigned long)storage_mounted_mask,
+      (unsigned long)storage_mount_attempts);
 }
 
 static void write_reg32(uint32_t addr, uint32_t value)
@@ -593,6 +1081,10 @@ static void apply_clock_defaults(void)
 
 static void init_board_gpios(void)
 {
+   *GPIO_R_OUTPUT_REG |= GPIO_R07_MASK;
+   *GPIO_R_DIR_REG |= GPIO_R07_MASK;
+   ((volatile unsigned char *)&PINMUXR)[PINPAD_R07 - 64] = 0;
+
    if (!unifrog_boot_logo_is_active()) {
       gpio_configure(PINPAD_R05, GPIO_DIR_OUTPUT);
       gpio_set_output(PINPAD_R05, true);
@@ -703,6 +1195,151 @@ static int directory_has_entries(const char *path)
    return entries;
 }
 
+static int directory_has_child(const char *root, const char *name)
+{
+   char path[256];
+   struct stat st;
+
+   if (!root || !name)
+      return 0;
+   snprintf(path, sizeof(path), "%s/%s", root, name);
+   return stat(path, &st) == 0;
+}
+
+static int storage_target_scan(const char *target, unsigned *entries_out,
+   unsigned *package_out, unsigned *user_out, unsigned *markers_out)
+{
+   DIR *dir;
+   struct dirent *ent;
+   unsigned entries = 0;
+   unsigned package = 0;
+   unsigned user = 0;
+   unsigned markers = 0;
+
+   if (entries_out)
+      *entries_out = 0;
+   if (package_out)
+      *package_out = 0;
+   if (user_out)
+      *user_out = 0;
+   if (markers_out)
+      *markers_out = 0;
+   if (!target)
+      return -1;
+   dir = opendir(target);
+   if (!dir)
+      return -1;
+   while ((ent = readdir(dir)) != NULL) {
+      const char *name = ent->d_name;
+
+      if (name[0] == '.' &&
+         (name[1] == '\0' || (name[1] == '.' && name[2] == '\0')))
+         continue;
+      entries++;
+      if (strcmp(name, "bios") == 0 || strcmp(name, "unifrog") == 0 ||
+          strcmp(name, "unifrog_data") == 0 || strcmp(name, "System Volume Information") == 0) {
+         package++;
+         continue;
+      }
+      if (strcmp(name, "ROMS") == 0 || strcmp(name, "ARCHIVE") == 0 ||
+          strcmp(name, "roms") == 0 || strcmp(name, "archive") == 0)
+         markers++;
+      user++;
+   }
+   closedir(dir);
+   if (entries_out)
+      *entries_out = entries;
+   if (package_out)
+      *package_out = package;
+   if (user_out)
+      *user_out = user;
+   if (markers_out)
+      *markers_out = markers;
+   return 0;
+}
+
+static void storage_clear_package_staging_mountpoint(const char *target)
+{
+   unsigned entries = 0;
+   unsigned package = 0;
+   unsigned user = 0;
+   unsigned markers = 0;
+   char staging[288];
+   int ret;
+
+   if (!target || storage_target_scan(target, &entries, &package, &user,
+       &markers) != 0 || entries == 0 || user || markers || entries != package)
+      return;
+
+   /*
+    * output/sdcard is a package template, not proof that the user's SD root is
+    * mounted.  If it leaked into the canonical mountpoint, move it aside so the
+    * real block device can be mounted on the path all runtime code uses.
+    */
+   snprintf(staging, sizeof(staging), "%s.staging", target);
+   (void)rmdir(staging);
+   errno = 0;
+   ret = rename(target, staging);
+   if (ret == 0)
+      (void)mkdir(target, 0777);
+   unifrog_log("unifrog storage mount package_staging target=%s staging=%s ret=%d errno=%d entries=%u package=%u\n",
+      target, staging, ret, errno, entries, package);
+}
+
+static int storage_target_looks_ready(const char *target)
+{
+   unsigned entries;
+   unsigned package;
+   unsigned user;
+   unsigned markers;
+
+   if (storage_target_scan(target, &entries, &package, &user, &markers) != 0 ||
+       entries == 0)
+      return 0;
+
+   /*
+    * The firmware image and update package can contain a minimal staging tree
+    * under /media/mmcblk0 before the SD mount is actually live.  That tree has
+    * only distro-owned directories (bios, unifrog, unifrog_data).  Do not adopt
+    * it as storage: doing so hides mount failures and makes the browser look as
+    * if the user's ROM folders disappeared.
+    */
+   return markers > 0 || user > 0 || directory_has_child(target, "bisrv.asd");
+}
+
+static int storage_adopt_existing_mount(unsigned index, uint32_t start_ms,
+   const char *reason)
+{
+   unsigned entries = 0;
+   unsigned package = 0;
+   unsigned user = 0;
+   unsigned markers = 0;
+
+   if (index >= sizeof(storage_mounts) / sizeof(storage_mounts[0]) ||
+       storage_target_scan(storage_mounts[index].target, &entries, &package,
+          &user, &markers) != 0)
+      return -1;
+   if (!storage_target_looks_ready(storage_mounts[index].target)) {
+      if (entries)
+         unifrog_log("unifrog storage mount target=%s not_ready reason=%s entries=%u package=%u user=%u markers=%u\n",
+            storage_mounts[index].target, reason ? reason : "", entries,
+            package, user, markers);
+      return -1;
+   }
+
+   storage_mounted_mask |= 1u << index;
+   storage_update_log_disk_available();
+   unifrog_log("unifrog storage mount target=%s adopted=1 reason=%s ms=%lu mask=0x%lx entries=%u package=%u user=%u markers=%u\n",
+      storage_mounts[index].target, reason ? reason : "",
+      (unsigned long)(unifrog_perf_time_ms() - start_ms),
+      (unsigned long)storage_mounted_mask, entries, package, user, markers);
+   unifrog_log_sync("storage mount adopted target=%s reason=%s mask=0x%lx attempts=%lu",
+      storage_mounts[index].target, reason ? reason : "",
+      (unsigned long)storage_mounted_mask,
+      (unsigned long)storage_mount_attempts);
+   return 0;
+}
+
 int unifrog_platform_mount_storage(void)
 {
    int mounted = -1;
@@ -719,20 +1356,23 @@ int unifrog_platform_mount_storage(void)
       int ntfs_errno = 0;
 
       (void)mkdir(storage_mounts[i].target, 0777);
+      storage_clear_package_staging_mountpoint(storage_mounts[i].target);
 
       target_start_ms = unifrog_perf_time_ms();
       had_entries = directory_has_entries(storage_mounts[i].target);
-      if (had_entries) {
-         unifrog_log("unifrog storage mount target=%s already_ready=1 ms=%lu mask=0x%lx\n",
-            storage_mounts[i].target,
-            (unsigned long)(unifrog_perf_time_ms() - target_start_ms),
-            (unsigned long)storage_mounted_mask);
-         return 0;
-      }
       if (storage_mounted_mask & (1u << i)) {
+         if (had_entries && storage_target_looks_ready(storage_mounts[i].target)) {
+            unifrog_log("unifrog storage mount target=%s already_adopted=1 ms=%lu mask=0x%lx\n",
+               storage_mounts[i].target,
+               (unsigned long)(unifrog_perf_time_ms() - target_start_ms),
+               (unsigned long)storage_mounted_mask);
+            storage_update_log_disk_available();
+            return 0;
+         }
          unifrog_log("unifrog storage mount stale_mask target=%s bit=%u mask=0x%lx\n",
             storage_mounts[i].target, i, (unsigned long)storage_mounted_mask);
          storage_mounted_mask &= ~(1u << i);
+         storage_update_log_disk_available();
       }
 
       storage_mount_attempts++;
@@ -743,6 +1383,7 @@ int unifrog_platform_mount_storage(void)
       vfat_errno = errno;
       if (vfat_ret == 0) {
          storage_mounted_mask |= 1u << i;
+         storage_update_log_disk_available();
          mounted = 0;
          unifrog_log("unifrog storage mount attempt=%lu dev=%s target=%s fs=vfat ret=0 errno=%d ms=%lu mask=0x%lx\n",
             (unsigned long)storage_mount_attempts, storage_mounts[i].dev,
@@ -766,6 +1407,7 @@ int unifrog_platform_mount_storage(void)
       ntfs_errno = errno;
       if (ntfs_ret == 0) {
          storage_mounted_mask |= 1u << i;
+         storage_update_log_disk_available();
          mounted = 0;
          unifrog_log("unifrog storage mount attempt=%lu dev=%s target=%s fs=ntfs ret=0 errno=%d ms=%lu mask=0x%lx\n",
             (unsigned long)storage_mount_attempts, storage_mounts[i].dev,
@@ -778,20 +1420,38 @@ int unifrog_platform_mount_storage(void)
             storage_mounts[i].target, ntfs_ret, ntfs_errno,
             (unsigned long)(unifrog_perf_time_ms() - target_start_ms));
       }
+      if (had_entries &&
+          storage_adopt_existing_mount(i, start_ms, "mount_failed_ready") == 0)
+         return 0;
    }
 
    unifrog_log("unifrog storage mount summary ret=%d ms=%lu mask=0x%lx attempts=%lu\n",
       mounted, (unsigned long)(unifrog_perf_time_ms() - start_ms),
       (unsigned long)storage_mounted_mask,
       (unsigned long)storage_mount_attempts);
+   if (mounted != 0)
+      unifrog_log_sync("storage mount failed ms=%lu mask=0x%lx attempts=%lu",
+         (unsigned long)(unifrog_perf_time_ms() - start_ms),
+         (unsigned long)storage_mounted_mask,
+         (unsigned long)storage_mount_attempts);
+   storage_update_log_disk_available();
    return mounted;
 }
 
 int unifrog_platform_storage_ready(void)
 {
-   return directory_has_entries(UNIFROG_SD_ROOT) ||
-      directory_has_entries("/media/mmcblk0p1") ||
-      directory_has_entries("/media/mmcblk0p2");
+   for (unsigned i = 0; i < sizeof(storage_mounts) / sizeof(storage_mounts[0]); i++) {
+      if ((storage_mounted_mask & (1u << i)) &&
+          storage_target_looks_ready(storage_mounts[i].target)) {
+         storage_update_log_disk_available();
+         return 1;
+      }
+      if (storage_adopt_existing_mount(i, unifrog_perf_time_ms(),
+            "ready_probe") == 0)
+         return 1;
+   }
+   storage_update_log_disk_available();
+   return 0;
 }
 
 int unifrog_platform_recover_storage(const char *tag, unsigned attempts,
@@ -843,6 +1503,7 @@ int unifrog_platform_sd_apply_profile(const char *profile,
    int unmount_ret;
    int switch_ret;
    int mount_ret = 0;
+   int sanity_ret = 0;
 
    runtime_profile = sd_runtime_profile_by_name(profile);
    if (!runtime_profile) {
@@ -862,6 +1523,9 @@ int unifrog_platform_sd_apply_profile(const char *profile,
    }
 
    start_ms = unifrog_perf_time_ms();
+   unifrog_log_sync("sd_profile switch begin profile=%s host=0x%08lx card=0x%08lx",
+      profile, (unsigned long)host,
+      (unsigned long)sd_read_ptr(host, SD_MMC_HOST_CARD_OFFSET));
    unifrog_log("unifrog sd runtime switch begin profile=%s host=0x%08lx "
           "card=0x%08lx caps=0x%08lx caps2=0x%08lx\n",
       profile,
@@ -869,14 +1533,19 @@ int unifrog_platform_sd_apply_profile(const char *profile,
       (unsigned long)sd_read_ptr(host, SD_MMC_HOST_CARD_OFFSET),
       (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS_OFFSET),
       (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS2_OFFSET));
+   sd_runtime_log_registers("switch_begin", host);
 
    sd_runtime_stage(profile, "unmount begin", 0);
    unmount_ret = sd_runtime_unmount_storage(profile);
    if (unmount_ret != 0) {
+      fileuart_note_storage_unstable(SD_RUNTIME_FILEUART_FAULT_TICKS);
+      unifrog_log_note_storage_quiet(SD_RUNTIME_LOG_FAULT_MS);
       sd_runtime_format_detail(profile, host, -1,
          unifrog_perf_time_ms() - start_ms, detail, detail_size);
       unifrog_log("unifrog sd runtime switch profile=%s ret=-1 "
              "reason=unmount_failed ms=%lu\n",
+         profile, (unsigned long)(unifrog_perf_time_ms() - start_ms));
+      unifrog_log_sync("sd_profile switch fail profile=%s reason=unmount ms=%lu",
          profile, (unsigned long)(unifrog_perf_time_ms() - start_ms));
       sd_runtime_stage(profile, "unmount failed", unmount_ret);
       return -1;
@@ -887,10 +1556,15 @@ int unifrog_platform_sd_apply_profile(const char *profile,
 
    switch_ret = sd_runtime_reconfigure_host(profile, host, runtime_profile);
    if (switch_ret != 0) {
+      fileuart_note_storage_unstable(SD_RUNTIME_FILEUART_FAULT_TICKS);
+      unifrog_log_note_storage_quiet(SD_RUNTIME_LOG_FAULT_MS);
       sd_runtime_format_detail(profile, host, -1,
          unifrog_perf_time_ms() - start_ms, detail, detail_size);
       unifrog_log("unifrog sd runtime switch profile=%s ret=-1 "
              "reason=reconfigure_failed switch_ret=%d ms=%lu\n",
+         profile, switch_ret,
+         (unsigned long)(unifrog_perf_time_ms() - start_ms));
+      unifrog_log_sync("sd_profile switch fail profile=%s reason=reconfigure ret=%d ms=%lu",
          profile, switch_ret,
          (unsigned long)(unifrog_perf_time_ms() - start_ms));
       if (mount_attempts) {
@@ -908,22 +1582,41 @@ int unifrog_platform_sd_apply_profile(const char *profile,
          mount_attempts, mount_delay_ms);
       sd_runtime_stage(profile, "recover done", mount_ret);
    }
+   sd_runtime_log_registers("after_recover", host);
 
-   snprintf(sd_runtime_boot.active_profile,
-      sizeof(sd_runtime_boot.active_profile), "%s", profile);
+   if (mount_ret == 0) {
+      sd_runtime_stage(profile, "sanity begin", 0);
+      sanity_ret = sd_runtime_sanity_check(profile);
+      sd_runtime_stage(profile, "sanity done", sanity_ret);
+      if (sanity_ret != 0) {
+         fileuart_note_storage_unstable(SD_RUNTIME_FILEUART_FAULT_TICKS);
+         unifrog_log_note_storage_quiet(SD_RUNTIME_LOG_FAULT_MS);
+      }
+   }
+
+   if (mount_ret == 0 && sanity_ret == 0) {
+      snprintf(sd_runtime_boot.active_profile,
+         sizeof(sd_runtime_boot.active_profile), "%s", profile);
+      unifrog_log_note_storage_quiet(SD_RUNTIME_LOG_QUIET_MS);
+   }
    sd_runtime_format_detail(profile, host, mount_ret,
       unifrog_perf_time_ms() - start_ms, detail, detail_size);
    unifrog_log("unifrog sd runtime switch done profile=%s ret=%d ms=%lu "
-          "caps=0x%08lx caps2=0x%08lx actual=%lu mount_ret=%d\n",
+          "caps=0x%08lx caps2=0x%08lx actual=%lu mount_ret=%d sanity_ret=%d\n",
       profile,
-      mount_ret == 0 ? 0 : -1,
+      (mount_ret == 0 && sanity_ret == 0) ? 0 : -1,
       (unsigned long)(unifrog_perf_time_ms() - start_ms),
       (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS_OFFSET),
       (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS2_OFFSET),
       (unsigned long)sd_read_u32(host, SD_MMC_HOST_ACTUAL_CLOCK_OFFSET),
-      mount_ret);
+      mount_ret, sanity_ret);
+   unifrog_log_sync("sd_profile switch done profile=%s ret=%d ms=%lu actual=%lu mount_ret=%d sanity_ret=%d detail=%s",
+      profile, (mount_ret == 0 && sanity_ret == 0) ? 0 : -1,
+      (unsigned long)(unifrog_perf_time_ms() - start_ms),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_ACTUAL_CLOCK_OFFSET),
+      mount_ret, sanity_ret, detail ? detail : "");
 
-   return mount_ret == 0 ? 0 : -1;
+   return (mount_ret == 0 && sanity_ret == 0) ? 0 : -1;
 }
 
 int unifrog_platform_sd_restore_boot(unsigned mount_attempts,
@@ -934,6 +1627,7 @@ int unifrog_platform_sd_restore_boot(unsigned mount_attempts,
    int unmount_ret;
    int restore_ret = 0;
    int mount_ret = 0;
+   int sanity_ret = 0;
 
    host = sd_runtime_find_host();
    if (!host) {
@@ -946,16 +1640,23 @@ int unifrog_platform_sd_restore_boot(unsigned mount_attempts,
       sd_runtime_save_boot(host);
 
    start_ms = unifrog_perf_time_ms();
+   unifrog_log_sync("sd_profile restore begin host=0x%08lx active=%s",
+      (unsigned long)host, sd_runtime_boot.active_profile);
    unifrog_log("unifrog sd runtime restore begin host=0x%08lx active=%s\n",
       (unsigned long)host, sd_runtime_boot.active_profile);
+   sd_runtime_log_registers("restore_begin", host);
 
    sd_runtime_stage("restore", "unmount begin", 0);
    unmount_ret = sd_runtime_unmount_storage("restore");
    if (unmount_ret != 0) {
+      fileuart_note_storage_unstable(SD_RUNTIME_FILEUART_FAULT_TICKS);
+      unifrog_log_note_storage_quiet(SD_RUNTIME_LOG_FAULT_MS);
       sd_runtime_format_detail("restore", host, -1,
          unifrog_perf_time_ms() - start_ms, detail, detail_size);
       unifrog_log("unifrog sd runtime restore ret=-1 reason=unmount_failed "
              "ms=%lu\n",
+         (unsigned long)(unifrog_perf_time_ms() - start_ms));
+      unifrog_log_sync("sd_profile restore fail reason=unmount ms=%lu",
          (unsigned long)(unifrog_perf_time_ms() - start_ms));
       sd_runtime_stage("restore", "unmount failed", unmount_ret);
       return -1;
@@ -976,23 +1677,42 @@ int unifrog_platform_sd_restore_boot(unsigned mount_attempts,
          mount_attempts, mount_delay_ms);
       sd_runtime_stage("restore", "recover done", mount_ret);
    }
+   sd_runtime_log_registers("restore_after_recover", host);
 
-   if (restore_ret == 0)
+   if (restore_ret == 0 && mount_ret == 0) {
+      sd_runtime_stage("restore", "sanity begin", 0);
+      sanity_ret = sd_runtime_sanity_check("boot");
+      sd_runtime_stage("restore", "sanity done", sanity_ret);
+   }
+
+   if (restore_ret == 0 && mount_ret == 0 && sanity_ret == 0)
       snprintf(sd_runtime_boot.active_profile,
          sizeof(sd_runtime_boot.active_profile), "boot");
+   else {
+      fileuart_note_storage_unstable(SD_RUNTIME_FILEUART_FAULT_TICKS);
+      unifrog_log_note_storage_quiet(SD_RUNTIME_LOG_FAULT_MS);
+   }
+   if (restore_ret == 0 && mount_ret == 0 && sanity_ret == 0)
+      unifrog_log_note_storage_quiet(SD_RUNTIME_LOG_QUIET_MS);
    sd_runtime_format_detail("boot", host, mount_ret,
       unifrog_perf_time_ms() - start_ms, detail, detail_size);
    unifrog_log("unifrog sd runtime restore done ret=%d ms=%lu caps=0x%08lx "
-          "caps2=0x%08lx actual=%lu restore_ret=%d mount_ret=%d\n",
-      (restore_ret == 0 && mount_ret == 0) ? 0 : -1,
+          "caps2=0x%08lx actual=%lu restore_ret=%d mount_ret=%d sanity_ret=%d\n",
+      (restore_ret == 0 && mount_ret == 0 && sanity_ret == 0) ? 0 : -1,
       (unsigned long)(unifrog_perf_time_ms() - start_ms),
       (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS_OFFSET),
       (unsigned long)sd_read_u32(host, SD_MMC_HOST_CAPS2_OFFSET),
       (unsigned long)sd_read_u32(host, SD_MMC_HOST_ACTUAL_CLOCK_OFFSET),
       restore_ret,
-      mount_ret);
+      mount_ret,
+      sanity_ret);
+   unifrog_log_sync("sd_profile restore done ret=%d ms=%lu actual=%lu restore_ret=%d mount_ret=%d sanity_ret=%d detail=%s",
+      (restore_ret == 0 && mount_ret == 0 && sanity_ret == 0) ? 0 : -1,
+      (unsigned long)(unifrog_perf_time_ms() - start_ms),
+      (unsigned long)sd_read_u32(host, SD_MMC_HOST_ACTUAL_CLOCK_OFFSET),
+      restore_ret, mount_ret, sanity_ret, detail ? detail : "");
 
-   return (restore_ret == 0 && mount_ret == 0) ? 0 : -1;
+   return (restore_ret == 0 && mount_ret == 0 && sanity_ret == 0) ? 0 : -1;
 }
 
 void unifrog_platform_set_storage_stage_callback(
@@ -1004,8 +1724,24 @@ void unifrog_platform_set_storage_stage_callback(
 
 void unifrog_platform_set_storage_log_suspended(int suspended)
 {
+   if (suspended) {
+      if (storage_log_suspend_depth < 0xffffffffu)
+         storage_log_suspend_depth++;
+   } else if (storage_log_suspend_depth > 0) {
+      storage_log_suspend_depth--;
+   }
+   suspended = storage_log_suspend_depth > 0 ? 1 : 0;
    fileuart_set_storage_suspended(suspended);
-   unifrog_log("unifrog storage log_suspended=%d\n", suspended ? 1 : 0);
+   unifrog_log_set_disk_suspended(suspended);
+   unifrog_log("unifrog storage log_suspended=%d depth=%u\n",
+      suspended, storage_log_suspend_depth);
+}
+
+void unifrog_platform_note_storage_unstable(unsigned ticks)
+{
+   fileuart_note_storage_unstable(ticks);
+   unifrog_log_note_storage_quiet(ticks);
+   unifrog_log("unifrog storage unstable quiet_ticks=%u\n", ticks);
 }
 
 int unifrog_platform_wait_for_storage(void)
@@ -1020,21 +1756,23 @@ int unifrog_platform_wait_for_storage(void)
       int root_ready;
       int p1_ready;
       int p2_ready;
+      int ready;
 
       mount_ret = unifrog_platform_mount_storage();
       mount_done_ms = unifrog_perf_time_ms();
 
-      root_ready = directory_has_entries(UNIFROG_SD_ROOT);
-      p1_ready = directory_has_entries("/media/mmcblk0p1");
-      p2_ready = directory_has_entries("/media/mmcblk0p2");
+      root_ready = storage_target_looks_ready(UNIFROG_SD_ROOT);
+      p1_ready = storage_target_looks_ready("/media/mmcblk0p1");
+      p2_ready = storage_target_looks_ready("/media/mmcblk0p2");
+      ready = unifrog_platform_storage_ready();
 
-      if (root_ready || p1_ready || p2_ready)
+      if (ready)
          stable++;
       else
          stable = 0;
 
-      unifrog_log("unifrog storage poll=%d mount_ret=%d mount_ms=%lu check_ms=%lu total_ms=%lu root=%d p1=%d p2=%d stable=%d/%d mask=0x%lx\n",
-         i, mount_ret,
+      unifrog_log("unifrog storage poll=%d mount_ret=%d ready=%d mount_ms=%lu check_ms=%lu total_ms=%lu root=%d p1=%d p2=%d stable=%d/%d mask=0x%lx\n",
+         i, mount_ret, ready,
          (unsigned long)(mount_done_ms - poll_start_ms),
          (unsigned long)(unifrog_perf_time_ms() - mount_done_ms),
          (unsigned long)(unifrog_perf_time_ms() - wait_start_ms),
@@ -1066,4 +1804,22 @@ void unifrog_platform_idle_forever(void)
 {
    for (;;)
       usleep(1000);
+}
+
+__attribute__((weak)) void fileuart_note_storage_unstable(unsigned ticks)
+{
+   (void)ticks;
+}
+
+__attribute__((weak)) void fileuart_get_debug_status(uint32_t *pending,
+   uint32_t *suspended, uint32_t *quiet_ticks, uint32_t *dirty_bytes)
+{
+   if (pending)
+      *pending = 0;
+   if (suspended)
+      *suspended = 0;
+   if (quiet_ticks)
+      *quiet_ticks = 0;
+   if (dirty_bytes)
+      *dirty_bytes = 0;
 }

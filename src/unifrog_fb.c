@@ -26,7 +26,7 @@ static int get_var(int fd, struct fb_var_screeninfo *var)
    return ioctl(fd, FBIOGET_VSCREENINFO, var);
 }
 
-static int put_rgb565_var(int fd, struct fb_var_screeninfo *var, unsigned flags)
+static int put_format_var(int fd, struct fb_var_screeninfo *var, unsigned flags)
 {
    unsigned xoffset = var->xoffset;
    unsigned yoffset = var->yoffset;
@@ -50,22 +50,41 @@ static int put_rgb565_var(int fd, struct fb_var_screeninfo *var, unsigned flags)
       var->xres_virtual = var->xres;
       var->yres_virtual = var->yres;
    }
-   var->bits_per_pixel = 16;
-   var->red.length = 5;
-   var->green.length = 6;
-   var->blue.length = 5;
+   if (flags & UNIFROG_FB_OPEN_XRGB8888) {
+      var->bits_per_pixel = 32;
+      var->red.length = 8;
+      var->green.length = 8;
+      var->blue.length = 8;
+      var->transp.length = 0;
+   } else {
+      var->bits_per_pixel = 16;
+      var->red.length = 5;
+      var->green.length = 6;
+      var->blue.length = 5;
+      var->transp.length = 0;
+   }
    return ioctl(fd, FBIOPUT_VSCREENINFO, var);
 }
 
-static int fb_var_is_usable_rgb565(const struct fb_var_screeninfo *var)
+static int fb_var_is_usable_format(const struct fb_var_screeninfo *var,
+   unsigned flags)
 {
    if (!var)
       return 0;
-   if (var->bits_per_pixel != 16 ||
-       var->red.length != 5 ||
-       var->green.length != 6 ||
-       var->blue.length != 5)
-      return 0;
+   if (flags & UNIFROG_FB_OPEN_XRGB8888) {
+      if (var->bits_per_pixel != 32 ||
+          var->red.length != 8 ||
+          var->green.length != 8 ||
+          var->blue.length != 8 ||
+          var->transp.length != 0)
+         return 0;
+   } else {
+      if (var->bits_per_pixel != 16 ||
+          var->red.length != 5 ||
+          var->green.length != 6 ||
+          var->blue.length != 5)
+         return 0;
+   }
    if (var->xres_virtual < var->xres || var->yres_virtual < var->yres)
       return 0;
    if (var->xoffset + var->xres > var->xres_virtual ||
@@ -116,9 +135,9 @@ int unifrog_fb_open(struct unifrog_fb *fb, unsigned flags)
    get1_ms = unifrog_perf_time_ms();
 
    if (!(flags & UNIFROG_FB_OPEN_PRESERVE) ||
-       !fb_var_is_usable_rgb565(&var)) {
+       !fb_var_is_usable_format(&var, flags)) {
       put_var = 1;
-      if (put_rgb565_var(fd, &var, flags) != 0) {
+      if (put_format_var(fd, &var, flags) != 0) {
          fail_stage = "put_var";
          goto fail;
       }
@@ -225,6 +244,8 @@ struct unifrog_surface unifrog_fb_surface_for_buffer(const struct unifrog_fb *fb
    memset(&surface, 0, sizeof(surface));
    if (!fb || !fb->pixels || buffer_index >= fb->buffer_count)
       return surface;
+   if (fb->bpp != 16)
+      return surface;
    surface.pixels = fb->pixels + buffer_index * fb->stride_pixels * fb->height;
    surface.width = fb->width;
    surface.height = fb->height;
@@ -245,11 +266,13 @@ struct unifrog_ge_surface unifrog_fb_ge_surface_for_buffer(const struct unifrog_
    memset(&surface, 0, sizeof(surface));
    if (!fb || !fb->pixels || buffer_index >= fb->buffer_count)
       return surface;
-   surface.pixels = fb->pixels + buffer_index * fb->stride_pixels * fb->height;
+   surface.pixels = (uint8_t *)fb->pixels +
+      (size_t)buffer_index * fb->pitch_bytes * fb->height;
    surface.width = fb->width;
    surface.height = fb->height;
    surface.pitch_bytes = fb->pitch_bytes;
-   surface.format = UNIFROG_GE_FORMAT_RGB565;
+   surface.format = fb->bpp == 32 ?
+      UNIFROG_GE_FORMAT_XRGB8888 : UNIFROG_GE_FORMAT_RGB565;
    return surface;
 }
 
@@ -265,7 +288,8 @@ void unifrog_fb_flush_buffer(const struct unifrog_fb *fb, unsigned buffer_index)
 
       if (buffer_index >= fb->buffer_count)
          return;
-      base = fb->pixels + buffer_index * fb->stride_pixels * fb->height;
+      base = (uint16_t *)((uint8_t *)fb->pixels +
+         (size_t)buffer_index * fb->pitch_bytes * fb->height);
       unifrog_perf_cache_flush(base, fb->visible_bytes);
    }
 }
@@ -323,6 +347,7 @@ int unifrog_fb_pan(struct unifrog_fb *fb, unsigned buffer_index)
       return -1;
    if (get_var(fb->fd, &var) != 0)
       return -1;
+   (void)unifrog_fb_wait_vsync(fb);
    var.xoffset = 0;
    var.yoffset = buffer_index * fb->height;
    if (ioctl(fb->fd, FBIOPAN_DISPLAY, &var) != 0)

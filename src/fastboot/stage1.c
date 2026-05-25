@@ -843,10 +843,8 @@ void stage1_main(void)
 			(unsigned int)-1, 0, 0);
 	}
 
-	if (load_file("firmware/unifrog.bin", 0, RAW_LOAD_ADDR) == 0)
-		jump_to_payload("firmware/unifrog.bin");
-	if (load_file("unifrog.bin", 0, RAW_LOAD_ADDR) == 0)
-		jump_to_payload("unifrog.bin");
+	if (load_file("unifrog/firmware/unifrog.bin", 0, RAW_LOAD_ADDR) == 0)
+		jump_to_payload("unifrog/firmware/unifrog.bin");
 
 	if (load_asd_staged("stock.asd") == 0)
 		jump_to_payload("stock.asd");

@@ -1,9 +1,9 @@
 # UniFrog Memory Layout
 
-UniFrog uses two memory ownership classes with different lifetimes: persistent
-runtime memory and a reclaimable application arena. Media playback now uses the
-same normal allocation path as the rest of the runtime; there is no separately
-reserved MMZ pool in the default layout.
+UniFrog uses three memory ownership classes with different lifetimes:
+persistent runtime memory, a reclaimable application arena, and a deterministic
+media MMZ pool. The SF2000 media-specific split is documented in
+`docs/sf2000-memory-model.md`.
 
 Fixed runtime reservations such as JIT caches and DMA buffers are part of the
 same ownership story. See `docs/link-layout-diagnostics.md` for the linker
@@ -40,24 +40,37 @@ On the current SF2000/GB300 DTS the arena is backed by
 `/hcrtos/memory-mapping/appmem`. The default policy is:
 
 - keep 48 MiB of `sysmem` for UniFrog/HCRTOS
-- give the rest of RAM to one reclaimable application arena
-- keep `mmz0` at size zero
+- keep a fixed `mmz0` media pool sized for 1080p H.264 decode/display surfaces
+- give the remaining middle RAM to one reclaimable application arena
 
-This currently targets about 80 MiB of contiguous application arena on the
-128 MiB layout. Devices with less RAM can expose a smaller arena or no arena;
-loaders must reject cores that do not fit.
+This currently targets about 44 MiB of contiguous application arena on the
+128 MiB media-capable layout. Devices with less RAM can expose a smaller arena
+or no arena; loaders must reject cores that do not fit.
 
 ## Media Memory
 
-MMZ is intentionally size zero in the default UniFrog layout. Vendor media code
-still calls MMZ allocation APIs, so the SDK routes zero-sized MMZ allocations to
-normal sysmem instead of requiring a reserved driver pool. This keeps MP4
-playback working while leaving the high-memory arena available for applications.
+The SF2000 DTS reserves `mmz0` for hardware decoded frame/display surfaces.
+HCRTOS media drivers allocate those surfaces internally during `VIDDEC_INIT`,
+so this pool must be physically contiguous and must not depend on ordinary heap
+fragmentation. The current 1080p pool is about 34.93 MiB.
 
-UniFrog media playback should use an application-owned streaming buffer instead
-of loading the whole file into memory. The current default stream cache is 1 MiB
-inside the app arena; it can be tuned lower after device testing confirms SD
-refill latency stays hidden.
+HCRTOS KSHM is separate from decoded frame memory. Because the DTS does not
+define a named `kshm` MMZ pool, KSHM falls back to normal aligned heap
+allocation for compressed packet rings while playback is active and releases
+them when `VIDDEC_RLS`/`AUDDEC_RLS` runs. The media DTS advertises a 16 MiB
+`viddec.kshm_size`; native video keeps that size for high-resolution streams
+and requests an 8 MiB compressed ring for streams at or below 640x360. Native
+audio currently opens `/dev/auddec` with the stock-style `0xa0000` compressed
+ring used by HCRTOS cast examples. These rings are dynamic playback
+allocations, not permanent DTS reservations.
+
+UniFrog media playback uses streaming buffers instead of loading the whole file
+into memory. The native FFmpeg custom AVIO buffer is intentionally a small
+64 KiB read chunk, with a 16 KiB allocation fallback if memory is fragmented.
+A separate post-probe read-ahead cache can allocate `16 x 512 KiB = 8 MiB` for
+video, with smaller fallback windows if the decoder rings have consumed normal
+heap, to reduce SD transactions during playback without letting MP4 probing
+over-read tens of MiB before playback starts.
 
 ## Compatibility Rule
 

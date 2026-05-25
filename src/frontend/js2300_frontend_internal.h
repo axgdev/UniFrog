@@ -28,7 +28,9 @@
 #include <unifrog/boot_logo.h>
 #include <unifrog/boot_trace.h>
 #include <unifrog/diag.h>
+#include <unifrog/display_benchmark.h>
 #include <unifrog/fb.h>
+#include <unifrog/ge.h>
 #include <unifrog/gfx.h>
 #include <unifrog/input.h>
 #include <unifrog/libretro_host.h>
@@ -36,6 +38,7 @@
 #include <unifrog/media.h>
 #include <unifrog/panic.h>
 #include <unifrog/path.h>
+#include <unifrog/paths.h>
 #include <unifrog/perf.h>
 #include <unifrog/platform.h>
 #include <unifrog/png.h>
@@ -43,22 +46,26 @@
 
 #define printf unifrog_log
 
-#define JS2300_FRONTEND_APP_ROOT "/media/mmcblk0/unifrog"
-#define JS2300_FRONTEND_ENTRY "main.js"
+#define JS2300_FRONTEND_APP_ROOT UNIFROG_DIST_ROOT
+#define JS2300_FRONTEND_DATA_ROOT UNIFROG_DATA_ROOT
 #define JS2300_FRONTEND_HCRTOS_MEDIA_MODULE \
    JS2300_FRONTEND_APP_ROOT "/modules/hcrtos-media.bin"
 #define JS2300_FRONTEND_MAX_PATH 256
 #define JS2300_FRONTEND_MANIFEST JS2300_FRONTEND_APP_ROOT "/manifest.ini"
 #define JS2300_FRONTEND_SYSTEM_CHECK_REPORT \
-   JS2300_FRONTEND_APP_ROOT "/system-check.txt"
+   UNIFROG_REPORT_ROOT "/system-check.txt"
 #define JS2300_FRONTEND_STORAGE_TEST_REPORT \
-   JS2300_FRONTEND_APP_ROOT "/storage-test-result.txt"
+   UNIFROG_REPORT_ROOT "/storage-test-result.txt"
 #define JS2300_FRONTEND_STORAGE_FULL_TEST_REPORT \
-   JS2300_FRONTEND_APP_ROOT "/storage-full-test-result.txt"
+   UNIFROG_REPORT_ROOT "/storage-full-test-result.txt"
 #define JS2300_FRONTEND_STORAGE_MODE_TEST_REPORT \
-   JS2300_FRONTEND_APP_ROOT "/storage-mode-test-result.txt"
+   UNIFROG_REPORT_ROOT "/storage-mode-test-result.txt"
+#define JS2300_FRONTEND_STORAGE_STRESS_REPORT \
+   UNIFROG_REPORT_ROOT "/storage-stress-result.txt"
+#define JS2300_FRONTEND_STORAGE_QUICK_BENCH_REPORT \
+   UNIFROG_REPORT_ROOT "/storage-quick-benchmark.txt"
 #define JS2300_FRONTEND_STORAGE_TEST_PROBE \
-   JS2300_FRONTEND_APP_ROOT "/storage-test-probe.txt"
+   JS2300_FRONTEND_DATA_ROOT "/storage-test-probe.txt"
 #define JS2300_FRONTEND_ICON_CACHE 24u
 #define JS2300_FRONTEND_INDEX_MAX_DEPTH 12u
 #define JS2300_FRONTEND_INDEX_MAX_FILES 65535u
@@ -82,6 +89,7 @@ struct js2300_cached_icon {
 
 struct js2300_frontend {
    struct unifrog_fb fb;
+   struct unifrog_ge ge;
    struct unifrog_battery_status battery;
    struct unifrog_libretro_run_options run_options;
    struct js2300_cached_icon icon_cache[JS2300_FRONTEND_ICON_CACHE];
@@ -93,6 +101,8 @@ struct js2300_frontend {
    int frame_open;
    unsigned frame_draw_ops;
    int frame_has_visible_content;
+   int frame_ge_dirty;
+   int ge_ready;
    unsigned boot_logo_present_skips;
    int pending_backlight_valid;
    unsigned pending_backlight_level;
@@ -101,11 +111,10 @@ struct js2300_frontend {
    unsigned video_present_count;
    unsigned video_present_log_count;
    uint32_t frontend_start_ms;
+   int owns_framebuffer;
+   int extension_mode;
    int relaunch;
    int input_recovered;
-   int boot_read_active;
-   int boot_read_started;
-   size_t boot_read_old_auto_flush;
    uint32_t icon_use_counter;
 };
 
@@ -172,15 +181,15 @@ void host_exit(void *opaque, const char *reason);
 
 void frontend_configure_host(struct js2300_frontend *frontend,
    struct js2300_host *host);
-int frontend_start_boot_read_window(struct js2300_frontend *frontend,
-   const char *tag);
-int frontend_restore_boot_read_window(struct js2300_frontend *frontend,
-   const char *tag, int flush);
-int frontend_start_runtime_read_window(struct js2300_frontend *frontend,
-   const char *tag);
+void js2300_frontend_default_run_options(
+   struct unifrog_libretro_run_options *options);
+int run_js_script_file(struct js2300_frontend *frontend, const char *path);
 int run_requested_action(struct js2300_frontend *frontend);
 int run_storage_test(struct js2300_frontend *frontend);
 int run_storage_full_test(struct js2300_frontend *frontend);
 int run_storage_mode_test(struct js2300_frontend *frontend, const char *profile);
+int run_storage_stress_test(struct js2300_frontend *frontend,
+   const char *profile);
+int run_storage_quick_benchmark(struct js2300_frontend *frontend);
 
 #endif

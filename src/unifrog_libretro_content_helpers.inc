@@ -186,6 +186,9 @@ static int read_fd_fully_to_buffer(int fd, const char *path, uint8_t *data,
 {
    size_t done = 0;
    unsigned last_progress = 0xffffffffu;
+   uint64_t start_us = host_time_us();
+   unsigned timeout_ms = libretro_fast_read_timeout_enabled ?
+      libretro_fast_read_timeout_ms(size) : 0;
 
    if (fd < 0 || !data || size == 0)
       return -1;
@@ -202,9 +205,26 @@ static int read_fd_fully_to_buffer(int fd, const char *path, uint8_t *data,
          printf("unifrog libretro file read failed path=%s size=%u done=%u got=%d errno=%d label=%s\n",
             path ? path : "", (unsigned)size, (unsigned)done, (int)got,
             errno, label ? label : "");
+         unifrog_log_sync("content_fd_read fail path=%s size=%u done=%u got=%d errno=%d label=%s",
+            path ? path : "", (unsigned)size, (unsigned)done, (int)got,
+            errno, label ? label : "");
          return -1;
       }
       done += (size_t)got;
+      if (timeout_ms &&
+          host_elapsed_ms(start_us, host_time_us()) > timeout_ms) {
+         printf("unifrog libretro file read timeout path=%s size=%u done=%u elapsed=%u timeout=%u label=%s\n",
+            path ? path : "", (unsigned)size, (unsigned)done,
+            host_elapsed_ms(start_us, host_time_us()), timeout_ms,
+            label ? label : "");
+         unifrog_log_sync("content_fd_read timeout path=%s size=%u done=%u elapsed=%u timeout=%u label=%s",
+            path ? path : "", (unsigned)size, (unsigned)done,
+            host_elapsed_ms(start_us, host_time_us()), timeout_ms,
+            label ? label : "");
+         unifrog_platform_sd_debug_dump("content_fd_read_timeout");
+         errno = ETIMEDOUT;
+         return -1;
+      }
       progress = progress_base + (unsigned)((done * progress_span) /
          (size ? size : 1u));
       if (progress != last_progress) {
@@ -213,6 +233,9 @@ static int read_fd_fully_to_buffer(int fd, const char *path, uint8_t *data,
          last_progress = progress;
       }
    }
+   unifrog_log_sync("content_fd_read done path=%s size=%u elapsed=%u label=%s",
+      path ? path : "", (unsigned)size,
+      host_elapsed_ms(start_us, host_time_us()), label ? label : "");
    return 0;
 }
 
