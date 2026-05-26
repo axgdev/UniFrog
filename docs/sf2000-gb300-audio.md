@@ -74,6 +74,12 @@ normal native-video sync path. If `VIDDEC_INIT` rejects that combined state with
 PCM audio for that video session. Keep this recovery SF2000-only; GB300 media
 needs the hardware-auddec plus I2SO-prime path to preserve audible output.
 
+SF2000 can still use hardware auddec and hardware viddec together when
+`VIDDEC_INIT` accepts the combined state. Keep SF2000 seeks on the older stable
+path: viddec flush rate `0.0`, no explicit `/dev/avsync0` timebase reset, and no
+post-seek packet dropping. GB300 keeps the newer seek catch-up path because its
+audible route depends on the hardware auddec plus I2SO-prime configuration.
+
 ## Progress Signals
 
 Auddec init/start success is not enough. A working route must show real
