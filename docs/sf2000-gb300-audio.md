@@ -84,13 +84,23 @@ demuxer can land on the previous H.264 keyframe, and resuming playback on the
 first packet whose timestamp reaches the target can feed a dependent frame
 without its reference history. That produces visible artifacts until the next
 I-frame. The native player may show the first pre-target keyframe as a clean
-still. If that keyframe is close to the target, it feeds the short pre-roll
-without pacing so the decoder has reference frames and can resume on the target
-packet. If the pre-roll is too long, it drops video until the target and resumes
-only on a keyframe at or after the target. Audio packets before the target are
-also dropped so the hardware audio clock does not restart early. Repeated seeks
-while catch-up is active must use the pending target as the current position,
-because hardware clocks can report `0` immediately after decoder flushes.
+still. If that keyframe is close enough and cheap enough to decode, it feeds the
+short pre-roll without pacing so the decoder has reference frames and can resume
+on the target packet. HD clips and large keyframes use a tighter pre-roll budget
+and skip toward the next usable target keyframe instead. Audio packets before
+the target are also dropped so the hardware audio clock does not restart early.
+Repeated seeks while catch-up is active must use the pending target as the
+current position, because hardware clocks can report `0` immediately after
+decoder flushes. A short seek-settle window also lets rapid LEFT/RIGHT taps
+collapse into the newest target before packets for intermediate targets are fed.
+
+If video falls behind audio after a seek, recovery is progress-aware and shared
+between SF2000 and GB300. Viddec timeouts do not immediately flush the decoder:
+UniFrog first checks viddec clock and frame counters. While those are still
+moving, audio may keep playing and video is allowed to catch up. Only a true
+stall seeks the demuxer to the current audio clock, flushes viddec, drops audio
+that would duplicate queued packets, and resumes on the next usable video
+keyframe.
 
 SF2000 keeps the hardware-specific stable sync details: viddec flush rate `0.0`
 and no explicit `/dev/avsync0` timebase reset. GB300 keeps the hardware auddec

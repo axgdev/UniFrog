@@ -137,18 +137,38 @@ Set these in `config.mk` or on the `make` command line:
   hardware audio clock. Keep this above `MEDIA_AUDIO_FEED_LEAD_MS`; if both
   values are equal, tiny decoder-clock jitter can become constant wait/log
   churn.
-- `MEDIA_SEEK_WARMUP_PACKETS`: bounded packet window allowed through after a
-  demux seek before hardware-ahead caps resume. This is separate from steady
-  playback buffering; it only gives the flushed HCRTOS decoder clocks enough
-  data to advance from zero again.
+- `MEDIA_SEEK_WARMUP_PACKETS`: default bounded packet window allowed through
+  after a demux seek before hardware-ahead caps resume. This is separate from
+  steady playback buffering; it only gives the flushed HCRTOS decoder clocks
+  enough data to advance from zero again.
+- `MEDIA_SEEK_VIDEO_WARMUP_PACKETS` and
+  `MEDIA_SEEK_VIDEO_RECOVER_WARMUP_PACKETS`: smaller video-only warmup windows
+  used after normal seeks and true post-seek video recovery. Audio keeps the
+  larger default window because queued audio is the clock source; video should
+  not flood `/dev/viddec` with seconds of packets while it is catching up.
+- `MEDIA_SEEK_SETTLE_MS`: short debounce window after each seek request. It
+  lets rapid repeated LEFT/RIGHT taps collapse into the newest target before
+  the demuxer starts feeding intermediate video packets that will never be
+  shown.
 - `MEDIA_HW_AHEAD_MAX_WAIT_MS`: maximum time to wait for `/dev/auddec` or
   `/dev/viddec` clocks to reduce an over-ahead condition. If the hardware clock
   stalls after repeated seeks, UniFrog caps its internal feed timestamp and
   resumes instead of risking a watchdog reset.
 - `MEDIA_VIDEO_STUCK_BEHIND_MS`: post-seek recovery threshold. When viddec times
-  out and its clock remains this far behind auddec, UniFrog resets the HCRTOS
-  AVSYNC timebase to the audio clock and flushes viddec with the stock-style
-  `1.0` flush rate before feeding more packets.
+  out and its clock remains this far behind auddec, UniFrog first checks whether
+  the viddec clock or decode/display counters have advanced recently. Only a
+  true stall jumps the demuxer to the current audio clock, flushes viddec, drops
+  audio packets that would duplicate already queued audio, and resumes from the
+  next usable video keyframe.
+- `MEDIA_VIDEO_STALL_RECOVER_MS` and `MEDIA_VIDEO_RECOVER_GAP_MS`: guards for
+  that recovery. They prevent repeated blind viddec flushes while video is
+  actively catching up, which can leave the audio clock running while displayed
+  video stops advancing.
+- `MEDIA_SEEK_PREROLL_DECODE_MS`, `MEDIA_SEEK_PREROLL_HD_DECODE_MS`, and
+  `MEDIA_SEEK_PREROLL_KEYFRAME_MAX_BYTES`: cost budget for decoding a
+  pre-target keyframe and its short reference pre-roll. Low-resolution clips may
+  use a longer pre-roll for cleaner resumes; HD clips and very large keyframes
+  skip directly toward the target keyframe instead.
 - `MEDIA_SEEK_ACCELERATE_FRAMES`: set to `1` to show the older visible
   fast-forward catch-up after seeks. The default `0` keeps the video plane
   hidden and drops pre-target video packets until demux reaches the requested
