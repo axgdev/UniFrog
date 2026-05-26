@@ -84,9 +84,13 @@ demuxer can land on the previous H.264 keyframe, and resuming playback on the
 first packet whose timestamp reaches the target can feed a dependent frame
 without its reference history. That produces visible artifacts until the next
 I-frame. The native player may show the first pre-target keyframe as a clean
-still, drops video packets until the target, then resumes normal playback only
-on a keyframe at or after the target. Audio packets before the target are also
-dropped so the hardware audio clock does not restart early.
+still. If that keyframe is close to the target, it feeds the short pre-roll
+without pacing so the decoder has reference frames and can resume on the target
+packet. If the pre-roll is too long, it drops video until the target and resumes
+only on a keyframe at or after the target. Audio packets before the target are
+also dropped so the hardware audio clock does not restart early. Repeated seeks
+while catch-up is active must use the pending target as the current position,
+because hardware clocks can report `0` immediately after decoder flushes.
 
 SF2000 keeps the hardware-specific stable sync details: viddec flush rate `0.0`
 and no explicit `/dev/avsync0` timebase reset. GB300 keeps the hardware auddec
