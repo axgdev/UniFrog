@@ -18,8 +18,9 @@ make
 
 `FRONTEND_IMPL=native` is the default boot frontend. The launcher exposes
 Explore, Collection, History, Apps, Info, Config, Reboot, and Shutdown entries.
-Explore is lazy directory browsing, so entering a large system folder does not
-recursively scan the whole ROM tree.
+Apps includes a native Media Player for videos, music, and images. Explore is
+lazy directory browsing, so entering a large system folder does not recursively
+scan the whole ROM tree.
 
 This creates:
 

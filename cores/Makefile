@@ -42,8 +42,6 @@ PCE_FAST_DIR := $(CORE_SOURCE_ROOT)/beetle-pce-fast-libretro
 PCE_FAST_LIB := $(PCE_FAST_DIR)/pce_fast_libretro_sf2000.a
 QPSX_DIR := $(CORE_SOURCE_ROOT)/sf2000-qpsx-playstation-emulator
 QPSX_LIB := $(QPSX_DIR)/pcsx4all_libretro_sf2000.a
-PMP_VIDEO_DIR := $(CORE_SOURCE_ROOT)/sf2000-video-player
-PMP_VIDEO_LIB := $(PMP_VIDEO_DIR)/pmp_libretro_sf2000.a
 LIBRETRO_COMMON := $(OUT)/libretro-common-sf2000.a
 BUILD := build
 CC := $(CCACHE_PREFIX)$(CROSS_COMPILE)gcc
@@ -104,7 +102,6 @@ FCEUMM_RENAME_CFLAGS := $(call libretro_static_rename_cflags,fceumm)
 GEARBOY_RENAME_CFLAGS := $(call libretro_static_rename_cflags,gearboy)
 PCE_FAST_RENAME_CFLAGS := $(call libretro_static_rename_cflags,pce_fast)
 QPSX_RENAME_CFLAGS := $(call libretro_static_rename_cflags,qpsx)
-PMP_VIDEO_RENAME_CFLAGS := $(call libretro_static_rename_cflags,pmp_video)
 
 CORE_BASE_CFLAGS := -EL -march=mips32 -mtune=mips32 -Os -pipe \
 	-msoft-float -fsigned-char -G0 -mno-abicalls -fno-pic \
@@ -138,28 +135,6 @@ QPSX_CFLAGS := $(CORE_BASE_CFLAGS) $(QPSX_RENAME_CFLAGS) \
 	-Wno-implicit-function-declaration \
 	-Wno-int-conversion
 QPSX_CXXFLAGS := $(CORE_BASE_CFLAGS) $(QPSX_RENAME_CFLAGS) -Wno-cpp
-PMP_VIDEO_CFLAGS := $(CORE_BASE_CFLAGS) $(PMP_VIDEO_RENAME_CFLAGS) \
-	-include stdlib.h \
-	-DFPM_DEFAULT \
-	-I$(abspath $(PMP_VIDEO_DIR)) \
-	-I$(abspath $(PMP_VIDEO_DIR))/xvid \
-	-I$(abspath $(PMP_VIDEO_DIR))/xvid/bitstream \
-	-I$(abspath $(PMP_VIDEO_DIR))/xvid/dct \
-	-I$(abspath $(PMP_VIDEO_DIR))/xvid/image \
-	-I$(abspath $(PMP_VIDEO_DIR))/xvid/motion \
-	-I$(abspath $(PMP_VIDEO_DIR))/xvid/prediction \
-	-I$(abspath $(PMP_VIDEO_DIR))/xvid/quant \
-	-I$(abspath $(PMP_VIDEO_DIR))/xvid/utils \
-	-I$(abspath $(PMP_VIDEO_DIR))/libmad \
-	-Wall -Wno-unused-function -Wno-unused-variable \
-	-Wno-unused-but-set-variable \
-	-Wno-error=implicit-function-declaration \
-	-Wno-error=builtin-declaration-mismatch \
-	-Wno-format -Wno-format-truncation -Wno-misleading-indentation \
-	-Wno-implicit-function-declaration \
-	-Wno-builtin-declaration-mismatch \
-	-Wno-unused-local-typedefs
-
 GPSP_CFLAGS := -EL -march=mips32 -mtune=mips32 -msoft-float -G0 \
 	-mno-abicalls -fno-pic -fsigned-char -ffast-math \
 	-fomit-frame-pointer -ffunction-sections -fdata-sections \
@@ -293,7 +268,7 @@ CHD_SUPPORT_OBJECTS := \
 	$(BUILD)/chd-support/zlib_zutil.o
 
 CORE_TARGETS := gambatte gpsp gpsp_multicore picodrive snes9x2005 snes9x2002 \
-	quicknes fceumm gearboy pce-fast qpsx pmp-video
+	quicknes fceumm gearboy pce-fast qpsx
 SUPPORT_TARGETS := libretro-common chd-support
 SMOKE_TARGETS := libretro-common quicknes
 MAINTAIN_TARGETS := support-init core-init init smoke-init doctor smoke-doctor core-status pin-status \
@@ -510,7 +485,6 @@ doctor:
 	@test -e $(GEARBOY_ROOT)/.git || { echo "missing core checkout: $(GEARBOY_ROOT); run: make init"; exit 1; }
 	@test -e $(PCE_FAST_DIR)/.git || { echo "missing core checkout: $(PCE_FAST_DIR); run: make init"; exit 1; }
 	@test -e $(QPSX_DIR)/.git || { echo "missing core checkout: $(QPSX_DIR); run: make init"; exit 1; }
-	@test -e $(PMP_VIDEO_DIR)/.git || { echo "missing core checkout: $(PMP_VIDEO_DIR); run: make init"; exit 1; }
 	@test -f $(GPSP_DIR)/libretro/libretro-common/include/libretro.h || { echo "missing gpSP bundled libretro-common; run: make init"; exit 1; }
 	@test -f $(LIBCHDR_DIR)/src/libchdr_chd.c || { echo "missing support checkout: $(LIBCHDR_DIR); run: make init"; exit 1; }
 	@test -f $(ZSTD_DIR)/decompress/zstd_decompress.c || { echo "missing support checkout: $(ZSTD_DIR); run: make init"; exit 1; }
@@ -844,13 +818,6 @@ qpsx: doctor | $(OUT)
 		STATIC_LINKING=1 TARGET=pcsx4all_libretro_sf2000.a
 	$(call copy_core_lib,$(QPSX_LIB))
 
-pmp-video: doctor | $(OUT)
-	$(MAKE) -C $(PMP_VIDEO_DIR) -f Makefile platform=sf2000 \
-		MIPS=$(CROSS_COMPILE) CC="$(CC)" CXX="$(CXX)" AR=$(AR) \
-		CFLAGS="$(PMP_VIDEO_CFLAGS)" STATIC_LINKING=1 \
-		TARGET=pmp_libretro_sf2000.a
-	$(call copy_core_lib,$(PMP_VIDEO_LIB))
-
 check: doctor
 	@set -e; \
 	for spec in $(CORE_SPECS); do \
@@ -876,7 +843,6 @@ status:
 	git -C $(GEARBOY_ROOT) status --short
 	git -C $(PCE_FAST_DIR) status --short
 	git -C $(QPSX_DIR) status --short
-	git -C $(PMP_VIDEO_DIR) status --short
 
 clean:
 	$(MAKE) -C $(GAMBATTE_DIR) -f Makefile.libretro clean platform=sf2000 \
@@ -926,10 +892,6 @@ clean:
 		$(MAKE) -C $(QPSX_DIR) -f Makefile.libretro clean platform=sf2000 \
 		MIPS=$(CROSS_COMPILE) CC=$(CC) CXX=$(CXX) AR=$(AR) \
 		STATIC_LINKING=1 TARGET=pcsx4all_libretro_sf2000.a || true
-	$(MAKE) -C $(PMP_VIDEO_DIR) -f Makefile clean platform=sf2000 \
-		MIPS=$(CROSS_COMPILE) CC=$(CC) CXX=$(CXX) AR=$(AR) \
-		CFLAGS="$(PMP_VIDEO_CFLAGS)" STATIC_LINKING=1 \
-		TARGET=pmp_libretro_sf2000.a || true
 	rm -rf $(OUT) $(BUILD)
 
 ifneq ($(filter libretro-common all,$(if $(MAKECMDGOALS),$(MAKECMDGOALS),all)),)

@@ -150,11 +150,11 @@ after `/dev/auddec` or the PCM sink has started and the route has been selected;
 opening the gate during decoder creation exposes the analog path before I2SO
 output is primed.
 
-## SF2000 QPSX and PMP cores
+## SF2000 QPSX Core
 
-The qpsx and PMP/video cores are SF2000-oriented projects rather than normal
-upstream libretro cores. Treat them as external modules and keep their
-adaptation commits additive where possible.
+The qpsx core is an SF2000-oriented project rather than a normal upstream
+libretro core. Treat it as an external module and keep its adaptation commits
+additive where possible.
 
 QPSX contains MIPS GPU inner-loop assembly that assumes instructions beyond the
 baseline `-march=mips32` target. That code is opt-in through

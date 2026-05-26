@@ -723,8 +723,7 @@ LIBRETRO_MODULES := \
 	fceumm:FCEUMM:fceumm:fceumm:nes\|fds:fceumm:- \
 	gearboy:GEARBOY:gearboy:gearboy:gb\|gbc:gearboy:- \
 	pce-fast:PCE_FAST:pce_fast:pce-fast:pce\|sgx\|cue\|chd:pce_fast:$(CHD_SUPPORT_CORE_LIB) \
-	qpsx:QPSX:qpsx:qpsx:bin\|iso\|img\|cue\|pbp:qpsx:- \
-	pmp-video:PMP_VIDEO:pmp_video:pmp-video:avi:pmp_video:-
+	qpsx:QPSX:qpsx:qpsx:bin\|iso\|img\|cue\|pbp:qpsx:-
 
 define LIBRETRO_MODULE_REGISTER
 $(2)_CORE_ID := $(1)
@@ -746,8 +745,6 @@ $(foreach module,$(LIBRETRO_MODULES),$(eval $(call LIBRETRO_MODULE_REGISTER,$(wo
 PCE_FAST_CORE_LIB := $(CORES)/output/pce_fast_libretro_sf2000.a
 PCE_FAST_CORE_BIN := $(CORE_PACKAGE)/pce-fast.bin
 QPSX_CORE_LIB := $(CORES)/output/pcsx4all_libretro_sf2000.a
-PMP_VIDEO_CORE_LIB := $(CORES)/output/pmp_libretro_sf2000.a
-PMP_VIDEO_CORE_BIN := $(CORE_PACKAGE)/pmp-video.bin
 LIBRETRO_CORE_VARS := $(foreach module,$(LIBRETRO_MODULES),$(word 2,$(subst :, ,$(module))))
 LIBRETRO_CORE_IDS := $(foreach var,$(LIBRETRO_CORE_VARS),$($(var)_CORE_ID))
 PACKAGE_LIBRETRO_CORE_LIBS := $(foreach var,$(LIBRETRO_CORE_VARS),$($(var)_CORE_LIB))
@@ -1509,6 +1506,7 @@ $(FRONTEND_PACKAGE_STAMP): \
 		$(FRONTEND_PACKAGE)/main.js $(FRONTEND_PACKAGE)/main.js.mqbc \
 		$(FRONTEND_PACKAGE)/quick-menu.js \
 		$(FRONTEND_PACKAGE)/bytecode-manifest.txt
+	$(Q)rm -f $(CORE_PACKAGE)/pmp-video.bin
 	$(Q)rm -rf $(USER_PACKAGE)/probes $(USER_PACKAGE)/languages \
 		$(USER_PACKAGE)/scripts
 	$(Q)mkdir -p $(FRONTEND_PACKAGE)/firmware \

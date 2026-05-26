@@ -225,7 +225,6 @@ static int run_system_check(void)
       JS2300_FRONTEND_APP_ROOT "/cores/gearboy.bin",
       JS2300_FRONTEND_APP_ROOT "/cores/pce-fast.bin",
       JS2300_FRONTEND_APP_ROOT "/cores/qpsx.bin",
-      JS2300_FRONTEND_APP_ROOT "/cores/pmp-video.bin",
 #if UNIFROG_HCRTOS_MEDIA_MODULE
       JS2300_FRONTEND_HCRTOS_MEDIA_MODULE,
 #endif

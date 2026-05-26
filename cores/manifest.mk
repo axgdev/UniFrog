@@ -22,8 +22,7 @@ CORE_SPECS := \
 	'fceumm|$(CORE_SOURCE_ROOT)/libretro-fceumm|https://github.com/libretro/libretro-fceumm.git|head|3a84a6fd0ba20dd4877c06b1d58741172148395f|src' \
 	'gearboy|$(CORE_SOURCE_ROOT)/Gearboy|https://github.com/drhelius/Gearboy.git|tag|36f9faf04bcb6c023176de12dddae99ffc1ceb10|:files /LICENSE /src/** /platforms/libretro/Makefile /platforms/libretro/Makefile.common /platforms/libretro/libretro.cpp /platforms/libretro/libretro.h /platforms/libretro/libretro_core_options.h /platforms/libretro/link.T /platforms/shared/dependencies/miniz/**' \
 	'pce-fast|$(CORE_SOURCE_ROOT)/beetle-pce-fast-libretro|https://github.com/libretro/beetle-pce-fast-libretro.git|head|9ba79648d6ec85e833aef719d7f359117498d89c|mednafen libretro-common' \
-	'qpsx|$(CORE_SOURCE_ROOT)/sf2000-qpsx-playstation-emulator|https://github.com/angree/sf2000-qpsx-playstation-emulator.git|head|368310aa1b94fe764b8fdf4ddbd7afd06d7bd2a1|src libretro' \
-	'pmp-video|$(CORE_SOURCE_ROOT)/sf2000-video-player|https://github.com/angree/sf2000-video-player.git|head|3fba73781f3b502642ef7eb7748ab0dca357926d|.'
+	'qpsx|$(CORE_SOURCE_ROOT)/sf2000-qpsx-playstation-emulator|https://github.com/angree/sf2000-qpsx-playstation-emulator.git|head|368310aa1b94fe764b8fdf4ddbd7afd06d7bd2a1|src libretro'
 
 SMOKE_SUPPORT_SPECS := \
 	'zlib|$(CORE_SUPPORT_ROOT)/zlib|https://github.com/madler/zlib.git|tag|da607da739fa6047df13e66a2af6b8bec7c2a498|:root-files'

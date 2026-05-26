@@ -64,7 +64,6 @@ UniFrog patches in `cores/patches/`.
 | Gearboy | `.deps/cores/Gearboy` | GPL-3.0. See `LICENSE`. |
 | Beetle PCE Fast | `.deps/cores/beetle-pce-fast-libretro` | GPL-2.0. See `COPYING`. |
 | QPSX | `.deps/cores/sf2000-qpsx-playstation-emulator` | GPL-2.0-or-later. See `LICENSE`. |
-| PMP video | `.deps/cores/sf2000-video-player` | Mixed. Includes libretro MIT-style header, TJpgDec permissive notice, Xvid GPL code, libmad GPL-family code, and other file-level notices. Review upstream source before redistributing outside UniFrog releases. |
 
 ## Assets
 
