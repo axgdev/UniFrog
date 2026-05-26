@@ -6580,13 +6580,8 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
    memset(&progress, 0, sizeof(progress));
    progress.fe = fe;
    unifrog_text_copy(progress.name, sizeof(progress.name), item->name);
-   if (fe->launch_splash) {
-      if (media_path_is_audio(item->path))
-         frontend_loading_show(fe, "Now Playing", item->name,
-            "B stop  Left/Right seek", 100);
-      else
-         frontend_loading_show(fe, "Media", item->name, "loading", 20);
-   }
+   if (fe->launch_splash && !media_path_is_audio(item->path))
+      frontend_loading_show(fe, "Media", item->name, "loading", 20);
    memset(&options, 0, sizeof(options));
    options.preset = -1;
    if (fe->launch_splash && !media_path_is_audio(item->path)) {
