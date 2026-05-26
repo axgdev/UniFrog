@@ -25,7 +25,6 @@ The application arena is for one active high-level guest at a time:
 
 - a libretro core image, BSS, and fixed work buffers
 - or a JavaScript/script runtime when no game core is running
-- or the JavaScript quick menu while a game core is suspended
 - or scratch buffers owned by a loader step
 
 On exit, UniFrog can wipe or reuse the whole arena. Nothing needed to redraw the

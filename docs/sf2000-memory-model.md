@@ -2,7 +2,7 @@
 
 This document describes the SF2000 media-capable layout used by UniFrog. It is
 separate from the generic memory notes because the video decoder has stricter
-physical-memory requirements than libretro cores and JavaScript UI code.
+physical-memory requirements than libretro cores and optional scripts.
 
 ## Physical RAM Split
 

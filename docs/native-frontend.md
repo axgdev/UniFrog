@@ -29,7 +29,7 @@ MuOS, clone it outside the tracked source tree or under ignored `.deps` by
 hand. Do not add MustardOS frontend files to the UniFrog build unless we make a
 clear license and architecture decision to vendor or depend on them.
 
-The native frontend should provide:
+The native frontend provides:
 
 - LVGL display flush and tick callbacks backed by `unifrog_fb`/`unifrog_perf`.
 - Menu input backed by `unifrog_input_menu_buttons()`.

@@ -73,7 +73,7 @@ When a speed-sensitive bug is suspected, check `/log.txt` for:
 - `unifrog libretro scpu after target=... current=...`
 - `unifrog input sources ... raw0=... raw1=... norm0=... norm1=...`
 - `unifrog boot_time ...`
-- `unifrog quick_muos input_ready ms=...`
+- `unifrog quick_menu input_ready ms=...`
 
 If raw local input works before a clock change and then stays zero after the
 clock change while pinmux and GPIO direction are unchanged, suspect pulse

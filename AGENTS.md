@@ -13,33 +13,32 @@ Keep this repository small and direct.
 - Dependency pins: `make deps-status` and `make upgrade-deps`; use
   `MODE=head|tag` only to override repository policy.
 - Defaults: `TOOLCHAIN=/opt/mipsel-mti-elf`, `SDK=unifrog-hcrtos-sdk`,
-  `DEPS=.deps`, `SD_MODE=safe`, `SD_READ_MODE=uhs25`,
-  `HCRTOS_MEDIA=firmware`
-- SD diagnostics: the default `SD_MODE=safe` build can run Developer ->
-  Storage test for a quick guarded sweep, or Storage full test for
-  `/ROMS/probes/test*.md`. Full test restores safe mode and checkpoints its
-  report after each experimental read. Storage mode test selects one profile,
-  switches once, reads all probes, then restores safe mode. Use the on-screen
-  stage as the primary freeze clue; power cycles can overwrite warm reboot
-  diagnostics.
-  Frontend startup stays on the safe boot profile. Runtime ROM and native
-  module reads use `SD_READ_MODE=uhs25` by default, then restore the boot
-  profile before normal UI writes or core init. Use `SD_READ_MODE=boot` to
-  disable those runtime windows.
-  `SD_MODE=hs1|wide50|wide|uhs12|uhs25|uhs` are fixed-profile experimental
-  boot builds.
+  `DEPS=.deps`, `SD_MODE=wide20`, `SD_READ_MODE=boot`,
+  `HCRTOS_MEDIA=native`
+- SD diagnostics: the default `SD_MODE=wide20` build runs storage tests on the
+  boot profile. Build with `SD_MODE=safe` for runtime profile sweeps. Storage
+  full test uses `/ROMS/probes/test*.md`, restores the boot mode after each
+  experimental read, and checkpoints its report. Storage mode test selects one
+  profile, switches once, reads all probes, then restores the boot mode. Use
+  the on-screen stage as the primary freeze clue; power cycles can overwrite
+  warm reboot diagnostics.
+  Frontend startup, ROM loading, and native module loading stay on the boot
+  profile by default. Use non-`boot` `SD_READ_MODE` values only for runtime
+  storage diagnostics.
+  `SD_MODE=hs1|wide50|wide|uhs12|uhs25|uhs` and other non-default profiles are
+  fixed-profile experimental boot builds.
 - Local overrides belong in untracked `config.mk`.
 
 ## Scope
 
 - Build the native SF2000 `bisrv.asd` and SD-card package.
 - Keep the boot frontend in `src/native_frontend.c` and
-  `src/frontend_lvgl.c`. `frontend/quick-menu.js` is the in-game libretro
-  quick menu. Native JS2300 bridge code in `src/frontend/js2300_frontend_*.c`
+  `src/frontend_lvgl.c`. The in-game libretro quick menu lives in
+  `src/unifrog_libretro_host.c`. Native JS2300 bridge code in
+  `src/frontend/js2300_frontend_*.c`
   exposes only standalone script bindings and diagnostics.
-- Keep SDK FFmpeg/HCRTOS media firmware-linked by default; the SD-loaded
-  `HCRTOS_MEDIA=module` mode is currently for loader diagnostics because
-  `hcplayer_create()` can stall when the media stack runs from that module.
+- Keep the native FFmpeg/HCRTOS media path as the default. The SD-loaded
+  `HCRTOS_MEDIA=module` mode is for loader diagnostics.
 - Keep the SF2000 board DTS in `board/hc15xx/common/dts/sf2000_min.dts`; the
   SDK rebuild consumes that file instead of carrying a second copy.
 - Keep the mixed-license HCRTOS SDK in the `unifrog-hcrtos-sdk` submodule.

@@ -413,7 +413,6 @@ CONFIG_DEFINES := \
 	-DUNIFROG_FRONTEND_IMPL=\"$(FRONTEND_IMPL)\" \
 	-DUNIFROG_FRONTEND_NATIVE=$(if $(filter native,$(FRONTEND_IMPL)),1,0) \
 	-DUNIFROG_FRONTEND_MUOS=0 \
-	-DUNIFROG_FRONTEND_JS2300=$(if $(filter js2300,$(FRONTEND_IMPL)),1,0) \
 	-DUNIFROG_SD_MODE=\"$(SD_MODE)\" \
 	-DUNIFROG_SD_READ_MODE=\"$(SD_READ_MODE)\" \
 	-DUNIFROG_SD_FORCE_PIO=$(SD_FORCE_PIO) \
@@ -1019,7 +1018,6 @@ help:
 	@echo "  make HCRTOS_MEDIA=module  Keep HCRTOS media in an SD-loaded module"
 	@echo "  make HCRTOS_MEDIA=firmware  Link hcplayer/HCRTOS media into unifrog.bin"
 	@echo "  make FRONTEND_IMPL=native   Build the native frontend (default)"
-	@echo "  make FRONTEND_IMPL=native   Build the native C frontend fallback"
 	@echo "  make MEDIA_AUDIO_FEED_LEAD_MS=3000  Tune hardware audio feed lead"
 	@echo "  make MEDIA_VIDEO_LOWRES_KSHM_SIZE=8388608  Tune low-res viddec compressed ring"
 	@echo "  make MEDIA_FILE_READAHEAD_SIZE=2097152  Tune media SD readahead bytes"
@@ -1509,6 +1507,7 @@ $(FRONTEND_PACKAGE_STAMP): \
 		$(FRONTEND_PACKAGE)/languages $(FRONTEND_PACKAGE)/archive \
 		$(FRONTEND_PACKAGE)/scripts \
 		$(FRONTEND_PACKAGE)/main.js $(FRONTEND_PACKAGE)/main.js.mqbc \
+		$(FRONTEND_PACKAGE)/quick-menu.js \
 		$(FRONTEND_PACKAGE)/bytecode-manifest.txt
 	$(Q)rm -rf $(USER_PACKAGE)/probes $(USER_PACKAGE)/languages \
 		$(USER_PACKAGE)/scripts
@@ -1935,6 +1934,7 @@ install: fastboot-check layout-check
 	$(Q)rm -rf $(SDCARD)/unifrog/cores $(SDCARD)/unifrog/modules
 	$(Q)rm -rf $(SDCARD)/unifrog/app $(SDCARD)/unifrog/main.js \
 		$(SDCARD)/unifrog/main.js.mqbc \
+		$(SDCARD)/unifrog/quick-menu.js \
 		$(SDCARD)/unifrog/bytecode-manifest.txt
 	$(Q)cp -R $(FRONTEND_PACKAGE)/. $(SDCARD)/unifrog/
 	$(Q)cp LICENSE $(SDCARD)/unifrog/LICENSE.txt

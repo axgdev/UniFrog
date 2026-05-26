@@ -85,10 +85,8 @@ them right after `retro_load_game()`, periodically hashes the exposed memory
 while the core runs, writes changed save memory in the background, and writes
 again on clean core exit.
 
-The JavaScript quick menu uses native bindings for libretro save states.
+The native quick menu uses the libretro host save-state helpers directly.
 State slots are stored next to battery saves as `.state0` through `.state9`.
-Keep pause-menu UI in JavaScript; native code should expose only the fast
-operations needed by that UI.
 
 ## Compressed ROM loading
 

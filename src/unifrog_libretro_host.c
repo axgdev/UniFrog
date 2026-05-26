@@ -16,10 +16,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#if UNIFROG_FRONTEND_JS2300
-#include <js2300/js2300.h>
-#endif
-
 #include <kernel/lib/zlib.h>
 
 #include <unifrog/audio.h>
@@ -84,11 +80,6 @@
 #define LIBRETRO_NO_OUTPUT_GRACE_FRAMES 300u
 #define LIBRETRO_SAVE_DIR "/media/mmcblk0/unifrog/saves"
 #define LIBRETRO_CONTENT_CACHE_DIR "/media/mmcblk0/unifrog/cache"
-#define LIBRETRO_QUICK_JS_ROOT "/media/mmcblk0/unifrog"
-#define LIBRETRO_QUICK_JS_ENTRY "quick-menu.js"
-#define LIBRETRO_QUICK_JS_HEAP_BYTES (2u * 1024u * 1024u)
-#define LIBRETRO_QUICK_JS_STACK_BYTES (96u * 1024u)
-#define LIBRETRO_QUICK_JS_BYTECODE_BYTES (512u * 1024u)
 #define LIBRETRO_MEMORY_AUTOSAVE_FRAMES 600u
 #define LIBRETRO_MEMORY_FILE_MAX (16u * 1024u * 1024u)
 #define LIBRETRO_SAVE_FAST_READ_MIN_BYTES (64u * 1024u)
@@ -141,9 +132,9 @@ enum quick_memory_slot {
    QUICK_MEMORY_COUNT,
 };
 
-enum quick_js_action {
-   QUICK_JS_ACTION_RESUME = 0,
-   QUICK_JS_ACTION_RETURN_MENU = 1,
+enum quick_menu_action {
+   QUICK_MENU_ACTION_RESUME = 0,
+   QUICK_MENU_ACTION_RETURN_MENU = 1,
 };
 
 struct quick_memory_file {
@@ -509,9 +500,7 @@ struct libretro_host {
    unsigned quick_state_slot;
    int quick_state_auto_load;
    int quick_state_auto_save;
-   int quick_js_action;
-   int quick_js_frame_open;
-   unsigned quick_js_draw_buffer;
+   int quick_menu_action;
    int quick_combo_armed;
    char quick_status[96];
    struct quick_core_option core_options[LIBRETRO_CORE_OPTION_MAX];
@@ -574,7 +563,7 @@ static int read_file_aligned_timeout(FILE *file, const char *path,
    uint8_t **out_data, size_t *out_size, const char *label,
    unsigned timeout_ms);
 static int exit_combo_down(void);
-static int quick_js_run(const struct libretro_core_api *core,
+static int quick_menu_run(const struct libretro_core_api *core,
    const char *rom_path);
 static void host_pace_begin(void);
 
@@ -3136,7 +3125,7 @@ static int exit_combo_down(void)
       (host.buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_START));
 }
 
-static int quick_js_status_value(void)
+static int quick_menu_status_value(void)
 {
    unsigned backlight = 0;
 
@@ -3147,7 +3136,7 @@ static int quick_js_status_value(void)
       (host.audio_enabled ? 1u : 0u));
 }
 
-static int quick_js_toggle_audio(void)
+static int quick_menu_toggle_audio(void)
 {
    host.audio_enabled = host.audio_enabled ? 0 : 1;
    host.options.audio_enabled = host.audio_enabled;
@@ -3155,11 +3144,11 @@ static int quick_js_toggle_audio(void)
    host.audio_quiet_batches = 0;
    if (host.audio_open)
       (void)unifrog_audio_set_output_enabled(&host.audio, 0);
-   printf("unifrog quick_js audio=%d\n", host.audio_enabled);
-   return quick_js_status_value();
+   printf("unifrog quick_menu audio=%d\n", host.audio_enabled);
+   return quick_menu_status_value();
 }
 
-static void quick_js_apply_fast_forward_speed(unsigned multiplier)
+static void quick_menu_apply_fast_forward_speed(unsigned multiplier)
 {
    multiplier = sanitize_fast_forward_multiplier(multiplier);
    host.fast_forward_multiplier = multiplier;
@@ -3171,11 +3160,11 @@ static void quick_js_apply_fast_forward_speed(unsigned multiplier)
    host.audio_quiet_batches = 0;
    if (host.audio_open)
       (void)unifrog_audio_set_output_enabled(&host.audio, 0);
-   printf("unifrog quick_js fast_forward=%d multiplier=%u\n",
+   printf("unifrog quick_menu fast_forward=%d multiplier=%u\n",
       host.fast_forward, host.fast_forward_multiplier);
 }
 
-static const char *quick_js_frameskip_label(void)
+static const char *quick_menu_frameskip_label(void)
 {
    switch (host.options.frameskip) {
    case UNIFROG_LIBRETRO_FRAMESKIP_AUTO:
@@ -3189,7 +3178,7 @@ static const char *quick_js_frameskip_label(void)
    }
 }
 
-static int quick_js_cycle_frameskip(int delta)
+static int quick_menu_cycle_frameskip(int delta)
 {
    static const int frameskip_values[] = {
       UNIFROG_LIBRETRO_FRAMESKIP_OFF,
@@ -3217,12 +3206,12 @@ static int quick_js_cycle_frameskip(int delta)
    }
    host.options.frameskip = frameskip_values[index];
    host.variables_dirty = 1;
-   printf("unifrog quick_js frameskip=%d label=%s\n",
-      host.options.frameskip, quick_js_frameskip_label());
+   printf("unifrog quick_menu frameskip=%d label=%s\n",
+      host.options.frameskip, quick_menu_frameskip_label());
    return host.options.frameskip;
 }
 
-static int quick_js_cycle_fast_forward_multiplier(int delta)
+static int quick_menu_cycle_fast_forward_multiplier(int delta)
 {
    static const unsigned multipliers[] = { 0, 2, 4, 8, 16 };
    unsigned current = sanitize_fast_forward_multiplier(
@@ -3245,11 +3234,11 @@ static int quick_js_cycle_fast_forward_multiplier(int delta)
       if (index >= ARRAY_SIZE(multipliers))
          index = 0;
    }
-   quick_js_apply_fast_forward_speed(multipliers[index]);
+   quick_menu_apply_fast_forward_speed(multipliers[index]);
    return (int)host.fast_forward_multiplier;
 }
 
-static int quick_js_cycle_display(void)
+static int quick_menu_cycle_display(void)
 {
    switch (host.display_mode) {
    case UNIFROG_LIBRETRO_DISPLAY_FIT:
@@ -3267,31 +3256,12 @@ static int quick_js_cycle_display(void)
       host.presenter.flags = present_flags_for_display_mode(host.display_mode);
       host.presenter.cleared_buffer_mask = 0;
    }
-   printf("unifrog quick_js display=%s\n",
+   printf("unifrog quick_menu display=%s\n",
       display_mode_label(host.display_mode));
-   return quick_js_status_value();
+   return quick_menu_status_value();
 }
 
-static int quick_js_cycle_backlight(void)
-{
-   unsigned current = 0;
-   unsigned next = quick_backlight_levels[0];
-
-   if (unifrog_backlight_get(&current) == 0) {
-      for (unsigned i = 0; i < ARRAY_SIZE(quick_backlight_levels); i++) {
-         if (quick_backlight_levels[i] > current) {
-            next = quick_backlight_levels[i];
-            break;
-         }
-      }
-   }
-   (void)unifrog_backlight_set(next);
-   host.options.backlight_level = (int)next;
-   printf("unifrog quick_js backlight=%u\n", next);
-   return quick_js_status_value();
-}
-
-static unsigned quick_muos_current_backlight(void)
+static unsigned quick_menu_current_backlight(void)
 {
    unsigned current = 0;
 
@@ -3303,9 +3273,9 @@ static unsigned quick_muos_current_backlight(void)
    return current;
 }
 
-static unsigned quick_muos_cycle_backlight(int delta)
+static unsigned quick_menu_cycle_backlight(int delta)
 {
-   unsigned current = quick_muos_current_backlight();
+   unsigned current = quick_menu_current_backlight();
    unsigned next = delta < 0 ?
       quick_backlight_levels[ARRAY_SIZE(quick_backlight_levels) - 1u] :
       quick_backlight_levels[0];
@@ -3327,45 +3297,20 @@ static unsigned quick_muos_cycle_backlight(int delta)
    }
    (void)unifrog_backlight_set(next);
    host.options.backlight_level = (int)next;
-   printf("unifrog quick_muos backlight=%u\n", next);
+   printf("unifrog quick_menu backlight=%u\n", next);
    return next;
 }
 
-static int quick_js_state_slot(void)
-{
-   if (host.quick_state_slot >= LIBRETRO_STATE_SLOT_COUNT)
-      host.quick_state_slot = 0;
-   return (int)host.quick_state_slot;
-}
-
-static int quick_js_cycle_state_slot(int delta)
-{
-   if (host.quick_state_slot >= LIBRETRO_STATE_SLOT_COUNT)
-      host.quick_state_slot = 0;
-   if (delta < 0) {
-      if (host.quick_state_slot == 0)
-         host.quick_state_slot = LIBRETRO_STATE_SLOT_COUNT - 1u;
-      else
-         host.quick_state_slot--;
-   } else {
-      host.quick_state_slot++;
-      if (host.quick_state_slot >= LIBRETRO_STATE_SLOT_COUNT)
-         host.quick_state_slot = 0;
-   }
-   printf("unifrog quick_js state_slot=%u\n", host.quick_state_slot);
-   return (int)host.quick_state_slot;
-}
-
-static unsigned quick_js_current_scpu_mhz(void)
+static unsigned quick_menu_current_scpu_mhz(void)
 {
    if (host.scpu_target_mhz)
       return host.scpu_target_mhz;
    return unifrog_scpu_current_mhz();
 }
 
-static int quick_js_cycle_scpu(int delta)
+static int quick_menu_cycle_scpu(int delta)
 {
-   unsigned current = quick_js_current_scpu_mhz();
+   unsigned current = quick_menu_current_scpu_mhz();
    unsigned next = delta < 0 ?
       quick_scpu_mhz_options[ARRAY_SIZE(quick_scpu_mhz_options) - 1u] :
       quick_scpu_mhz_options[0];
@@ -3399,14 +3344,14 @@ static int quick_js_cycle_scpu(int delta)
             &host.scpu_mhz_est, &host.count_hz_est,
             &host.count_hz_calibrated);
    }
-   printf("unifrog quick_js scpu current=%u target=%u ret=%d now=%u restore_valid=%d budget=%u\n",
+   printf("unifrog quick_menu scpu current=%u target=%u ret=%d now=%u restore_valid=%d budget=%u\n",
       current, next, host.scpu_apply_ret, unifrog_scpu_current_mhz(),
       host.scpu_restore_valid, host.frame_budget_count);
    (void)libretro_log_flush_force_if_safe();
    return host.scpu_apply_ret == 0 ? (int)next : -1;
 }
 
-static const char *quick_muos_ge_label(enum unifrog_ge_clock clock)
+static const char *quick_menu_ge_label(enum unifrog_ge_clock clock)
 {
    switch (clock) {
    case UNIFROG_GE_CLOCK_148MHZ:
@@ -3420,7 +3365,7 @@ static const char *quick_muos_ge_label(enum unifrog_ge_clock clock)
    }
 }
 
-static int quick_muos_cycle_ge_clock(int delta)
+static int quick_menu_cycle_ge_clock(int delta)
 {
    static const enum unifrog_ge_clock clocks[] = {
       UNIFROG_GE_CLOCK_148MHZ,
@@ -3450,12 +3395,12 @@ static int quick_muos_cycle_ge_clock(int delta)
    host.options.ge_clock = (int)host.ge_clock;
    if (host.presenter_open)
       (void)unifrog_ge_set_clock(&host.presenter.ge, host.ge_clock);
-   printf("unifrog quick_muos ge_clock=%s enum=%d\n",
-      quick_muos_ge_label(host.ge_clock), host.options.ge_clock);
+   printf("unifrog quick_menu ge_clock=%s enum=%d\n",
+      quick_menu_ge_label(host.ge_clock), host.options.ge_clock);
    return host.options.ge_clock;
 }
 
-static int quick_muos_cycle_input_profile(int delta)
+static int quick_menu_cycle_input_profile(int delta)
 {
    static const int profiles[] = {
       UNIFROG_LIBRETRO_INPUT_DEFAULT,
@@ -3488,315 +3433,12 @@ static int quick_muos_cycle_input_profile(int delta)
    host.input_profile_dirty = 1;
    host.core_options_dirty = 1;
    core_options_save_opt_file();
-   printf("unifrog quick_muos keymap=%s\n",
+   printf("unifrog quick_menu keymap=%s\n",
       input_profile_opt_value(host.input_profile));
    return host.input_profile;
 }
 
-#if UNIFROG_FRONTEND_JS2300
-static struct unifrog_surface quick_js_surface(void)
-{
-   return unifrog_fb_surface_for_buffer(&host.presenter.fb,
-      host.quick_js_draw_buffer);
-}
-
-static void quick_js_begin_frame(void)
-{
-   if (!host.presenter_open || host.quick_js_frame_open)
-      return;
-
-   host.quick_js_draw_buffer = host.presenter.active_buffer;
-   if (host.presenter.buffer_count > 1)
-      host.quick_js_draw_buffer =
-         (host.presenter.active_buffer + 1u) % host.presenter.buffer_count;
-   host.quick_js_frame_open = 1;
-}
-
-static void quick_js_log(void *opaque, const char *message)
-{
-   (void)opaque;
-   printf("js2300 quick: %s\n", message ? message : "");
-}
-
-static int quick_js_flush_log(void *opaque)
-{
-   (void)opaque;
-   return unifrog_log_flush();
-}
-
-static uint32_t quick_js_millis(void *opaque)
-{
-   (void)opaque;
-   return unifrog_perf_time_ms();
-}
-
-static void quick_js_sleep(void *opaque, uint32_t ms)
-{
-   (void)opaque;
-   if (ms > 1000)
-      ms = 1000;
-   if (ms)
-      usleep((useconds_t)ms * 1000u);
-}
-
-static void quick_js_video_clear(void *opaque, uint16_t color)
-{
-   struct unifrog_surface surface;
-   (void)opaque;
-
-   if (!host.presenter_open)
-      return;
-   quick_js_begin_frame();
-   surface = quick_js_surface();
-   unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height, color);
-}
-
-static void quick_js_video_rects(void *opaque,
-   const struct js2300_rect *rects, size_t count)
-{
-   struct unifrog_surface surface;
-   (void)opaque;
-
-   if (!host.presenter_open || !rects)
-      return;
-   quick_js_begin_frame();
-   surface = quick_js_surface();
-   for (size_t i = 0; i < count; i++)
-      unifrog_gfx_fill_rect(&surface, rects[i].x, rects[i].y,
-         rects[i].w, rects[i].h, rects[i].color);
-}
-
-static void quick_js_video_text(void *opaque, int x, int y,
-   const char *text, uint16_t color)
-{
-   struct unifrog_surface surface;
-   (void)opaque;
-
-   if (!host.presenter_open)
-      return;
-   quick_js_begin_frame();
-   surface = quick_js_surface();
-   unifrog_gfx_draw_text(&surface, x, y, text ? text : "", color, 1);
-}
-
-static void quick_js_video_present(void *opaque)
-{
-   (void)opaque;
-
-   if (!host.presenter_open)
-      return;
-   if (!host.quick_js_frame_open) {
-      (void)unifrog_fb_wait_vsync(&host.presenter.fb);
-      return;
-   }
-
-   unifrog_fb_flush_buffer(&host.presenter.fb, host.quick_js_draw_buffer);
-   (void)unifrog_fb_wait_vsync(&host.presenter.fb);
-   if (unifrog_fb_pan(&host.presenter.fb, host.quick_js_draw_buffer) == 0)
-      host.presenter.active_buffer = host.quick_js_draw_buffer;
-   host.quick_js_frame_open = 0;
-}
-
-static uint32_t quick_js_input_mask(uint32_t buttons)
-{
-   uint32_t out = 0;
-
-   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_UP))
-      out |= 1u << 0;
-   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_DOWN))
-      out |= 1u << 1;
-   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_LEFT))
-      out |= 1u << 2;
-   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_RIGHT))
-      out |= 1u << 3;
-   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_A))
-      out |= 1u << 4;
-   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_B))
-      out |= 1u << 5;
-   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_X))
-      out |= 1u << 6;
-   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_Y))
-      out |= 1u << 7;
-   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_L))
-      out |= 1u << 8;
-   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_R))
-      out |= 1u << 9;
-   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_SELECT))
-      out |= 1u << 10;
-   if (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_START))
-      out |= 1u << 11;
-   return out;
-}
-
-static uint32_t quick_js_input_poll(void *opaque)
-{
-   uint32_t buttons;
-   (void)opaque;
-
-   unifrog_input_save_previous();
-   unifrog_input_poll_with_wireless_divisor(1);
-   host.buttons = unifrog_input_buttons();
-   buttons = unifrog_input_menu_buttons();
-   return quick_js_input_mask(buttons);
-}
-
-static int quick_js_backlight(void *opaque, int level, int *out_level)
-{
-   unsigned current = 0;
-   int ret = 0;
-   (void)opaque;
-
-   if (level >= 0) {
-      if (level > 100)
-         level = 100;
-      ret = unifrog_backlight_set((unsigned)level);
-      host.options.backlight_level = level;
-   }
-   if (unifrog_backlight_get(&current) != 0)
-      return -1;
-   if (out_level)
-      *out_level = (int)current;
-   return ret;
-}
-
-static int quick_js_action(void *opaque, const char *id)
-{
-   (void)opaque;
-
-   if (!id)
-      return -1;
-   if (strcmp(id, "quick:status") == 0)
-      return quick_js_status_value();
-   if (strcmp(id, "quick:resume") == 0) {
-      host.quick_js_action = QUICK_JS_ACTION_RESUME;
-      return 0;
-   }
-   if (strcmp(id, "quick:return") == 0) {
-      host.quick_js_action = QUICK_JS_ACTION_RETURN_MENU;
-      return 0;
-   }
-   if (strcmp(id, "quick:audio") == 0)
-      return quick_js_toggle_audio();
-   if (strcmp(id, "quick:fast-forward-status") == 0)
-      return host.fast_forward ? 1 : 0;
-   if (strcmp(id, "quick:fast-forward-speed") == 0)
-      return (int)sanitize_fast_forward_multiplier(
-         host.fast_forward_multiplier);
-   if (strcmp(id, "quick:fast-forward-speed-next") == 0)
-      return quick_js_cycle_fast_forward_multiplier(1);
-   if (strcmp(id, "quick:fast-forward-speed-prev") == 0)
-      return quick_js_cycle_fast_forward_multiplier(-1);
-   if (strcmp(id, "quick:frameskip") == 0)
-      return host.options.frameskip;
-   if (strcmp(id, "quick:frameskip-next") == 0)
-      return quick_js_cycle_frameskip(1);
-   if (strcmp(id, "quick:frameskip-prev") == 0)
-      return quick_js_cycle_frameskip(-1);
-   if (strcmp(id, "quick:display") == 0)
-      return quick_js_cycle_display();
-   if (strcmp(id, "quick:backlight") == 0)
-      return quick_js_cycle_backlight();
-   if (strcmp(id, "quick:state-slot") == 0)
-      return quick_js_state_slot();
-   if (strcmp(id, "quick:state-slot-next") == 0)
-      return quick_js_cycle_state_slot(1);
-   if (strcmp(id, "quick:state-slot-prev") == 0)
-      return quick_js_cycle_state_slot(-1);
-   if (strcmp(id, "quick:save-state") == 0)
-      return quick_save_state_file();
-   if (strcmp(id, "quick:load-state") == 0)
-      return quick_load_state_file();
-   if (strcmp(id, "quick:cpu") == 0)
-      return (int)quick_js_current_scpu_mhz();
-   if (strcmp(id, "quick:cpu-next") == 0)
-      return quick_js_cycle_scpu(1);
-   if (strcmp(id, "quick:cpu-prev") == 0)
-      return quick_js_cycle_scpu(-1);
-   return -1;
-}
-
-static void quick_js_exit(void *opaque, const char *reason)
-{
-   (void)opaque;
-   printf("unifrog quick_js exit reason=%s action=%d\n",
-      reason ? reason : "", host.quick_js_action);
-}
-
-static void quick_js_configure_host(struct js2300_host *js_host)
-{
-   memset(js_host, 0, sizeof(*js_host));
-   js_host->size = sizeof(*js_host);
-   js_host->log = quick_js_log;
-   js_host->flush_log = quick_js_flush_log;
-   js_host->millis = quick_js_millis;
-   js_host->sleep_ms = quick_js_sleep;
-   js_host->video_clear = quick_js_video_clear;
-   js_host->video_rects = quick_js_video_rects;
-   js_host->video_text = quick_js_video_text;
-   js_host->video_present = quick_js_video_present;
-   js_host->input_poll = quick_js_input_poll;
-   js_host->action = quick_js_action;
-   js_host->exit = quick_js_exit;
-   js_host->backlight = quick_js_backlight;
-}
-
-static int quick_js_run(const struct libretro_core_api *core,
-   const char *rom_path)
-{
-   struct js2300_config config;
-   struct js2300_host js_host;
-   struct js2300_runtime *runtime = NULL;
-   uint64_t start_us;
-   int ret;
-
-   if (!host.presenter_open)
-      return 0;
-
-   if (host.audio_open)
-      (void)unifrog_audio_set_output_enabled(&host.audio, 0);
-   host.audio_gate_open = 0;
-   host.quick_js_action = QUICK_JS_ACTION_RESUME;
-   host.quick_js_frame_open = 0;
-   host.quick_core = core;
-   host.quick_rom_path = rom_path;
-   if (host.quick_state_slot >= LIBRETRO_STATE_SLOT_COUNT)
-      host.quick_state_slot = 0;
-
-   if (js2300_config_init(&config) != 0)
-      return 1;
-   config.app_root = LIBRETRO_QUICK_JS_ROOT;
-   config.entry_script = LIBRETRO_QUICK_JS_ENTRY;
-   config.heap_bytes = LIBRETRO_QUICK_JS_HEAP_BYTES;
-   config.stack_bytes = LIBRETRO_QUICK_JS_STACK_BYTES;
-   config.bytecode_cache_bytes = LIBRETRO_QUICK_JS_BYTECODE_BYTES;
-   quick_js_configure_host(&js_host);
-
-   start_us = host_time_us();
-   printf("unifrog quick_js start entry=%s\n", LIBRETRO_QUICK_JS_ENTRY);
-   unifrog_diag_memory_snapshot("quick_js.start");
-   (void)libretro_log_flush_force_if_safe();
-   ret = js2300_runtime_create(&config, &js_host, &runtime);
-   unifrog_diag_memory_snapshot("quick_js.created");
-   if (ret == 0)
-      ret = js2300_runtime_run(runtime);
-   unifrog_diag_memory_snapshot("quick_js.after_run");
-   js2300_runtime_destroy(runtime);
-   unifrog_diag_memory_snapshot("quick_js.destroyed");
-   if (ret != 0)
-      host.quick_js_action = QUICK_JS_ACTION_RETURN_MENU;
-   printf("unifrog quick_js done ret=%d action=%d ms=%u\n",
-      ret, host.quick_js_action,
-      host_elapsed_ms(start_us, host_time_us()));
-   (void)libretro_log_flush_force_if_safe();
-
-   host.quick_js_frame_open = 0;
-   host.presenter.cleared_buffer_mask = 0;
-   if (host.fast_forward)
-      host.fast_forward_force_present = 1;
-   return host.quick_js_action == QUICK_JS_ACTION_RETURN_MENU ? 1 : 0;
-}
-#else
-static void quick_muos_draw_row(struct unifrog_surface *surface, int y,
+static void quick_menu_draw_row(struct unifrog_surface *surface, int y,
    const char *label, const char *detail, int focused)
 {
    uint16_t bg = focused ? UNIFROG_RGB565(45, 95, 110) :
@@ -3816,7 +3458,7 @@ static void quick_muos_draw_row(struct unifrog_surface *surface, int y,
       unifrog_gfx_draw_text(surface, 216, y + 2, detail, muted, 1);
 }
 
-static void quick_muos_draw_tab(struct unifrog_surface *surface, int x, int y,
+static void quick_menu_draw_tab(struct unifrog_surface *surface, int x, int y,
    int w, const char *label, int focused)
 {
    uint16_t bg = focused ? UNIFROG_RGB565(52, 104, 132) :
@@ -3831,14 +3473,14 @@ static void quick_muos_draw_tab(struct unifrog_surface *surface, int x, int y,
    unifrog_gfx_draw_text(surface, x + 8, y + 6, label ? label : "", fg, 1);
 }
 
-static void quick_muos_detail(char *dst, size_t size, unsigned value)
+static void quick_menu_detail(char *dst, size_t size, unsigned value)
 {
    if (!dst || size == 0)
       return;
    snprintf(dst, size, "< %u >", value);
 }
 
-static void quick_muos_fast_forward_detail(char *dst, size_t size)
+static void quick_menu_fast_forward_detail(char *dst, size_t size)
 {
    unsigned multiplier;
 
@@ -3851,7 +3493,7 @@ static void quick_muos_fast_forward_detail(char *dst, size_t size)
       snprintf(dst, size, "< %ux >", multiplier);
 }
 
-static unsigned quick_muos_visible_core_option_count(void)
+static unsigned quick_menu_visible_core_option_count(void)
 {
    unsigned count = 0;
 
@@ -3862,7 +3504,7 @@ static unsigned quick_muos_visible_core_option_count(void)
    return count;
 }
 
-static int quick_muos_visible_core_option_index(unsigned visible_index)
+static int quick_menu_visible_core_option_index(unsigned visible_index)
 {
    unsigned count = 0;
 
@@ -3876,7 +3518,7 @@ static int quick_muos_visible_core_option_index(unsigned visible_index)
    return -1;
 }
 
-static void quick_muos_core_option_detail(char *dst, size_t size,
+static void quick_menu_core_option_detail(char *dst, size_t size,
    const struct quick_core_option *option)
 {
    const char *value;
@@ -3892,9 +3534,9 @@ static void quick_muos_core_option_detail(char *dst, size_t size,
    snprintf(dst, size, "< %.18s >", value);
 }
 
-static void quick_muos_cycle_core_option(unsigned visible_index, int delta)
+static void quick_menu_cycle_core_option(unsigned visible_index, int delta)
 {
-   int actual = quick_muos_visible_core_option_index(visible_index);
+   int actual = quick_menu_visible_core_option_index(visible_index);
    struct quick_core_option *option;
 
    if (actual < 0)
@@ -3914,62 +3556,62 @@ static void quick_muos_cycle_core_option(unsigned visible_index, int delta)
    }
    host.variables_dirty = 1;
    host.core_options_dirty = 1;
-   printf("unifrog quick_muos core_option key=%s value=%s index=%u/%u\n",
+   printf("unifrog quick_menu core_option key=%s value=%s index=%u/%u\n",
       option->key, option->values[option->selected],
       option->selected + 1u, option->value_count);
    core_options_save_opt_file();
 }
 
-static void quick_muos_present(unsigned buffer)
+static void quick_menu_present(unsigned buffer)
 {
    unifrog_fb_flush_buffer(&host.presenter.fb, buffer);
    if (unifrog_fb_pan(&host.presenter.fb, buffer) == 0)
       host.presenter.active_buffer = buffer;
 }
 
-static int quick_muos_run(const struct libretro_core_api *core,
+static int quick_menu_run(const struct libretro_core_api *core,
    const char *rom_path)
 {
-   enum quick_muos_page {
-      QUICK_MUOS_PAGE_MAIN = 0,
-      QUICK_MUOS_PAGE_CORE = 1,
-      QUICK_MUOS_PAGE_UNIFROG = 2,
-      QUICK_MUOS_PAGE_CONFIRM = 3,
+   enum quick_menu_page {
+      QUICK_MENU_PAGE_MAIN = 0,
+      QUICK_MENU_PAGE_CORE = 1,
+      QUICK_MENU_PAGE_UNIFROG = 2,
+      QUICK_MENU_PAGE_CONFIRM = 3,
    };
-   enum quick_muos_main_row {
-      QUICK_MUOS_MAIN_RESUME,
-      QUICK_MUOS_MAIN_SAVE,
-      QUICK_MUOS_MAIN_LOAD,
-      QUICK_MUOS_MAIN_CORE,
-      QUICK_MUOS_MAIN_UNIFROG,
-      QUICK_MUOS_MAIN_RETURN,
-      QUICK_MUOS_MAIN_COUNT,
+   enum quick_menu_main_row {
+      QUICK_MENU_MAIN_RESUME,
+      QUICK_MENU_MAIN_SAVE,
+      QUICK_MENU_MAIN_LOAD,
+      QUICK_MENU_MAIN_CORE,
+      QUICK_MENU_MAIN_UNIFROG,
+      QUICK_MENU_MAIN_RETURN,
+      QUICK_MENU_MAIN_COUNT,
    };
-   enum quick_muos_core_row {
-      QUICK_MUOS_CORE_BACK,
-      QUICK_MUOS_CORE_FIXED_COUNT,
+   enum quick_menu_core_row {
+      QUICK_MENU_CORE_BACK,
+      QUICK_MENU_CORE_FIXED_COUNT,
    };
-   enum quick_muos_unifrog_row {
-      QUICK_MUOS_UNIFROG_BACK,
-      QUICK_MUOS_UNIFROG_FAST_FORWARD,
-      QUICK_MUOS_UNIFROG_FRAMESKIP,
-      QUICK_MUOS_UNIFROG_AUDIO,
-      QUICK_MUOS_UNIFROG_DISPLAY,
-      QUICK_MUOS_UNIFROG_KEYMAP,
-      QUICK_MUOS_UNIFROG_CPU,
-      QUICK_MUOS_UNIFROG_GE,
-      QUICK_MUOS_UNIFROG_BACKLIGHT,
-      QUICK_MUOS_UNIFROG_COUNT,
+   enum quick_menu_unifrog_row {
+      QUICK_MENU_UNIFROG_BACK,
+      QUICK_MENU_UNIFROG_FAST_FORWARD,
+      QUICK_MENU_UNIFROG_FRAMESKIP,
+      QUICK_MENU_UNIFROG_AUDIO,
+      QUICK_MENU_UNIFROG_DISPLAY,
+      QUICK_MENU_UNIFROG_KEYMAP,
+      QUICK_MENU_UNIFROG_CPU,
+      QUICK_MENU_UNIFROG_GE,
+      QUICK_MENU_UNIFROG_BACKLIGHT,
+      QUICK_MENU_UNIFROG_COUNT,
    };
-   enum quick_muos_confirm_row {
-      QUICK_MUOS_CONFIRM_YES,
-      QUICK_MUOS_CONFIRM_CANCEL,
-      QUICK_MUOS_CONFIRM_COUNT,
+   enum quick_menu_confirm_row {
+      QUICK_MENU_CONFIRM_YES,
+      QUICK_MENU_CONFIRM_CANCEL,
+      QUICK_MENU_CONFIRM_COUNT,
    };
-   enum quick_muos_confirm_action {
-      QUICK_MUOS_CONFIRM_NONE,
-      QUICK_MUOS_CONFIRM_SAVE,
-      QUICK_MUOS_CONFIRM_LOAD,
+   enum quick_menu_confirm_action {
+      QUICK_MENU_CONFIRM_NONE,
+      QUICK_MENU_CONFIRM_SAVE,
+      QUICK_MENU_CONFIRM_LOAD,
    };
    static const char *main_labels[] = {
       "Resume", "Save state", "Load state", "Core Options",
@@ -3986,10 +3628,10 @@ static int quick_muos_run(const struct libretro_core_api *core,
       "Confirm", "Cancel",
    };
    unsigned selected = 0;
-   unsigned page = QUICK_MUOS_PAGE_MAIN;
-   unsigned previous_page = QUICK_MUOS_PAGE_MAIN;
-   unsigned previous_selected = QUICK_MUOS_MAIN_SAVE;
-   unsigned confirm_action = QUICK_MUOS_CONFIRM_NONE;
+   unsigned page = QUICK_MENU_PAGE_MAIN;
+   unsigned previous_page = QUICK_MENU_PAGE_MAIN;
+   unsigned previous_selected = QUICK_MENU_MAIN_SAVE;
+   unsigned confirm_action = QUICK_MENU_CONFIRM_NONE;
    unsigned save_slot;
    unsigned load_slot;
    uint32_t previous = 0;
@@ -4004,11 +3646,11 @@ static int quick_muos_run(const struct libretro_core_api *core,
       entry_combo |
       UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_A) |
       UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_B);
-   static const char *labels[QUICK_MUOS_CORE_FIXED_COUNT +
+   static const char *labels[QUICK_MENU_CORE_FIXED_COUNT +
       LIBRETRO_CORE_OPTION_MAX];
    static char label_storage[LIBRETRO_CORE_OPTION_MAX]
       [LIBRETRO_CORE_OPTION_LABEL_MAX];
-   static char detail[QUICK_MUOS_CORE_FIXED_COUNT +
+   static char detail[QUICK_MENU_CORE_FIXED_COUNT +
       LIBRETRO_CORE_OPTION_MAX][28];
 
    (void)core;
@@ -4019,7 +3661,7 @@ static int quick_muos_run(const struct libretro_core_api *core,
    if (host.audio_open)
       (void)unifrog_audio_set_output_enabled(&host.audio, 0);
    host.audio_gate_open = 0;
-   host.quick_js_action = QUICK_JS_ACTION_RESUME;
+   host.quick_menu_action = QUICK_MENU_ACTION_RESUME;
    host.quick_combo_armed = 0;
    host.quick_status[0] = '\0';
    host.quick_core = core;
@@ -4029,7 +3671,7 @@ static int quick_muos_run(const struct libretro_core_api *core,
    save_slot = host.quick_state_slot;
    load_slot = host.quick_state_slot;
 
-   printf("unifrog quick_muos start entry_buttons=0x%08lx\n",
+   printf("unifrog quick_menu start entry_buttons=0x%08lx\n",
       (unsigned long)unifrog_input_menu_buttons());
 
    for (;;) {
@@ -4051,76 +3693,76 @@ static int quick_muos_run(const struct libretro_core_api *core,
          draw_buffer);
 
       memset(detail, 0, sizeof(detail));
-      if (page == QUICK_MUOS_PAGE_MAIN) {
-         for (unsigned i = 0; i < QUICK_MUOS_MAIN_COUNT; i++)
+      if (page == QUICK_MENU_PAGE_MAIN) {
+         for (unsigned i = 0; i < QUICK_MENU_MAIN_COUNT; i++)
             labels[i] = main_labels[i];
-         row_count = QUICK_MUOS_MAIN_COUNT;
-         quick_muos_detail(detail[QUICK_MUOS_MAIN_SAVE],
-            sizeof(detail[QUICK_MUOS_MAIN_SAVE]), save_slot + 1u);
-         quick_muos_detail(detail[QUICK_MUOS_MAIN_LOAD],
-            sizeof(detail[QUICK_MUOS_MAIN_LOAD]), load_slot + 1u);
-         snprintf(detail[QUICK_MUOS_MAIN_CORE],
-            sizeof(detail[QUICK_MUOS_MAIN_CORE]), "%u options",
-            quick_muos_visible_core_option_count());
+         row_count = QUICK_MENU_MAIN_COUNT;
+         quick_menu_detail(detail[QUICK_MENU_MAIN_SAVE],
+            sizeof(detail[QUICK_MENU_MAIN_SAVE]), save_slot + 1u);
+         quick_menu_detail(detail[QUICK_MENU_MAIN_LOAD],
+            sizeof(detail[QUICK_MENU_MAIN_LOAD]), load_slot + 1u);
+         snprintf(detail[QUICK_MENU_MAIN_CORE],
+            sizeof(detail[QUICK_MENU_MAIN_CORE]), "%u options",
+            quick_menu_visible_core_option_count());
       } else {
-         if (page == QUICK_MUOS_PAGE_CORE) {
-            unsigned visible_core_options = quick_muos_visible_core_option_count();
+         if (page == QUICK_MENU_PAGE_CORE) {
+            unsigned visible_core_options = quick_menu_visible_core_option_count();
 
-            for (unsigned i = 0; i < QUICK_MUOS_CORE_FIXED_COUNT; i++)
+            for (unsigned i = 0; i < QUICK_MENU_CORE_FIXED_COUNT; i++)
                labels[i] = core_labels[i];
-            row_count = QUICK_MUOS_CORE_FIXED_COUNT + visible_core_options;
+            row_count = QUICK_MENU_CORE_FIXED_COUNT + visible_core_options;
             for (unsigned i = 0; i < visible_core_options; i++) {
-               int actual = quick_muos_visible_core_option_index(i);
-               unsigned row = QUICK_MUOS_CORE_FIXED_COUNT + i;
+               int actual = quick_menu_visible_core_option_index(i);
+               unsigned row = QUICK_MENU_CORE_FIXED_COUNT + i;
                if (actual < 0)
                   continue;
                snprintf(label_storage[i], sizeof(label_storage[i]), "%.25s",
                   host.core_options[actual].label);
                labels[row] = label_storage[i];
-               quick_muos_core_option_detail(detail[row], sizeof(detail[row]),
+               quick_menu_core_option_detail(detail[row], sizeof(detail[row]),
                   &host.core_options[actual]);
             }
-         } else if (page == QUICK_MUOS_PAGE_UNIFROG) {
-            for (unsigned i = 0; i < QUICK_MUOS_UNIFROG_COUNT; i++)
+         } else if (page == QUICK_MENU_PAGE_UNIFROG) {
+            for (unsigned i = 0; i < QUICK_MENU_UNIFROG_COUNT; i++)
                labels[i] = unifrog_labels[i];
-            row_count = QUICK_MUOS_UNIFROG_COUNT;
-            quick_muos_fast_forward_detail(
-               detail[QUICK_MUOS_UNIFROG_FAST_FORWARD],
-               sizeof(detail[QUICK_MUOS_UNIFROG_FAST_FORWARD]));
-            snprintf(detail[QUICK_MUOS_UNIFROG_FRAMESKIP],
-               sizeof(detail[QUICK_MUOS_UNIFROG_FRAMESKIP]), "< %s >",
-               quick_js_frameskip_label());
-            snprintf(detail[QUICK_MUOS_UNIFROG_AUDIO],
-               sizeof(detail[QUICK_MUOS_UNIFROG_AUDIO]), "< %s >",
+            row_count = QUICK_MENU_UNIFROG_COUNT;
+            quick_menu_fast_forward_detail(
+               detail[QUICK_MENU_UNIFROG_FAST_FORWARD],
+               sizeof(detail[QUICK_MENU_UNIFROG_FAST_FORWARD]));
+            snprintf(detail[QUICK_MENU_UNIFROG_FRAMESKIP],
+               sizeof(detail[QUICK_MENU_UNIFROG_FRAMESKIP]), "< %s >",
+               quick_menu_frameskip_label());
+            snprintf(detail[QUICK_MENU_UNIFROG_AUDIO],
+               sizeof(detail[QUICK_MENU_UNIFROG_AUDIO]), "< %s >",
                host.audio_enabled ? "on" : "off");
-            snprintf(detail[QUICK_MUOS_UNIFROG_DISPLAY],
-               sizeof(detail[QUICK_MUOS_UNIFROG_DISPLAY]), "< %s >",
+            snprintf(detail[QUICK_MENU_UNIFROG_DISPLAY],
+               sizeof(detail[QUICK_MENU_UNIFROG_DISPLAY]), "< %s >",
                display_mode_label(host.display_mode));
-            snprintf(detail[QUICK_MUOS_UNIFROG_KEYMAP],
-               sizeof(detail[QUICK_MUOS_UNIFROG_KEYMAP]), "< %s >",
+            snprintf(detail[QUICK_MENU_UNIFROG_KEYMAP],
+               sizeof(detail[QUICK_MENU_UNIFROG_KEYMAP]), "< %s >",
                input_profile_opt_value(host.input_profile));
-            snprintf(detail[QUICK_MUOS_UNIFROG_CPU],
-               sizeof(detail[QUICK_MUOS_UNIFROG_CPU]), "< %u >",
-               quick_js_current_scpu_mhz());
-            snprintf(detail[QUICK_MUOS_UNIFROG_GE],
-               sizeof(detail[QUICK_MUOS_UNIFROG_GE]), "< %s >",
-               quick_muos_ge_label(host.ge_clock));
-            quick_muos_detail(detail[QUICK_MUOS_UNIFROG_BACKLIGHT],
-               sizeof(detail[QUICK_MUOS_UNIFROG_BACKLIGHT]),
-               quick_muos_current_backlight());
+            snprintf(detail[QUICK_MENU_UNIFROG_CPU],
+               sizeof(detail[QUICK_MENU_UNIFROG_CPU]), "< %u >",
+               quick_menu_current_scpu_mhz());
+            snprintf(detail[QUICK_MENU_UNIFROG_GE],
+               sizeof(detail[QUICK_MENU_UNIFROG_GE]), "< %s >",
+               quick_menu_ge_label(host.ge_clock));
+            quick_menu_detail(detail[QUICK_MENU_UNIFROG_BACKLIGHT],
+               sizeof(detail[QUICK_MENU_UNIFROG_BACKLIGHT]),
+               quick_menu_current_backlight());
          } else {
-            for (unsigned i = 0; i < QUICK_MUOS_CONFIRM_COUNT; i++)
+            for (unsigned i = 0; i < QUICK_MENU_CONFIRM_COUNT; i++)
                labels[i] = confirm_labels[i];
-            row_count = QUICK_MUOS_CONFIRM_COUNT;
-            snprintf(detail[QUICK_MUOS_CONFIRM_YES],
-               sizeof(detail[QUICK_MUOS_CONFIRM_YES]), "< slot %u >",
-               confirm_action == QUICK_MUOS_CONFIRM_LOAD ?
+            row_count = QUICK_MENU_CONFIRM_COUNT;
+            snprintf(detail[QUICK_MENU_CONFIRM_YES],
+               sizeof(detail[QUICK_MENU_CONFIRM_YES]), "< slot %u >",
+               confirm_action == QUICK_MENU_CONFIRM_LOAD ?
                   load_slot + 1u : save_slot + 1u);
          }
       }
-      footer = page == QUICK_MUOS_PAGE_CONFIRM ?
+      footer = page == QUICK_MENU_PAGE_CONFIRM ?
          "A confirm  B cancel" : "A choose  Left/Right adjust  B back";
-      visible_rows = page == QUICK_MUOS_PAGE_CONFIRM ? 2u : 8u;
+      visible_rows = page == QUICK_MENU_PAGE_CONFIRM ? 2u : 8u;
       if (visible_rows > row_count)
          visible_rows = row_count;
       first_row = 0;
@@ -4136,27 +3778,27 @@ static int quick_muos_run(const struct libretro_core_api *core,
       unifrog_gfx_draw_text(&surface, 12, 10, "Pause Menu",
          UNIFROG_RGB565(230, 238, 240), 1);
       unifrog_gfx_draw_text(&surface, (int)surface.width - 58, 10,
-         page == QUICK_MUOS_PAGE_MAIN ? "paused" :
-            page == QUICK_MUOS_PAGE_CORE ? "core" :
-            page == QUICK_MUOS_PAGE_UNIFROG ? "settings" : "sure?",
+         page == QUICK_MENU_PAGE_MAIN ? "paused" :
+            page == QUICK_MENU_PAGE_CORE ? "core" :
+            page == QUICK_MENU_PAGE_UNIFROG ? "settings" : "sure?",
          UNIFROG_RGB565(139, 154, 160), 1);
-      quick_muos_draw_tab(&surface, 10, 38, 70, "Pause",
-         page == QUICK_MUOS_PAGE_MAIN);
-      quick_muos_draw_tab(&surface, 84, 38, 70, "Core",
-         page == QUICK_MUOS_PAGE_CORE);
-      quick_muos_draw_tab(&surface, 158, 38, 78, "UniFrog",
-         page == QUICK_MUOS_PAGE_UNIFROG);
-      quick_muos_draw_tab(&surface, 240, 38, 70, "State",
-         page == QUICK_MUOS_PAGE_CONFIRM);
-      if (page == QUICK_MUOS_PAGE_CONFIRM)
+      quick_menu_draw_tab(&surface, 10, 38, 70, "Pause",
+         page == QUICK_MENU_PAGE_MAIN);
+      quick_menu_draw_tab(&surface, 84, 38, 70, "Core",
+         page == QUICK_MENU_PAGE_CORE);
+      quick_menu_draw_tab(&surface, 158, 38, 78, "UniFrog",
+         page == QUICK_MENU_PAGE_UNIFROG);
+      quick_menu_draw_tab(&surface, 240, 38, 70, "State",
+         page == QUICK_MENU_PAGE_CONFIRM);
+      if (page == QUICK_MENU_PAGE_CONFIRM)
          unifrog_gfx_draw_text(&surface, 14, 64,
-            confirm_action == QUICK_MUOS_CONFIRM_LOAD ?
+            confirm_action == QUICK_MENU_CONFIRM_LOAD ?
                "Load selected state?" : "Save selected state?",
             UNIFROG_RGB565(230, 238, 240), 1);
       for (unsigned i = 0; i < visible_rows; i++) {
          unsigned row = first_row + i;
-         quick_muos_draw_row(&surface,
-            (page == QUICK_MUOS_PAGE_CONFIRM ? 90 : 66) + (int)i * 18,
+         quick_menu_draw_row(&surface,
+            (page == QUICK_MENU_PAGE_CONFIRM ? 90 : 66) + (int)i * 18,
             labels[row], detail[row], row == selected);
       }
       if (host.quick_status[0])
@@ -4168,7 +3810,7 @@ static int quick_muos_run(const struct libretro_core_api *core,
          surface.width, 1, UNIFROG_RGB565(120, 214, 189));
       unifrog_gfx_draw_text(&surface, 12, (int)surface.height - 15,
          footer, UNIFROG_RGB565(139, 154, 160), 1);
-      quick_muos_present(draw_buffer);
+      quick_menu_present(draw_buffer);
 
       unifrog_input_save_previous();
       unifrog_input_poll_with_wireless_divisor(1);
@@ -4183,7 +3825,7 @@ static int quick_muos_run(const struct libretro_core_api *core,
             entry_combo_released = 1;
             repeat_button = 0;
             next_repeat_ms = 0;
-            printf("unifrog quick_muos input_ready ms=%lu\n",
+            printf("unifrog quick_menu input_ready ms=%lu\n",
                (unsigned long)now_ms);
          }
          usleep(16000);
@@ -4217,106 +3859,106 @@ static int quick_muos_run(const struct libretro_core_api *core,
          next_repeat_ms = now_ms + ((pressed & repeat_button) ? 320u : 90u);
       }
       if (pressed & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_LEFT)) {
-         if (page == QUICK_MUOS_PAGE_CONFIRM &&
-             selected == QUICK_MUOS_CONFIRM_YES) {
-            if (confirm_action == QUICK_MUOS_CONFIRM_LOAD)
+         if (page == QUICK_MENU_PAGE_CONFIRM &&
+             selected == QUICK_MENU_CONFIRM_YES) {
+            if (confirm_action == QUICK_MENU_CONFIRM_LOAD)
                load_slot = load_slot == 0 ? LIBRETRO_STATE_SLOT_COUNT - 1u :
                   load_slot - 1u;
             else
                save_slot = save_slot == 0 ? LIBRETRO_STATE_SLOT_COUNT - 1u :
                   save_slot - 1u;
-         } else if (page == QUICK_MUOS_PAGE_MAIN) {
-            if (selected == QUICK_MUOS_MAIN_SAVE)
+         } else if (page == QUICK_MENU_PAGE_MAIN) {
+            if (selected == QUICK_MENU_MAIN_SAVE)
                save_slot = save_slot == 0 ? LIBRETRO_STATE_SLOT_COUNT - 1u :
                   save_slot - 1u;
-            else if (selected == QUICK_MUOS_MAIN_LOAD)
+            else if (selected == QUICK_MENU_MAIN_LOAD)
                load_slot = load_slot == 0 ? LIBRETRO_STATE_SLOT_COUNT - 1u :
                   load_slot - 1u;
-         } else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_FAST_FORWARD)
-            (void)quick_js_cycle_fast_forward_multiplier(-1);
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_FRAMESKIP)
-            (void)quick_js_cycle_frameskip(-1);
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_AUDIO)
-            (void)quick_js_toggle_audio();
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_DISPLAY)
-            (void)quick_js_cycle_display();
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_KEYMAP)
-            (void)quick_muos_cycle_input_profile(-1);
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_CPU)
-            (void)quick_js_cycle_scpu(-1);
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_GE)
-            (void)quick_muos_cycle_ge_clock(-1);
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_BACKLIGHT)
-            (void)quick_muos_cycle_backlight(-1);
-         else if (page == QUICK_MUOS_PAGE_CORE &&
-               selected >= QUICK_MUOS_CORE_FIXED_COUNT)
-            quick_muos_cycle_core_option(
-               selected - QUICK_MUOS_CORE_FIXED_COUNT, -1);
+         } else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_FAST_FORWARD)
+            (void)quick_menu_cycle_fast_forward_multiplier(-1);
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_FRAMESKIP)
+            (void)quick_menu_cycle_frameskip(-1);
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_AUDIO)
+            (void)quick_menu_toggle_audio();
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_DISPLAY)
+            (void)quick_menu_cycle_display();
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_KEYMAP)
+            (void)quick_menu_cycle_input_profile(-1);
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_CPU)
+            (void)quick_menu_cycle_scpu(-1);
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_GE)
+            (void)quick_menu_cycle_ge_clock(-1);
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_BACKLIGHT)
+            (void)quick_menu_cycle_backlight(-1);
+         else if (page == QUICK_MENU_PAGE_CORE &&
+               selected >= QUICK_MENU_CORE_FIXED_COUNT)
+            quick_menu_cycle_core_option(
+               selected - QUICK_MENU_CORE_FIXED_COUNT, -1);
       }
       if (pressed & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_RIGHT)) {
-         if (page == QUICK_MUOS_PAGE_CONFIRM &&
-             selected == QUICK_MUOS_CONFIRM_YES) {
-            unsigned *slot = confirm_action == QUICK_MUOS_CONFIRM_LOAD ?
+         if (page == QUICK_MENU_PAGE_CONFIRM &&
+             selected == QUICK_MENU_CONFIRM_YES) {
+            unsigned *slot = confirm_action == QUICK_MENU_CONFIRM_LOAD ?
                &load_slot : &save_slot;
             (*slot)++;
             if (*slot >= LIBRETRO_STATE_SLOT_COUNT)
                *slot = 0;
-         } else if (page == QUICK_MUOS_PAGE_MAIN) {
-            if (selected == QUICK_MUOS_MAIN_SAVE) {
+         } else if (page == QUICK_MENU_PAGE_MAIN) {
+            if (selected == QUICK_MENU_MAIN_SAVE) {
                save_slot++;
                if (save_slot >= LIBRETRO_STATE_SLOT_COUNT)
                   save_slot = 0;
-            } else if (selected == QUICK_MUOS_MAIN_LOAD) {
+            } else if (selected == QUICK_MENU_MAIN_LOAD) {
                load_slot++;
                if (load_slot >= LIBRETRO_STATE_SLOT_COUNT)
                   load_slot = 0;
             }
-         } else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_FAST_FORWARD)
-            (void)quick_js_cycle_fast_forward_multiplier(1);
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_FRAMESKIP)
-            (void)quick_js_cycle_frameskip(1);
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_AUDIO)
-            (void)quick_js_toggle_audio();
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_DISPLAY)
-            (void)quick_js_cycle_display();
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_KEYMAP)
-            (void)quick_muos_cycle_input_profile(1);
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_CPU)
-            (void)quick_js_cycle_scpu(1);
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_GE)
-            (void)quick_muos_cycle_ge_clock(1);
-         else if (page == QUICK_MUOS_PAGE_UNIFROG &&
-               selected == QUICK_MUOS_UNIFROG_BACKLIGHT)
-            (void)quick_muos_cycle_backlight(1);
-         else if (page == QUICK_MUOS_PAGE_CORE &&
-               selected >= QUICK_MUOS_CORE_FIXED_COUNT)
-            quick_muos_cycle_core_option(
-               selected - QUICK_MUOS_CORE_FIXED_COUNT, 1);
+         } else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_FAST_FORWARD)
+            (void)quick_menu_cycle_fast_forward_multiplier(1);
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_FRAMESKIP)
+            (void)quick_menu_cycle_frameskip(1);
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_AUDIO)
+            (void)quick_menu_toggle_audio();
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_DISPLAY)
+            (void)quick_menu_cycle_display();
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_KEYMAP)
+            (void)quick_menu_cycle_input_profile(1);
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_CPU)
+            (void)quick_menu_cycle_scpu(1);
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_GE)
+            (void)quick_menu_cycle_ge_clock(1);
+         else if (page == QUICK_MENU_PAGE_UNIFROG &&
+               selected == QUICK_MENU_UNIFROG_BACKLIGHT)
+            (void)quick_menu_cycle_backlight(1);
+         else if (page == QUICK_MENU_PAGE_CORE &&
+               selected >= QUICK_MENU_CORE_FIXED_COUNT)
+            quick_menu_cycle_core_option(
+               selected - QUICK_MENU_CORE_FIXED_COUNT, 1);
       }
       if (entry_combo_released &&
           (pressed & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_SELECT)) &&
           (buttons & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_START)))
          break;
       if (pressed & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_B)) {
-         if (page != QUICK_MUOS_PAGE_MAIN) {
+         if (page != QUICK_MENU_PAGE_MAIN) {
             page = previous_page;
             selected = previous_selected;
-            confirm_action = QUICK_MUOS_CONFIRM_NONE;
+            confirm_action = QUICK_MENU_CONFIRM_NONE;
             previous = buttons;
             usleep(16000);
             continue;
@@ -4324,92 +3966,92 @@ static int quick_muos_run(const struct libretro_core_api *core,
          break;
       }
       if (pressed & UNIFROG_BUTTON_MASK(UNIFROG_BUTTON_A)) {
-         if (page == QUICK_MUOS_PAGE_MAIN) {
-            if (selected == QUICK_MUOS_MAIN_RESUME) {
+         if (page == QUICK_MENU_PAGE_MAIN) {
+            if (selected == QUICK_MENU_MAIN_RESUME) {
                break;
-            } else if (selected == QUICK_MUOS_MAIN_SAVE) {
+            } else if (selected == QUICK_MENU_MAIN_SAVE) {
                previous_page = page;
                previous_selected = selected;
-               confirm_action = QUICK_MUOS_CONFIRM_SAVE;
-               page = QUICK_MUOS_PAGE_CONFIRM;
-               selected = QUICK_MUOS_CONFIRM_YES;
+               confirm_action = QUICK_MENU_CONFIRM_SAVE;
+               page = QUICK_MENU_PAGE_CONFIRM;
+               selected = QUICK_MENU_CONFIRM_YES;
                snprintf(host.quick_status, sizeof(host.quick_status),
                   "Save to slot %u", save_slot + 1u);
-            } else if (selected == QUICK_MUOS_MAIN_LOAD) {
+            } else if (selected == QUICK_MENU_MAIN_LOAD) {
                previous_page = page;
                previous_selected = selected;
-               confirm_action = QUICK_MUOS_CONFIRM_LOAD;
-               page = QUICK_MUOS_PAGE_CONFIRM;
-               selected = QUICK_MUOS_CONFIRM_YES;
+               confirm_action = QUICK_MENU_CONFIRM_LOAD;
+               page = QUICK_MENU_PAGE_CONFIRM;
+               selected = QUICK_MENU_CONFIRM_YES;
                snprintf(host.quick_status, sizeof(host.quick_status),
                   "Load from slot %u", load_slot + 1u);
-            } else if (selected == QUICK_MUOS_MAIN_CORE) {
+            } else if (selected == QUICK_MENU_MAIN_CORE) {
                previous_page = page;
                previous_selected = selected;
-               page = QUICK_MUOS_PAGE_CORE;
-               selected = QUICK_MUOS_CORE_FIXED_COUNT;
-               if (selected >= QUICK_MUOS_CORE_FIXED_COUNT +
-                   quick_muos_visible_core_option_count())
-                  selected = QUICK_MUOS_CORE_BACK;
-            } else if (selected == QUICK_MUOS_MAIN_UNIFROG) {
+               page = QUICK_MENU_PAGE_CORE;
+               selected = QUICK_MENU_CORE_FIXED_COUNT;
+               if (selected >= QUICK_MENU_CORE_FIXED_COUNT +
+                   quick_menu_visible_core_option_count())
+                  selected = QUICK_MENU_CORE_BACK;
+            } else if (selected == QUICK_MENU_MAIN_UNIFROG) {
                previous_page = page;
                previous_selected = selected;
-               page = QUICK_MUOS_PAGE_UNIFROG;
-               selected = QUICK_MUOS_UNIFROG_FAST_FORWARD;
-            } else if (selected == QUICK_MUOS_MAIN_RETURN) {
-               host.quick_js_action = QUICK_JS_ACTION_RETURN_MENU;
+               page = QUICK_MENU_PAGE_UNIFROG;
+               selected = QUICK_MENU_UNIFROG_FAST_FORWARD;
+            } else if (selected == QUICK_MENU_MAIN_RETURN) {
+               host.quick_menu_action = QUICK_MENU_ACTION_RETURN_MENU;
                break;
             }
-         } else if (page == QUICK_MUOS_PAGE_CORE) {
-            if (selected == QUICK_MUOS_CORE_BACK) {
-               page = QUICK_MUOS_PAGE_MAIN;
-               selected = QUICK_MUOS_MAIN_CORE;
-            } else if (selected >= QUICK_MUOS_CORE_FIXED_COUNT) {
-               quick_muos_cycle_core_option(
-                  selected - QUICK_MUOS_CORE_FIXED_COUNT, 1);
+         } else if (page == QUICK_MENU_PAGE_CORE) {
+            if (selected == QUICK_MENU_CORE_BACK) {
+               page = QUICK_MENU_PAGE_MAIN;
+               selected = QUICK_MENU_MAIN_CORE;
+            } else if (selected >= QUICK_MENU_CORE_FIXED_COUNT) {
+               quick_menu_cycle_core_option(
+                  selected - QUICK_MENU_CORE_FIXED_COUNT, 1);
             }
-         } else if (page == QUICK_MUOS_PAGE_UNIFROG) {
-            if (selected == QUICK_MUOS_UNIFROG_BACK) {
-               page = QUICK_MUOS_PAGE_MAIN;
-               selected = QUICK_MUOS_MAIN_UNIFROG;
-            } else if (selected == QUICK_MUOS_UNIFROG_FAST_FORWARD) {
-               (void)quick_js_cycle_fast_forward_multiplier(1);
-            } else if (selected == QUICK_MUOS_UNIFROG_FRAMESKIP) {
-               (void)quick_js_cycle_frameskip(1);
-            } else if (selected == QUICK_MUOS_UNIFROG_AUDIO) {
-               (void)quick_js_toggle_audio();
-            } else if (selected == QUICK_MUOS_UNIFROG_DISPLAY) {
-               (void)quick_js_cycle_display();
-            } else if (selected == QUICK_MUOS_UNIFROG_KEYMAP) {
-               (void)quick_muos_cycle_input_profile(1);
-            } else if (selected == QUICK_MUOS_UNIFROG_CPU) {
-               (void)quick_js_cycle_scpu(1);
-            } else if (selected == QUICK_MUOS_UNIFROG_GE) {
-               (void)quick_muos_cycle_ge_clock(1);
-            } else if (selected == QUICK_MUOS_UNIFROG_BACKLIGHT) {
-               (void)quick_muos_cycle_backlight(1);
+         } else if (page == QUICK_MENU_PAGE_UNIFROG) {
+            if (selected == QUICK_MENU_UNIFROG_BACK) {
+               page = QUICK_MENU_PAGE_MAIN;
+               selected = QUICK_MENU_MAIN_UNIFROG;
+            } else if (selected == QUICK_MENU_UNIFROG_FAST_FORWARD) {
+               (void)quick_menu_cycle_fast_forward_multiplier(1);
+            } else if (selected == QUICK_MENU_UNIFROG_FRAMESKIP) {
+               (void)quick_menu_cycle_frameskip(1);
+            } else if (selected == QUICK_MENU_UNIFROG_AUDIO) {
+               (void)quick_menu_toggle_audio();
+            } else if (selected == QUICK_MENU_UNIFROG_DISPLAY) {
+               (void)quick_menu_cycle_display();
+            } else if (selected == QUICK_MENU_UNIFROG_KEYMAP) {
+               (void)quick_menu_cycle_input_profile(1);
+            } else if (selected == QUICK_MENU_UNIFROG_CPU) {
+               (void)quick_menu_cycle_scpu(1);
+            } else if (selected == QUICK_MENU_UNIFROG_GE) {
+               (void)quick_menu_cycle_ge_clock(1);
+            } else if (selected == QUICK_MENU_UNIFROG_BACKLIGHT) {
+               (void)quick_menu_cycle_backlight(1);
             }
          } else {
-            if (selected == QUICK_MUOS_CONFIRM_CANCEL) {
+            if (selected == QUICK_MENU_CONFIRM_CANCEL) {
                page = previous_page;
                selected = previous_selected;
-               confirm_action = QUICK_MUOS_CONFIRM_NONE;
-            } else if (confirm_action == QUICK_MUOS_CONFIRM_SAVE) {
+               confirm_action = QUICK_MENU_CONFIRM_NONE;
+            } else if (confirm_action == QUICK_MENU_CONFIRM_SAVE) {
                int ret;
 
                host.quick_state_slot = save_slot;
-               printf("unifrog quick_muos confirm save slot=%u\n",
+               printf("unifrog quick_menu confirm save slot=%u\n",
                   save_slot);
                ret = quick_save_state_file();
                if (ret >= 0)
                   break;
                page = previous_page;
                selected = previous_selected;
-            } else if (confirm_action == QUICK_MUOS_CONFIRM_LOAD) {
+            } else if (confirm_action == QUICK_MENU_CONFIRM_LOAD) {
                int ret;
 
                host.quick_state_slot = load_slot;
-               printf("unifrog quick_muos confirm load slot=%u\n",
+               printf("unifrog quick_menu confirm load slot=%u\n",
                   load_slot);
                ret = quick_load_state_file();
                if (ret >= 0)
@@ -4426,16 +4068,9 @@ static int quick_muos_run(const struct libretro_core_api *core,
    host.presenter.cleared_buffer_mask = 0;
    if (host.fast_forward)
       host.fast_forward_force_present = 1;
-   printf("unifrog quick_muos done action=%d\n", host.quick_js_action);
-   return host.quick_js_action == QUICK_JS_ACTION_RETURN_MENU ? 1 : 0;
+   printf("unifrog quick_menu done action=%d\n", host.quick_menu_action);
+   return host.quick_menu_action == QUICK_MENU_ACTION_RETURN_MENU ? 1 : 0;
 }
-
-static int quick_js_run(const struct libretro_core_api *core,
-   const char *rom_path)
-{
-   return quick_muos_run(core, rom_path);
-}
-#endif
 
 static unsigned host_calibrate_count_hz(void)
 {
@@ -7330,11 +6965,11 @@ out_content_prepare:
          host.quick_combo_armed = 1;
       if (host.quick_combo_armed && exit_combo_down()) {
          host.quick_combo_armed = 0;
-         printf("unifrog libretro quick_js core=%s frame=%u\n",
+         printf("unifrog libretro quick_menu core=%s frame=%u\n",
             core->id, host.run_frames);
          (void)libretro_log_flush_force_if_safe();
-         if (quick_js_run(core, path)) {
-            printf("unifrog libretro return_to_js core=%s frame=%u\n",
+         if (quick_menu_run(core, path)) {
+            printf("unifrog libretro return_to_frontend core=%s frame=%u\n",
                core->id, host.run_frames);
             (void)libretro_log_flush_force_if_safe();
             break;
