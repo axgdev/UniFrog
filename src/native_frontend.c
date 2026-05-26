@@ -313,10 +313,9 @@ static const struct frontend_catalog frontend_catalog[] = {
    { "quicknes", { ".nes" } },
    { "fceumm", { ".fds" } },
    { "snes9x2005", { ".sfc", ".smc" } },
-   { "picodrive", { ".md", ".gen", ".smd", ".32x", ".sms", ".gg", ".sg" } },
+   { "picodrive", { ".gen", ".smd", ".32x", ".sms", ".gg", ".sg" } },
    { "pce-fast", { ".pce", ".sgx" } },
    { "qpsx", { ".cue", ".iso", ".img", ".pbp" } },
-   { "pmp-video", { ".avi" } },
 };
 
 static const struct frontend_core_alias frontend_core_aliases[] = {

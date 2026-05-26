@@ -107,7 +107,7 @@ var coreCatalog = [
     label: "PicoDrive",
     value: "picodrive",
     system: "Sega Genesis",
-    suffixes: [".md", ".gen", ".smd", ".32x", ".sms", ".gg", ".sg"],
+    suffixes: [".gen", ".smd", ".32x", ".sms", ".gg", ".sg"],
     folders: ["/genesis/", "/megadrive/", "/mega drive/", "/sms/", "/gg/"]
   },
   {
@@ -123,12 +123,5 @@ var coreCatalog = [
     system: "PlayStation",
     suffixes: [".cue", ".iso", ".img", ".pbp"],
     folders: psxFolders
-  },
-  {
-    label: "PMP Video",
-    value: "pmp-video",
-    system: "Media",
-    suffixes: [".avi"],
-    folders: ["/video/", "/videos/", "/media/"]
   }
 ];
