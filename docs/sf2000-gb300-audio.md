@@ -68,6 +68,12 @@ and syncs video to that clock. Do not dump compressed packets into the rings at
 SD-card speed; large startup bursts make video frames run fast and then exit or
 stall.
 
+On SF2000, hardware auddec can be present before viddec because that is the
+normal native-video sync path. If `VIDDEC_INIT` rejects that combined state with
+`errno=1`, close auddec, retry viddec in freerun mode, and use UniFrog software
+PCM audio for that video session. Keep this recovery SF2000-only; GB300 media
+needs the hardware-auddec plus I2SO-prime path to preserve audible output.
+
 ## Progress Signals
 
 Auddec init/start success is not enough. A working route must show real

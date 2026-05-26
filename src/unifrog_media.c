@@ -6449,6 +6449,7 @@ static int media_play_native_video(const char *path,
    int auddec_write_failed = 0;
    int auddec_sw_fallback_attempted = 0;
    int native_video_failed = 0;
+   const char *sw_audio_reason = "auddec_open_failed";
    uint32_t seek_video_dropped_packets = 0;
    uint32_t seek_video_drop_last_log_ms = 0;
    unsigned video_feed_lead_ms = MEDIA_VIDEO_FEED_LEAD_MS;
@@ -6556,6 +6557,20 @@ static int media_play_native_video(const char *path,
    video_fd = media_video_open_decoder(fmt, video_stream, video_sync_mode, path);
    printf("unifrog media native video_open done fd=%d\n", video_fd);
    (void)unifrog_log_flush();
+   if (video_fd < 0 && auddec.fd >= 0 &&
+       !unifrog_audio_prefers_stereo_output()) {
+      printf("unifrog media native sf2000 video_retry close_auddec fd=%d sync=%d path=%s\n",
+         auddec.fd, video_sync_mode, path ? path : "");
+      media_auddec_close(&auddec);
+      media_video_reset_modules("sf2000_auddec_closed", path);
+      sw_audio_reason = "sf2000_viddec_retry";
+      video_sync_mode = AVSYNC_TYPE_FREERUN;
+      video_fd = media_video_open_decoder(fmt, video_stream, video_sync_mode,
+         path);
+      printf("unifrog media native sf2000 video_retry done fd=%d sync=%d\n",
+         video_fd, video_sync_mode);
+      (void)unifrog_log_flush();
+   }
    if (video_fd < 0)
       goto out;
    media_buffered_input_enable_video_readahead(&input, fmt, options, path);
@@ -6568,7 +6583,7 @@ static int media_play_native_video(const char *path,
       (void)media_native_open_sw_audio(fmt, audio_stream,
          audio_output_channels, &audio_decoder, &audio_ctx, &audio,
          &audio_converter, &pcm, &audio_enabled,
-         "auddec_open_failed", path);
+         sw_audio_reason, path);
    video_freerun = video_sync_mode == AVSYNC_TYPE_FREERUN;
    if (auddec.fd >= 0 && audio_feed_lead_ms > video_feed_lead_ms)
       video_feed_lead_ms = audio_feed_lead_ms;
