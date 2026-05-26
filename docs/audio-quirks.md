@@ -1,8 +1,11 @@
-# SF2000 Audio Quirks
+# SF2000/GB300 Audio Quirks
 
 This document records the confirmed audio behavior of UniFrog on the
 SF2000/GB300 HCRTOS runtime. Keep it updated when changing `src/unifrog_audio.c`
 or `src/unifrog_media.c`.
+
+For the current device route contract and GB300 hardware-decoder gotchas, see
+`docs/sf2000-gb300-audio.md`.
 
 ## Confirmed Behavior
 
@@ -90,9 +93,9 @@ or `src/unifrog_media.c`.
   single device run can test direct PCM routes, L15/R07 gate combinations, and
   `/dev/auddec` PCM routes without rebuilding.
 - The focused GB300 `/dev/auddec` PCM route probe is also available from
-  Developer -> Audio test. 0134 through 0136 showed all production auddec routes
-  stayed at `decoded=0`/`first_header_*=0`; use the runtime probe to collect
-  auddec route labels instead of compiling separate one-off probe builds.
+  Developer -> Audio test. It is a diagnostic aid for route regressions; normal
+  playback uses the established I2SO-prime route and should not depend on
+  one-off probe builds.
 - GB300 normal playback uses `/dev/auddec` first again. 0150 proved the missing
   board step was the shared DTS `i2so_platform` mute/fade state, not the PCM
   speaker gate or mono mix. Hardware auddec now prepares that audio route before
@@ -121,16 +124,16 @@ or `src/unifrog_media.c`.
   profile and do not rotate the first route. The 0127 diagnostics showed only
   `/dev/sndC0i2so` exists as a direct SND node; SPO/PCMO masks can return
   successful `AUDDEC_INIT`/`AUDDEC_START` while leaving the decoder clock stuck
-  and the speaker silent. The combined I2SO+SPO, SPO, and PCMO profiles remain
-  as fallback diagnostics if I2SO-only init fails.
+  and the speaker silent. Combined I2SO+SPO, SPO, and PCMO masks are fallback
+  diagnostics only, not production assumptions.
 - The GB300 hardware-auddec route opens a persistent `/dev/sndC0i2so` handle.
-  The vendor `SND_IOCTL_SET_EXTRA_DATA_PATH` loopthrough to `AUDDEV_I2SO`
-  remains opt-in via `MEDIA_GB300_I2SO_EXTRA_ROUTE=1`; default builds use the
-  established I2SO prime route first. Stalled GB300 auddec sessions are closed
-  without extra PAUSE/FLUSH/RLS teardown ioctls because those can block hard on
-  this runtime. If auddec falls back to FFmpeg-decoded PCM after an auddec
-  attempt, GB300 uses the simpler direct-SND software output backend to avoid a
-  poisoned AUDSINK state from the failed decoder session.
+  The vendor `SND_IOCTL_SET_EXTRA_DATA_PATH` loopthrough is not part of the
+  production path; it did not provide the missing GB300 output step and raised
+  freeze risk. Stalled GB300 auddec sessions are closed without extra
+  PAUSE/FLUSH/RLS teardown ioctls because those can block hard on this runtime.
+  If auddec falls back to FFmpeg-decoded PCM after an auddec attempt, GB300 uses
+  the simpler direct-SND software output backend to avoid a poisoned AUDSINK
+  state from the failed decoder session.
 - GB300 hardware-auddec probe attempts keep the speaker gate closed until
   auddec status reports header/frame progress or the auddec clock advances.
   The clock-progress allowance is GB300-only: after the 0150/0153 route tests,
@@ -248,6 +251,9 @@ used to remove UniFrog's external player dependency.
   screen/backlight may still expose the board's analog noise floor, but the
   loud software-amplified buzz follows the audio output gate/mute state.
 - Raising volume/gain can mask the buzz under real audio, but it is not a fix.
+- The GB300 extra-data-path loopthrough, direct AUDPAD/O_RDWR writes, synthetic
+  ADTS wrapping for MP4/M4A AAC, and one-channel GB300 hardware transport were
+  not the fix.
 
 ## Diagnostics
 
@@ -276,8 +282,6 @@ test. The direct PCM section logs `gb300_probe` routes and then a gate matrix:
 
 The auddec section logs this route order:
 
-- `i2so_extra_audsink_bypass_after`, `i2so_extra_bypass_after`, and
-  `i2so_extra_audsink_dma_after`: extra-data-path loopthrough comparisons.
 - `i2so_prime_after_dma`, `i2so_prime_before_dma`, and
   `default_prime_after_dma`: I2SO-prime variants around the auddec init/start
   order.

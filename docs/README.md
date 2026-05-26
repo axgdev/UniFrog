@@ -23,6 +23,7 @@ Current component docs:
 - `clock-speed-resilience.md`: CPU/GE clock behavior
 - `sf2000-hardware-findings.md`: board-level hardware findings
 - `sf2000-backlight-pwm.md`: backlight PWM notes
+- `sf2000-gb300-audio.md`: current SF2000/GB300 audio routes and gotchas
 - `audio-quirks.md`: SF2000 audio gate/mute behavior and buzz diagnostics
 - `filesystem-mmc-notes.md`: confirmed FatFs/MMC/logging behavior
 - `media-video-freeze-handoff.md`: native MP4/H.264 freeze signature and fix path
