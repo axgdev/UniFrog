@@ -145,6 +145,9 @@
 #ifndef UNIFROG_MEDIA_SEEK_ACCELERATE_FRAMES
 #define UNIFROG_MEDIA_SEEK_ACCELERATE_FRAMES 0
 #endif
+#ifndef UNIFROG_MEDIA_SEEK_KEYFRAME_DROP_LIMIT
+#define UNIFROG_MEDIA_SEEK_KEYFRAME_DROP_LIMIT 240
+#endif
 #ifndef UNIFROG_MEDIA_VIDEO_STUCK_BEHIND_MS
 #define UNIFROG_MEDIA_VIDEO_STUCK_BEHIND_MS 3000
 #endif
@@ -184,6 +187,8 @@
 #define MEDIA_SEEK_WARMUP_PACKETS ((unsigned)UNIFROG_MEDIA_SEEK_WARMUP_PACKETS)
 #define MEDIA_SEEK_ACCELERATE_FRAMES \
    ((int)UNIFROG_MEDIA_SEEK_ACCELERATE_FRAMES)
+#define MEDIA_SEEK_KEYFRAME_DROP_LIMIT \
+   ((unsigned)UNIFROG_MEDIA_SEEK_KEYFRAME_DROP_LIMIT)
 #define MEDIA_VIDEO_STUCK_BEHIND_MS \
    ((unsigned)UNIFROG_MEDIA_VIDEO_STUCK_BEHIND_MS)
 #define MEDIA_AUDIO_PACE_MAX_SLEEP_MS 100u
@@ -3472,6 +3477,23 @@ static int media_hc_codec_from_av(enum AVCodecID codec_id)
    }
 }
 
+static int media_video_seek_requires_keyframe(enum AVCodecID codec_id)
+{
+   switch (codec_id) {
+   case AV_CODEC_ID_MPEG1VIDEO:
+   case AV_CODEC_ID_MPEG2VIDEO:
+   case AV_CODEC_ID_H263:
+   case AV_CODEC_ID_H264:
+   case AV_CODEC_ID_MPEG4:
+   case AV_CODEC_ID_VC1:
+   case AV_CODEC_ID_WMV3:
+   case AV_CODEC_ID_VP8:
+      return 1;
+   default:
+      return 0;
+   }
+}
+
 static int media_hc_audio_codec_from_av(enum AVCodecID codec_id)
 {
    switch (codec_id) {
@@ -3575,6 +3597,48 @@ static int32_t media_packet_duration_ms(const AVPacket *packet,
    if (dur > INT32_MAX)
       return INT32_MAX;
    return (int32_t)dur;
+}
+
+static int media_seek_drop_audio_packet_until(const AVPacket *packet,
+   AVStream *stream, int64_t *until_ms, uint32_t *dropped_packets,
+   const char *label, const char *path)
+{
+   int32_t packet_ms;
+   int32_t packet_dur_ms;
+   int64_t packet_end_ms;
+
+   if (!packet || !stream || !until_ms || *until_ms == MEDIA_TIME_UNSET)
+      return 0;
+   packet_ms = media_packet_pts_ms(packet, stream->time_base);
+   packet_dur_ms = media_packet_duration_ms(packet, stream->time_base);
+   if (packet_ms < 0) {
+      *until_ms = MEDIA_TIME_UNSET;
+      if (dropped_packets)
+         *dropped_packets = 0;
+      return 0;
+   }
+   packet_end_ms = (int64_t)packet_ms +
+      (packet_dur_ms > 0 ? (int64_t)packet_dur_ms : 0);
+   if (packet_end_ms < *until_ms) {
+      uint32_t dropped = dropped_packets ? ++(*dropped_packets) : 0u;
+
+      if (dropped <= 4u) {
+         printf("unifrog media seek %s drop mode=skip packet_ms=%ld dur=%ld until=%lld dropped=%lu size=%d path=%s\n",
+            label ? label : "audio", (long)packet_ms,
+            (long)packet_dur_ms, (long long)*until_ms,
+            (unsigned long)dropped, packet->size, path ? path : "");
+      }
+      return 1;
+   }
+   if (dropped_packets && *dropped_packets) {
+      printf("unifrog media seek %s catchup_done packet_ms=%ld until=%lld dropped=%lu path=%s\n",
+         label ? label : "audio", (long)packet_ms, (long long)*until_ms,
+         (unsigned long)*dropped_packets, path ? path : "");
+   }
+   *until_ms = MEDIA_TIME_UNSET;
+   if (dropped_packets)
+      *dropped_packets = 0;
+   return 0;
 }
 
 static void media_audio_pacer_wait_ms(struct media_audio_pacer *pacer,
@@ -6451,8 +6515,14 @@ static int media_play_native_video(const char *path,
    int auddec_sw_fallback_attempted = 0;
    int native_video_failed = 0;
    const char *sw_audio_reason = "auddec_open_failed";
+   int seek_video_require_keyframe = 0;
+   int seek_video_wait_keyframe = 0;
+   int seek_video_anchor_pending = 0;
    uint32_t seek_video_dropped_packets = 0;
+   uint32_t seek_video_keyframe_drops = 0;
    uint32_t seek_video_drop_last_log_ms = 0;
+   int64_t seek_audio_catchup_until_ms = MEDIA_TIME_UNSET;
+   uint32_t seek_audio_dropped_packets = 0;
    unsigned video_feed_lead_ms = MEDIA_VIDEO_FEED_LEAD_MS;
    unsigned audio_feed_lead_ms = MEDIA_AUDIO_FEED_LEAD_MS;
    unsigned audio_output_channels = media_audio_output_channels();
@@ -6526,6 +6596,9 @@ static int media_play_native_video(const char *path,
       }
       goto out;
    }
+   seek_video_require_keyframe =
+      media_video_seek_requires_keyframe(
+         fmt->streams[video_stream]->codecpar->codec_id);
    media_clear_graphics_black("native_video_prepare", path);
    printf("unifrog media native init_drivers begin\n");
    media_video_progress(options, "drivers", 80, 100);
@@ -6592,13 +6665,14 @@ static int media_play_native_video(const char *path,
       video_feed_lead_ms = audio_feed_lead_ms;
    if (video_freerun && audio_enabled)
       printf("unifrog media native video forcing freerun due to software audio path\n");
-   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d audio_output_ch=%u video_feed_lead_ms=%u audio_feed_lead_ms=%u duration=%lld overlay=1 overlay_hide=A video_max_hw_ahead_ms=%u audio_max_hw_ahead_ms=%u hw_ahead_max_wait_ms=%u video_stuck_behind_ms=%u seek_catchup=%s sf2000_safe_sync=%d\n",
+   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d audio_output_ch=%u video_feed_lead_ms=%u audio_feed_lead_ms=%u duration=%lld overlay=1 overlay_hide=A video_max_hw_ahead_ms=%u audio_max_hw_ahead_ms=%u hw_ahead_max_wait_ms=%u video_stuck_behind_ms=%u seek_catchup=%s seek_keyframe=%d sf2000_safe_sync=%d\n",
       video_freerun, disable_audio, auddec.fd >= 0, auddec.freerun,
       audio_enabled, audio_output_channels, video_feed_lead_ms, audio_feed_lead_ms,
       (long long)duration_ms, MEDIA_VIDEO_MAX_HW_AHEAD_MS,
       MEDIA_AUDIO_MAX_HW_AHEAD_MS, MEDIA_HW_AHEAD_MAX_WAIT_MS,
       MEDIA_VIDEO_STUCK_BEHIND_MS,
       MEDIA_SEEK_ACCELERATE_FRAMES ? "accelerate" : "skip",
+      seek_video_require_keyframe,
       sf2000_hw_auddec_safe_sync);
    packet = av_packet_alloc();
    frame = av_frame_alloc();
@@ -6667,12 +6741,20 @@ static int media_play_native_video(const char *path,
             sw_audio_start_ms = 0;
             audio_frames = 0;
             seek_video_catchup_until_ms = target_ms;
+            seek_video_wait_keyframe =
+               seek_video_require_keyframe && !MEDIA_SEEK_ACCELERATE_FRAMES;
+            seek_video_anchor_pending = seek_video_wait_keyframe;
             seek_video_dropped_packets = 0;
+            seek_video_keyframe_drops = 0;
             seek_video_drop_last_log_ms = 0;
+            seek_audio_catchup_until_ms = target_ms;
+            seek_audio_dropped_packets = 0;
             video_layer_revealed = 0;
-            printf("unifrog media seek video catchup mode=%s until=%lld hidden=0 preserve_frame=1 path=%s\n",
+            printf("unifrog media seek video catchup mode=%s until=%lld keyframe=%d anchor=%d hidden=0 preserve_frame=1 path=%s\n",
                MEDIA_SEEK_ACCELERATE_FRAMES ? "accelerate" : "skip",
-               (long long)seek_video_catchup_until_ms, path ? path : "");
+               (long long)seek_video_catchup_until_ms,
+               seek_video_wait_keyframe, seek_video_anchor_pending,
+               path ? path : "");
             media_draw_progress_overlay(&overlay, "video_seek", target_ms,
                duration_ms, 1, path);
          }
@@ -6689,36 +6771,90 @@ static int media_play_native_video(const char *path,
             video_st->time_base, 1);
          int32_t video_packet_dur_ms = media_packet_duration_ms(packet,
             video_st->time_base);
-         int seek_catchup_packet = 0;
+         int packet_is_key = (packet->flags & AV_PKT_FLAG_KEY) ? 1 : 0;
+         int seek_catchup_active = 0;
+         int seek_before_target_packet = 0;
+         int seek_drop_packet = 0;
+         int seek_wait_key_drop = 0;
+         int seek_anchor_packet = 0;
+         int seek_done_after_send = 0;
+         const char *seek_drop_reason = "";
 
          if (seek_video_catchup_until_ms != MEDIA_TIME_UNSET &&
              video_packet_ms >= 0) {
             int64_t packet_end_ms = (int64_t)video_packet_ms +
                (video_packet_dur_ms > 0 ? (int64_t)video_packet_dur_ms : 0);
 
-            seek_catchup_packet = packet_end_ms < seek_video_catchup_until_ms;
+            seek_catchup_active = 1;
+            seek_before_target_packet =
+               packet_end_ms < seek_video_catchup_until_ms;
+            if (!MEDIA_SEEK_ACCELERATE_FRAMES) {
+               if (seek_before_target_packet) {
+                  if (seek_video_anchor_pending && packet_is_key) {
+                     seek_anchor_packet = 1;
+                     seek_video_anchor_pending = 0;
+                  } else {
+                     seek_drop_packet = 1;
+                     seek_drop_reason = "before";
+                  }
+               } else {
+                  seek_video_anchor_pending = 0;
+                  if (seek_video_wait_keyframe && !packet_is_key) {
+                     seek_drop_packet = 1;
+                     seek_wait_key_drop = 1;
+                     seek_drop_reason = "wait_key";
+                     seek_video_keyframe_drops++;
+                     if (seek_video_keyframe_drops >=
+                         MEDIA_SEEK_KEYFRAME_DROP_LIMIT) {
+                        printf("unifrog media seek video keyframe_fallback packet_ms=%ld dur=%ld until=%lld key_drops=%lu limit=%u size=%d path=%s\n",
+                           (long)video_packet_ms,
+                           (long)video_packet_dur_ms,
+                           (long long)seek_video_catchup_until_ms,
+                           (unsigned long)seek_video_keyframe_drops,
+                           MEDIA_SEEK_KEYFRAME_DROP_LIMIT, packet->size,
+                           path ? path : "");
+                        seek_drop_packet = 0;
+                        seek_wait_key_drop = 0;
+                        seek_drop_reason = "";
+                        seek_video_wait_keyframe = 0;
+                     }
+                  }
+                  if (!seek_drop_packet)
+                     seek_done_after_send = 1;
+               }
+            } else if (!seek_before_target_packet &&
+                       (!seek_video_wait_keyframe || packet_is_key)) {
+               seek_done_after_send = 1;
+            }
          }
          media_video_activity_stage(20u, video_packets & 0x00ffffffu,
             auddec.fd >= 0 ? auddec.packets : audio_frames);
-         if (seek_catchup_packet && !MEDIA_SEEK_ACCELERATE_FRAMES) {
+         if (seek_anchor_packet) {
+            printf("unifrog media seek video anchor keyframe packet_ms=%ld dur=%ld until=%lld dropped=%lu size=%d path=%s\n",
+               (long)video_packet_ms, (long)video_packet_dur_ms,
+               (long long)seek_video_catchup_until_ms,
+               (unsigned long)seek_video_dropped_packets, packet->size,
+               path ? path : "");
+         }
+         if (seek_drop_packet) {
             uint32_t now_ms = unifrog_perf_time_ms();
 
             seek_video_dropped_packets++;
             if (seek_video_dropped_packets <= 4u ||
                 now_ms - seek_video_drop_last_log_ms >= 500u) {
-               printf("unifrog media seek video drop mode=skip packet_ms=%ld dur=%ld until=%lld dropped=%lu key=%d size=%d path=%s\n",
+               printf("unifrog media seek video drop mode=skip reason=%s packet_ms=%ld dur=%ld until=%lld dropped=%lu key=%d key_wait=%d size=%d path=%s\n",
+                  seek_drop_reason,
                   (long)video_packet_ms, (long)video_packet_dur_ms,
                   (long long)seek_video_catchup_until_ms,
                   (unsigned long)seek_video_dropped_packets,
-                  (packet->flags & AV_PKT_FLAG_KEY) ? 1 : 0, packet->size,
-                  path ? path : "");
+                  packet_is_key, seek_wait_key_drop, packet->size, path ? path : "");
                seek_video_drop_last_log_ms = now_ms;
             }
             av_packet_unref(packet);
             continue;
          }
          if (audio_enabled && auddec.fd < 0) {
-            if (!seek_catchup_packet)
+            if (!seek_catchup_active || seek_done_after_send)
                media_video_wait_for_sw_audio(&audio, packet,
                   video_st->time_base, &sw_video_base_ms,
                   audio_frames, audio_ctx ? audio_ctx->sample_rate : 0,
@@ -6726,11 +6862,12 @@ static int media_play_native_video(const char *path,
          } else {
             int hw_wait_ret = 0;
 
-            media_video_pacer_wait(&hw_video_pacer, packet,
-               video_st->time_base, video_feed_lead_ms);
-            if (!seek_catchup_packet)
+            if (!seek_catchup_active || seek_done_after_send) {
+               media_video_pacer_wait(&hw_video_pacer, packet,
+                  video_st->time_base, video_feed_lead_ms);
                hw_wait_ret = media_wait_hardware_ahead("viddec", video_fd, 1,
                   &hw_video_pacer, MEDIA_VIDEO_MAX_HW_AHEAD_MS, path);
+            }
             if (hw_wait_ret > 0 && auddec.fd >= 0) {
                int64_t video_time = -1;
                int64_t audio_time = -1;
@@ -6754,12 +6891,18 @@ static int media_play_native_video(const char *path,
                         path);
                   media_audio_pacer_seek_reset(&hw_video_pacer, audio_time);
                   seek_video_catchup_until_ms = audio_time;
+                  seek_video_wait_keyframe =
+                     seek_video_require_keyframe &&
+                     !MEDIA_SEEK_ACCELERATE_FRAMES;
+                  seek_video_anchor_pending = 0;
                   seek_video_dropped_packets = 0;
+                  seek_video_keyframe_drops = 0;
                   seek_video_drop_last_log_ms = 0;
                   video_layer_revealed = 0;
-                  printf("unifrog media seek video catchup mode=%s until=%lld hidden=0 preserve_frame=1 path=%s\n",
+                  printf("unifrog media seek video catchup mode=%s until=%lld keyframe=%d anchor=%d hidden=0 preserve_frame=1 path=%s\n",
                      MEDIA_SEEK_ACCELERATE_FRAMES ? "accelerate" : "skip",
                      (long long)seek_video_catchup_until_ms,
+                     seek_video_wait_keyframe, seek_video_anchor_pending,
                      path ? path : "");
                }
             }
@@ -6778,20 +6921,31 @@ static int media_play_native_video(const char *path,
             break;
          }
          if (seek_video_catchup_until_ms != MEDIA_TIME_UNSET &&
-             !seek_catchup_packet) {
-            printf("unifrog media seek video catchup_done mode=%s packet_ms=%ld until=%lld hidden=%d dropped=%lu path=%s\n",
+             seek_done_after_send) {
+            printf("unifrog media seek video catchup_done mode=%s packet_ms=%ld until=%lld key=%d hidden=%d dropped=%lu key_drops=%lu path=%s\n",
                MEDIA_SEEK_ACCELERATE_FRAMES ? "accelerate" : "skip",
                (long)video_packet_ms, (long long)seek_video_catchup_until_ms,
-               0,
-               (unsigned long)seek_video_dropped_packets, path ? path : "");
+               packet_is_key, 0,
+               (unsigned long)seek_video_dropped_packets,
+               (unsigned long)seek_video_keyframe_drops, path ? path : "");
             seek_video_catchup_until_ms = MEDIA_TIME_UNSET;
+            seek_video_wait_keyframe = 0;
+            seek_video_anchor_pending = 0;
             seek_video_dropped_packets = 0;
+            seek_video_keyframe_drops = 0;
             seek_video_drop_last_log_ms = 0;
          }
-         if (!seek_catchup_packet || MEDIA_SEEK_ACCELERATE_FRAMES)
+         if (!seek_catchup_active || seek_done_after_send ||
+             seek_anchor_packet || MEDIA_SEEK_ACCELERATE_FRAMES)
             (void)media_native_video_reveal_if_ready(video_fd,
                &video_layer_revealed, &frames_decoded, &frames_displayed, path);
       } else if (auddec.fd >= 0 && packet->stream_index == audio_stream) {
+         if (media_seek_drop_audio_packet_until(packet,
+             fmt->streams[audio_stream], &seek_audio_catchup_until_ms,
+             &seek_audio_dropped_packets, "audio", path)) {
+            av_packet_unref(packet);
+            continue;
+         }
          if (!auddec_write_failed) {
             media_video_activity_stage(21u, auddec.packets & 0x00ffffffu,
                video_packets);
@@ -6828,6 +6982,12 @@ static int media_play_native_video(const char *path,
             }
          }
       } else if (audio_enabled && packet->stream_index == audio_stream) {
+         if (media_seek_drop_audio_packet_until(packet,
+             fmt->streams[audio_stream], &seek_audio_catchup_until_ms,
+             &seek_audio_dropped_packets, "sw_audio", path)) {
+            av_packet_unref(packet);
+            continue;
+         }
          int send_ret = avcodec_send_packet(audio_ctx, packet);
 
          if (send_ret >= 0 || send_ret == AVERROR(EAGAIN)) {

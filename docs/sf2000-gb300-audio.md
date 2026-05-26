@@ -77,10 +77,22 @@ needs the hardware-auddec plus I2SO-prime path to preserve audible output.
 SF2000 can still use hardware auddec and hardware viddec together when
 `VIDDEC_INIT` accepts the combined state. Keep the fast packet-dropping seek
 algorithm shared across SF2000 and GB300, but preserve the current video frame
-instead of hiding the video layer while the demuxer catches up. SF2000 keeps the
-hardware-specific stable sync details: viddec flush rate `0.0` and no explicit
-`/dev/avsync0` timebase reset. GB300 keeps the hardware auddec plus I2SO-prime
-route, including the `1.0` viddec flush rate.
+instead of hiding the video layer while the demuxer catches up.
+
+For inter-frame video codecs, seek catch-up must also be keyframe-gated. The
+demuxer can land on the previous H.264 keyframe, and resuming playback on the
+first packet whose timestamp reaches the target can feed a dependent frame
+without its reference history. That produces visible artifacts until the next
+I-frame. The native player may show the first pre-target keyframe as a clean
+still, drops video packets until the target, then resumes normal playback only
+on a keyframe at or after the target. Audio packets before the target are also
+dropped so the hardware audio clock does not restart early.
+
+SF2000 keeps the hardware-specific stable sync details: viddec flush rate `0.0`
+and no explicit `/dev/avsync0` timebase reset. GB300 keeps the hardware auddec
+plus I2SO-prime route, including the `1.0` viddec flush rate. The high-level
+seek algorithm stays shared unless a device-specific driver quirk requires a
+lower-level flush or clock difference.
 
 ## Progress Signals
 
