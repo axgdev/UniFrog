@@ -584,7 +584,6 @@ JS2300_HOST_SOURCES := \
 	src/frontend/js2300_frontend.c \
 	src/frontend/js2300_frontend_actions.c \
 	src/frontend/js2300_frontend_bindings.c \
-	src/frontend/js2300_frontend_catalog.c \
 	src/frontend/js2300_frontend_storage.c
 FRONTEND_HOST_SOURCES :=
 NATIVE_FRONTEND_SOURCES := \

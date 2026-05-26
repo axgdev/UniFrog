@@ -12,7 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 #include <sys/stat.h>
 #include <sys/unistd.h>
 
@@ -24,24 +23,16 @@
 #include <unifrog/backlight.h>
 #include <unifrog/battery.h>
 #include <unifrog/build_info.h>
-#include <unifrog/boot.h>
-#include <unifrog/boot_logo.h>
-#include <unifrog/boot_trace.h>
 #include <unifrog/diag.h>
 #include <unifrog/display_benchmark.h>
 #include <unifrog/fb.h>
-#include <unifrog/ge.h>
 #include <unifrog/gfx.h>
-#include <unifrog/input.h>
-#include <unifrog/libretro_host.h>
 #include <unifrog/log.h>
 #include <unifrog/media.h>
-#include <unifrog/panic.h>
-#include <unifrog/path.h>
 #include <unifrog/paths.h>
 #include <unifrog/perf.h>
 #include <unifrog/platform.h>
-#include <unifrog/png.h>
+#include <unifrog/storage_probe.h>
 #include <unifrog/text.h>
 
 #define printf unifrog_log
@@ -66,11 +57,6 @@
    UNIFROG_REPORT_ROOT "/storage-quick-benchmark.txt"
 #define JS2300_FRONTEND_STORAGE_TEST_PROBE \
    JS2300_FRONTEND_DATA_ROOT "/storage-test-probe.txt"
-#define JS2300_FRONTEND_ICON_CACHE 24u
-#define JS2300_FRONTEND_INDEX_MAX_DEPTH 12u
-#define JS2300_FRONTEND_INDEX_MAX_FILES 65535u
-#define JS2300_FRONTEND_INDEX_MAX_DIRS 4096u
-#define JS2300_FRONTEND_INDEX_MAX_BYTES ((2u * 1024u * 1024u) - 8192u)
 
 #define FRONTEND_ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -79,76 +65,17 @@ struct system_check_report {
    size_t used;
 };
 
-struct js2300_cached_icon {
-   char path[JS2300_FRONTEND_MAX_PATH];
-   struct unifrog_png_image image;
-   uint32_t last_used;
-   int loaded;
-   int failed;
-};
-
 struct js2300_frontend {
-   struct unifrog_fb fb;
-   struct unifrog_ge ge;
    struct unifrog_battery_status battery;
-   struct unifrog_libretro_run_options run_options;
-   struct js2300_cached_icon icon_cache[JS2300_FRONTEND_ICON_CACHE];
    char action[32];
    char path[JS2300_FRONTEND_MAX_PATH];
-   int video_preset;
-   int video_disable_audio;
-   unsigned draw_buffer;
-   int frame_open;
-   unsigned frame_draw_ops;
-   int frame_has_visible_content;
-   int frame_ge_dirty;
-   int ge_ready;
-   unsigned boot_logo_present_skips;
-   int pending_backlight_valid;
-   unsigned pending_backlight_level;
-   int pending_av_valid;
-   int pending_av_mode;
-   unsigned video_present_count;
-   unsigned video_present_log_count;
-   uint32_t frontend_start_ms;
-   int owns_framebuffer;
    int extension_mode;
-   int relaunch;
-   int input_recovered;
-   uint32_t icon_use_counter;
 };
 
-struct frontend_catalog_entry {
-   const char *system;
-   const char *core;
-   const char *const *suffixes;
-   unsigned suffix_count;
-   const char *const *folders;
-   unsigned folder_count;
-};
-
-struct frontend_index_scan {
-   FILE *game_file;
-   FILE *media_file;
-   struct js2300_fs_index_result *result;
-   uint32_t game_bytes;
-   uint32_t media_bytes;
-};
-
-int is_video_file(const char *name);
-const struct frontend_catalog_entry *frontend_catalog_for_path(const char *path);
-int frontend_is_game_name(const char *name);
-int frontend_should_hide_file(const char *name, const char *dir);
-int frontend_path_join_checked(char *dst, size_t dst_size,
-   const char *base, const char *name);
-int frontend_dirent_is_dot(const struct dirent *entry);
-int frontend_dirent_is_dir(const struct dirent *entry, const char *full);
-int frontend_index_scan_dir(const char *dir, unsigned depth,
-   struct frontend_index_scan *scan);
-
-int frontend_fb_open(struct js2300_frontend *frontend);
-void frontend_fb_reopen(struct js2300_frontend *frontend, const char *tag);
-void frontend_icon_cache_clear(struct js2300_frontend *frontend);
+void frontend_configure_host(struct js2300_frontend *frontend,
+   struct js2300_host *host);
+int run_js_script_file(struct js2300_frontend *frontend, const char *path);
+int run_requested_action(struct js2300_frontend *frontend);
 
 void host_log(void *opaque, const char *message);
 int host_flush_log(void *opaque);
@@ -179,12 +106,6 @@ int host_fs_index(void *opaque, const char *root,
 int host_action(void *opaque, const char *id);
 void host_exit(void *opaque, const char *reason);
 
-void frontend_configure_host(struct js2300_frontend *frontend,
-   struct js2300_host *host);
-void js2300_frontend_default_run_options(
-   struct unifrog_libretro_run_options *options);
-int run_js_script_file(struct js2300_frontend *frontend, const char *path);
-int run_requested_action(struct js2300_frontend *frontend);
 int run_storage_test(struct js2300_frontend *frontend);
 int run_storage_full_test(struct js2300_frontend *frontend);
 int run_storage_mode_test(struct js2300_frontend *frontend, const char *profile);

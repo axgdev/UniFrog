@@ -33,12 +33,10 @@ Keep this repository small and direct.
 ## Scope
 
 - Build the native SF2000 `bisrv.asd` and SD-card package.
-- Keep UI screens in `frontend/quick-menu.js` and `frontend/app/*.js`;
-  `frontend/main.js` is only the loader. Native JS2300 bridge code in
-  `src/frontend/js2300_frontend_*.c` exposes fast bindings, launch actions,
-  diagnostics, and crash handling.
-- Package JavaScript source with `.js.mqbc` bytecode and
-  `bytecode-manifest.txt`; do not rely on file timestamps for freshness.
+- Keep the boot frontend in `src/native_frontend.c` and
+  `src/frontend_lvgl.c`. `frontend/quick-menu.js` is the in-game libretro
+  quick menu. Native JS2300 bridge code in `src/frontend/js2300_frontend_*.c`
+  exposes only standalone script bindings and diagnostics.
 - Keep SDK FFmpeg/HCRTOS media firmware-linked by default; the SD-loaded
   `HCRTOS_MEDIA=module` mode is currently for loader diagnostics because
   `hcplayer_create()` can stall when the media stack runs from that module.
