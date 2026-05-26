@@ -75,10 +75,12 @@ PCM audio for that video session. Keep this recovery SF2000-only; GB300 media
 needs the hardware-auddec plus I2SO-prime path to preserve audible output.
 
 SF2000 can still use hardware auddec and hardware viddec together when
-`VIDDEC_INIT` accepts the combined state. Keep SF2000 seeks on the older stable
-path: viddec flush rate `0.0`, no explicit `/dev/avsync0` timebase reset, and no
-post-seek packet dropping. GB300 keeps the newer seek catch-up path because its
-audible route depends on the hardware auddec plus I2SO-prime configuration.
+`VIDDEC_INIT` accepts the combined state. Keep the fast packet-dropping seek
+algorithm shared across SF2000 and GB300, but preserve the current video frame
+instead of hiding the video layer while the demuxer catches up. SF2000 keeps the
+hardware-specific stable sync details: viddec flush rate `0.0` and no explicit
+`/dev/avsync0` timebase reset. GB300 keeps the hardware auddec plus I2SO-prime
+route, including the `1.0` viddec flush rate.
 
 ## Progress Signals
 

@@ -6445,8 +6445,7 @@ static int media_play_native_video(const char *path,
    int video_freerun = 0;
    int video_sync_mode = AVSYNC_TYPE_FREERUN;
    int video_layer_revealed = 0;
-   int seek_video_catchup_hidden = 0;
-   int sf2000_hw_auddec_seek_legacy = 0;
+   int sf2000_hw_auddec_safe_sync = 0;
    int sd_read_active = 0;
    int auddec_write_failed = 0;
    int auddec_sw_fallback_attempted = 0;
@@ -6587,20 +6586,20 @@ static int media_play_native_video(const char *path,
          &audio_converter, &pcm, &audio_enabled,
          sw_audio_reason, path);
    video_freerun = video_sync_mode == AVSYNC_TYPE_FREERUN;
-   sf2000_hw_auddec_seek_legacy =
+   sf2000_hw_auddec_safe_sync =
       auddec.fd >= 0 && !unifrog_audio_prefers_stereo_output();
    if (auddec.fd >= 0 && audio_feed_lead_ms > video_feed_lead_ms)
       video_feed_lead_ms = audio_feed_lead_ms;
    if (video_freerun && audio_enabled)
       printf("unifrog media native video forcing freerun due to software audio path\n");
-   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d audio_output_ch=%u video_feed_lead_ms=%u audio_feed_lead_ms=%u duration=%lld overlay=1 overlay_hide=A video_max_hw_ahead_ms=%u audio_max_hw_ahead_ms=%u hw_ahead_max_wait_ms=%u video_stuck_behind_ms=%u seek_catchup=%s sf2000_seek_legacy=%d\n",
+   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d audio_output_ch=%u video_feed_lead_ms=%u audio_feed_lead_ms=%u duration=%lld overlay=1 overlay_hide=A video_max_hw_ahead_ms=%u audio_max_hw_ahead_ms=%u hw_ahead_max_wait_ms=%u video_stuck_behind_ms=%u seek_catchup=%s sf2000_safe_sync=%d\n",
       video_freerun, disable_audio, auddec.fd >= 0, auddec.freerun,
       audio_enabled, audio_output_channels, video_feed_lead_ms, audio_feed_lead_ms,
       (long long)duration_ms, MEDIA_VIDEO_MAX_HW_AHEAD_MS,
       MEDIA_AUDIO_MAX_HW_AHEAD_MS, MEDIA_HW_AHEAD_MAX_WAIT_MS,
       MEDIA_VIDEO_STUCK_BEHIND_MS,
       MEDIA_SEEK_ACCELERATE_FRAMES ? "accelerate" : "skip",
-      sf2000_hw_auddec_seek_legacy);
+      sf2000_hw_auddec_safe_sync);
    packet = av_packet_alloc();
    frame = av_frame_alloc();
    if (!packet || !frame)
@@ -6653,7 +6652,7 @@ static int media_play_native_video(const char *path,
          media_flush_viddec_for_seek(video_fd, "video", path);
          media_flush_auddec_for_seek(&auddec, "video", path);
          if (media_seek_format_ms(fmt, target_ms, "video", path) == 0) {
-            if (sf2000_hw_auddec_seek_legacy)
+            if (sf2000_hw_auddec_safe_sync)
                printf("unifrog media seek avsync_skip tag=video reason=sf2000_hw_auddec target=%lld path=%s\n",
                   (long long)target_ms, path ? path : "");
             else
@@ -6667,28 +6666,13 @@ static int media_play_native_video(const char *path,
             sw_video_base_ms = MEDIA_TIME_UNSET;
             sw_audio_start_ms = 0;
             audio_frames = 0;
-            if (sf2000_hw_auddec_seek_legacy) {
-               seek_video_catchup_until_ms = MEDIA_TIME_UNSET;
-               seek_video_catchup_hidden = 0;
-               seek_video_dropped_packets = 0;
-               seek_video_drop_last_log_ms = 0;
-               printf("unifrog media seek video catchup mode=legacy_sf2000 until=%lld hidden=0 path=%s\n",
-                  (long long)target_ms, path ? path : "");
-            } else {
-               seek_video_catchup_until_ms = target_ms;
-               seek_video_catchup_hidden = 0;
-               seek_video_dropped_packets = 0;
-               seek_video_drop_last_log_ms = 0;
-               if (!MEDIA_SEEK_ACCELERATE_FRAMES) {
-                  (void)set_video_layer_visible(0, 0, 0, 0, 0);
-                  video_layer_revealed = 0;
-                  seek_video_catchup_hidden = 1;
-               }
-               printf("unifrog media seek video catchup mode=%s until=%lld hidden=%d path=%s\n",
-                  MEDIA_SEEK_ACCELERATE_FRAMES ? "accelerate" : "skip",
-                  (long long)seek_video_catchup_until_ms,
-                  seek_video_catchup_hidden, path ? path : "");
-            }
+            seek_video_catchup_until_ms = target_ms;
+            seek_video_dropped_packets = 0;
+            seek_video_drop_last_log_ms = 0;
+            video_layer_revealed = 0;
+            printf("unifrog media seek video catchup mode=%s until=%lld hidden=0 preserve_frame=1 path=%s\n",
+               MEDIA_SEEK_ACCELERATE_FRAMES ? "accelerate" : "skip",
+               (long long)seek_video_catchup_until_ms, path ? path : "");
             media_draw_progress_overlay(&overlay, "video_seek", target_ms,
                duration_ms, 1, path);
          }
@@ -6747,8 +6731,7 @@ static int media_play_native_video(const char *path,
             if (!seek_catchup_packet)
                hw_wait_ret = media_wait_hardware_ahead("viddec", video_fd, 1,
                   &hw_video_pacer, MEDIA_VIDEO_MAX_HW_AHEAD_MS, path);
-            if (hw_wait_ret > 0 && auddec.fd >= 0 &&
-                !sf2000_hw_auddec_seek_legacy) {
+            if (hw_wait_ret > 0 && auddec.fd >= 0) {
                int64_t video_time = -1;
                int64_t audio_time = -1;
 
@@ -6763,17 +6746,21 @@ static int media_play_native_video(const char *path,
                      (long long)hw_video_pacer.next_ms,
                      MEDIA_VIDEO_STUCK_BEHIND_MS, path ? path : "");
                   media_flush_viddec_for_seek(video_fd, "video_recover", path);
-                  media_set_avsync_timebase(audio_time, "video_recover", path);
+                  if (sf2000_hw_auddec_safe_sync)
+                     printf("unifrog media seek avsync_skip tag=video_recover reason=sf2000_hw_auddec target=%lld path=%s\n",
+                        (long long)audio_time, path ? path : "");
+                  else
+                     media_set_avsync_timebase(audio_time, "video_recover",
+                        path);
                   media_audio_pacer_seek_reset(&hw_video_pacer, audio_time);
                   seek_video_catchup_until_ms = audio_time;
-                  seek_video_catchup_hidden = 0;
                   seek_video_dropped_packets = 0;
                   seek_video_drop_last_log_ms = 0;
-                  if (!MEDIA_SEEK_ACCELERATE_FRAMES) {
-                     (void)set_video_layer_visible(0, 0, 0, 0, 0);
-                     video_layer_revealed = 0;
-                     seek_video_catchup_hidden = 1;
-                  }
+                  video_layer_revealed = 0;
+                  printf("unifrog media seek video catchup mode=%s until=%lld hidden=0 preserve_frame=1 path=%s\n",
+                     MEDIA_SEEK_ACCELERATE_FRAMES ? "accelerate" : "skip",
+                     (long long)seek_video_catchup_until_ms,
+                     path ? path : "");
                }
             }
          }
@@ -6795,10 +6782,9 @@ static int media_play_native_video(const char *path,
             printf("unifrog media seek video catchup_done mode=%s packet_ms=%ld until=%lld hidden=%d dropped=%lu path=%s\n",
                MEDIA_SEEK_ACCELERATE_FRAMES ? "accelerate" : "skip",
                (long)video_packet_ms, (long long)seek_video_catchup_until_ms,
-               seek_video_catchup_hidden,
+               0,
                (unsigned long)seek_video_dropped_packets, path ? path : "");
             seek_video_catchup_until_ms = MEDIA_TIME_UNSET;
-            seek_video_catchup_hidden = 0;
             seek_video_dropped_packets = 0;
             seek_video_drop_last_log_ms = 0;
          }
