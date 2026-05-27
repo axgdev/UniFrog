@@ -399,6 +399,9 @@ struct libretro_host {
    const char *core_id;
    uintptr_t core_gp;
    uint32_t buttons;
+   uint32_t local_buttons;
+   uint32_t port_buttons[UNIFROG_INPUT_MAX_PORTS];
+   unsigned input_poll_frame;
    enum retro_pixel_format pixel_format;
    enum unifrog_ge_clock ge_clock;
    int display_mode;
@@ -2445,10 +2448,20 @@ bool unifrog_libretro_rumble_cb(unsigned port, enum retro_rumble_effect effect,
 
 void unifrog_libretro_input_poll_cb(void)
 {
+   unsigned frame = host.run_frames + 1u;
+
    host_force_expected_gp();
-   unifrog_input_save_previous();
-   unifrog_input_poll_with_wireless_divisor(LIBRETRO_WIRELESS_POLL_DIVISOR);
-   host.buttons = unifrog_input_buttons();
+   if (host.input_poll_frame != frame) {
+      unifrog_input_save_previous();
+      unifrog_input_poll_with_wireless_divisor(LIBRETRO_WIRELESS_POLL_DIVISOR);
+      host.local_buttons = unifrog_input_local_buttons();
+      host.buttons = unifrog_input_buttons();
+      for (unsigned port = 0; port < UNIFROG_INPUT_MAX_PORTS; port++) {
+         host.port_buttons[port] = host.local_buttons |
+            unifrog_input_wireless_buttons(port);
+      }
+      host.input_poll_frame = frame;
+   }
 }
 
 static int button_down_from_mask(uint32_t buttons, unsigned id)
@@ -2502,15 +2515,17 @@ int16_t unifrog_libretro_input_state_cb(unsigned port, unsigned device,
    unsigned index, unsigned id)
 {
    uint32_t buttons;
+   unsigned frame = host.run_frames + 1u;
 
    host_force_expected_gp();
    (void)index;
    if (device != RETRO_DEVICE_JOYPAD)
       return 0;
+   if (host.input_poll_frame != frame)
+      unifrog_libretro_input_poll_cb();
 
    if (port < UNIFROG_INPUT_MAX_PORTS) {
-      buttons = unifrog_input_local_buttons() |
-         unifrog_input_wireless_buttons(port);
+      buttons = host.port_buttons[port];
    } else {
       return 0;
    }
@@ -2619,15 +2634,20 @@ static void host_audio_store_mono(int16_t *buffer, unsigned frame,
 static int host_audio_scale_mono(int left, int right, unsigned *abs_out)
 {
    int sample = (left + right) >> 1;
-   int scaled = host_audio_scale_sample(sample);
+   int scaled;
    unsigned abs_value;
 
-   if (scaled > 32767) {
-      scaled = 32767;
-      host.audio_clip_count++;
-   } else if (scaled < -32768) {
-      scaled = -32768;
-      host.audio_clip_count++;
+   if (host.audio_gain == 1u) {
+      scaled = sample;
+   } else {
+      scaled = host_audio_scale_sample(sample);
+      if (scaled > 32767) {
+         scaled = 32767;
+         host.audio_clip_count++;
+      } else if (scaled < -32768) {
+         scaled = -32768;
+         host.audio_clip_count++;
+      }
    }
    abs_value = scaled < 0 ? (unsigned)-scaled : (unsigned)scaled;
    if (abs_value > host.audio_peak_max)
@@ -2763,6 +2783,41 @@ size_t unifrog_libretro_audio_batch_cb(const int16_t *data, size_t frames)
       DEFAULT_SAMPLE_RATE;
    output_rate = host.audio_output_rate ? host.audio_output_rate :
       input_rate;
+
+   if (input_rate == output_rate) {
+      host.audio_resample_accum = 0;
+      while (input_offset < frames) {
+         size_t out_frames = 0;
+         unsigned peak_out = 0;
+
+         while (input_offset < frames &&
+                out_frames < LIBRETRO_AUDIO_WRITE_CHUNK_FRAMES) {
+            int left = data[input_offset * 2];
+            int right = data[input_offset * 2 + 1];
+            int scaled;
+            unsigned abs_out;
+
+            input_offset++;
+            scaled = host_audio_scale_mono(left, right, &abs_out);
+            if (abs_out > peak_out)
+               peak_out = abs_out;
+            host_audio_store_mono(audio_mix_buffer, (unsigned)out_frames,
+               (int16_t)scaled);
+            out_frames++;
+         }
+         if (out_frames == 0)
+            continue;
+         host_audio_update_gate(peak_out);
+         if (host_audio_write_frames(audio_mix_buffer, (unsigned)out_frames,
+             host.audio_batches) != 0)
+            break;
+         offset += out_frames;
+      }
+
+      host.audio_batches++;
+      host.audio_frames += (unsigned)offset;
+      return input_offset ? input_offset : frames;
+   }
 
    while (input_offset < frames) {
       size_t out_frames = 0;
@@ -6958,9 +7013,7 @@ out_content_prepare:
       unsigned active_count;
       unsigned vsync_count;
 
-      unifrog_input_save_previous();
-      unifrog_input_poll_with_wireless_divisor(LIBRETRO_WIRELESS_POLL_DIVISOR);
-      host.buttons = unifrog_input_buttons();
+      unifrog_libretro_input_poll_cb();
       if (!exit_combo_down())
          host.quick_combo_armed = 1;
       if (host.quick_combo_armed && exit_combo_down()) {
