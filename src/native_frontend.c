@@ -309,6 +309,17 @@ static void frontend_invalidate_draw(struct native_frontend *fe)
       fe->last_draw_valid = 0;
 }
 
+static void frontend_force_return_present(struct native_frontend *fe,
+   const char *tag)
+{
+   if (!fe)
+      return;
+   frontend_invalidate_draw(fe);
+   fe->needs_draw = 1;
+   unifrog_log("frontend return present tag=%s view=%d selected=%u\n",
+      tag ? tag : "", fe->view, fe->selected);
+}
+
 static const struct frontend_catalog frontend_catalog[] = {
    { "gpsp", { ".gba" } },
    { "gambatte", { ".gb", ".gbc" } },
@@ -6559,6 +6570,7 @@ static void launch_game(struct native_frontend *fe, struct frontend_item *item)
    set_status(fe, "returned %d", ret);
    (void)unifrog_ui_open(&fe->ui, 0);
    unifrog_input_clear();
+   frontend_force_return_present(fe, "game");
 }
 
 struct frontend_media_progress {
@@ -6646,6 +6658,7 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
    if (fe->view == FRONTEND_VIEW_OPEN_WITH ||
        fe->view == FRONTEND_VIEW_OPEN_WITH_OTHER)
       return_from_open_with(fe);
+   frontend_force_return_present(fe, "media");
 }
 
 static void launch_script(struct native_frontend *fe, struct frontend_item *item)
@@ -6674,6 +6687,7 @@ static void launch_script(struct native_frontend *fe, struct frontend_item *item
    set_status(fe, "script returned %d", ret);
    (void)unifrog_ui_open(&fe->ui, 0);
    unifrog_input_clear();
+   frontend_force_return_present(fe, "script");
 }
 
 static void launch_last_game(struct native_frontend *fe)
