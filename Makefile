@@ -1217,13 +1217,18 @@ deps-mquickjs:
 		fi; \
 		deps_ref="$(MQUICKJS_DEPS_BRANCH)"; \
 		if test "$(MQUICKJS_DEPS_COMMIT)" != "-"; then deps_ref="$(MQUICKJS_DEPS_COMMIT)"; fi; \
-		if $(DEP_GIT_ENV) git -C "$(MQUICKJS_DIR)" fetch $$depth_arg origin "$$deps_ref"; then \
+		fetch_err="$(MQUICKJS_DIR)/.git/unifrog-fetch.err"; \
+		if $(DEP_GIT_ENV) git -C "$(MQUICKJS_DIR)" fetch $$depth_arg origin "$$deps_ref" 2>"$$fetch_err"; then \
+			rm -f "$$fetch_err"; \
 			source_used=unifrog; \
 			MQUICKJS_CHECKOUT=FETCH_HEAD; \
 		elif test "$(DEP_SOURCE)" = unifrog; then \
+			if test -s "$$fetch_err"; then cat "$$fetch_err" >&2; fi; \
+			rm -f "$$fetch_err"; \
 			echo "missing managed dependency branch: $(MQUICKJS_DEPS_BRANCH)"; \
 			exit 1; \
 		else \
+			rm -f "$$fetch_err"; \
 			echo "  FALLBK  $(MQUICKJS_DIR) upstream $(MQUICKJS_REF)"; \
 			git -C "$(MQUICKJS_DIR)" remote set-url origin "$(MQUICKJS_URL)"; \
 			MQUICKJS_CHECKOUT="$(MQUICKJS_REF)"; \
@@ -1270,13 +1275,18 @@ deps-lvgl:
 		fi; \
 		deps_ref="$(LVGL_DEPS_BRANCH)"; \
 		if test "$(LVGL_DEPS_COMMIT)" != "-"; then deps_ref="$(LVGL_DEPS_COMMIT)"; fi; \
-		if $(DEP_GIT_ENV) git -C "$(LVGL_DIR)" fetch $$depth_arg origin "$$deps_ref"; then \
+		fetch_err="$(LVGL_DIR)/.git/unifrog-fetch.err"; \
+		if $(DEP_GIT_ENV) git -C "$(LVGL_DIR)" fetch $$depth_arg origin "$$deps_ref" 2>"$$fetch_err"; then \
+			rm -f "$$fetch_err"; \
 			source_used=unifrog; \
 			LVGL_CHECKOUT=FETCH_HEAD; \
 		elif test "$(DEP_SOURCE)" = unifrog; then \
+			if test -s "$$fetch_err"; then cat "$$fetch_err" >&2; fi; \
+			rm -f "$$fetch_err"; \
 			echo "missing managed dependency branch: $(LVGL_DEPS_BRANCH)"; \
 			exit 1; \
 		else \
+			rm -f "$$fetch_err"; \
 			echo "  FALLBK  $(LVGL_DIR) upstream $(LVGL_REF)"; \
 			git -C "$(LVGL_DIR)" remote set-url origin "$(LVGL_URL)"; \
 			LVGL_CHECKOUT="$(LVGL_REF)"; \
@@ -1324,13 +1334,18 @@ deps-ffmpeg: $(HCRTOS_FFMPEG_PATCHES)
 		fi; \
 		deps_ref="$(HCRTOS_FFMPEG_DEPS_BRANCH)"; \
 		if test "$(HCRTOS_FFMPEG_DEPS_COMMIT)" != "-"; then deps_ref="$(HCRTOS_FFMPEG_DEPS_COMMIT)"; fi; \
-		if $(DEP_GIT_ENV) git -C "$(HCRTOS_FFMPEG_SOURCE)" fetch $$depth_arg origin "$$deps_ref"; then \
+		fetch_err="$(HCRTOS_FFMPEG_SOURCE)/.git/unifrog-fetch.err"; \
+		if $(DEP_GIT_ENV) git -C "$(HCRTOS_FFMPEG_SOURCE)" fetch $$depth_arg origin "$$deps_ref" 2>"$$fetch_err"; then \
+			rm -f "$$fetch_err"; \
 			source_used=unifrog; \
 			FFMPEG_CHECKOUT=FETCH_HEAD; \
 		elif test "$(DEP_SOURCE)" = unifrog; then \
+			if test -s "$$fetch_err"; then cat "$$fetch_err" >&2; fi; \
+			rm -f "$$fetch_err"; \
 			echo "missing managed dependency branch: $(HCRTOS_FFMPEG_DEPS_BRANCH)"; \
 			exit 1; \
 		else \
+			rm -f "$$fetch_err"; \
 			echo "  FALLBK  $(HCRTOS_FFMPEG_SOURCE) upstream $(HCRTOS_FFMPEG_REF)"; \
 			git -C "$(HCRTOS_FFMPEG_SOURCE)" remote set-url origin "$(HCRTOS_FFMPEG_URL)"; \
 			FFMPEG_CHECKOUT="$(HCRTOS_FFMPEG_REF)"; \

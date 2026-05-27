@@ -384,13 +384,18 @@ support-init:
 				deps_ref="$$deps_branch"; \
 				if test "$$deps_commit" != "-"; then deps_ref="$$deps_commit"; fi; \
 				echo "  FETCH   support/$$name managed $$deps_ref"; \
-				if $(DEP_GIT_ENV) git -C "$$dir" fetch $$depth_arg $$filter_arg origin "$$deps_ref"; then \
+				fetch_err="$$dir/.git/unifrog-fetch.err"; \
+				if $(DEP_GIT_ENV) git -C "$$dir" fetch $$depth_arg $$filter_arg origin "$$deps_ref" 2>"$$fetch_err"; then \
+					rm -f "$$fetch_err"; \
 					source_used=unifrog; \
 					commit=FETCH_HEAD; \
 				elif test "$(DEP_SOURCE)" = unifrog; then \
+					if test -s "$$fetch_err"; then cat "$$fetch_err" >&2; fi; \
+					rm -f "$$fetch_err"; \
 					echo "missing managed dependency branch: $$deps_branch"; \
 					exit 1; \
 				else \
+					rm -f "$$fetch_err"; \
 					echo "  FALLBK  support/$$name upstream $$commit"; \
 					git -C "$$dir" remote set-url origin "$$url"; \
 				fi; \
@@ -478,13 +483,18 @@ core-init:
 				deps_ref="$$deps_branch"; \
 				if test "$$deps_commit" != "-"; then deps_ref="$$deps_commit"; fi; \
 				echo "  FETCH   $$name managed $$deps_ref"; \
-				if $(DEP_GIT_ENV) git -C "$$dir" fetch $$depth_arg $$filter_arg origin "$$deps_ref"; then \
+				fetch_err="$$dir/.git/unifrog-fetch.err"; \
+				if $(DEP_GIT_ENV) git -C "$$dir" fetch $$depth_arg $$filter_arg origin "$$deps_ref" 2>"$$fetch_err"; then \
+					rm -f "$$fetch_err"; \
 					source_used=unifrog; \
 					commit=FETCH_HEAD; \
 				elif test "$(DEP_SOURCE)" = unifrog; then \
+					if test -s "$$fetch_err"; then cat "$$fetch_err" >&2; fi; \
+					rm -f "$$fetch_err"; \
 					echo "missing managed dependency branch: $$deps_branch"; \
 					exit 1; \
 				else \
+					rm -f "$$fetch_err"; \
 					echo "  FALLBK  $$name upstream $$commit"; \
 					git -C "$$dir" remote set-url origin "$$url"; \
 				fi; \
