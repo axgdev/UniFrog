@@ -180,7 +180,7 @@ If the upstream static archive name does not match
 `cores/output/<archive-stem>_libretro_sf2000.a`, override
 `<PREFIX>_CORE_LIB` after the registration, as `QPSX_CORE_LIB` does. If the
 SD-package filename should differ from the module basename, override
-`<PREFIX>_CORE_BIN`, as `PCE_FAST_CORE_BIN` and `PMP_VIDEO_CORE_BIN` do. The
+`<PREFIX>_CORE_BIN`, as `PCE_FAST_CORE_BIN` does. The
 core still needs a matching target in `cores/Makefile` and a source pin in
 `cores/manifest.mk`.
 

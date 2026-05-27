@@ -54,10 +54,11 @@ quick menu, themes, and diagnostics stay in C/LVGL-side code.
 The JS2300 host bridge is split by role:
 
 - `src/frontend/js2300_frontend.c`: JS2300 host wiring and native script entry
-- `src/frontend/js2300_frontend_bindings.c`: drawing, input, battery, and FS
-  bindings exposed to JavaScript
-- `src/frontend/js2300_frontend_catalog.c`: fast native game/media indexing
-- `src/frontend/js2300_frontend_actions.c`: launch actions and system checks
+- `src/frontend/js2300_frontend_bindings.c`: script logging, timing,
+  filesystem, battery, backlight, AV, and lightweight indexing bindings
+- `src/frontend/js2300_frontend_actions.c`: script-triggered diagnostics and
+  system checks
+- `src/frontend/js2300_frontend_storage.c`: storage diagnostics
 
 Updating optional scripts does not require relinking firmware. Updating native
 bindings, runtime modules, or ABI headers requires a rebuild.

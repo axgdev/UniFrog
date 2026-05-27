@@ -92,6 +92,7 @@ enum frontend_view {
    FRONTEND_VIEW_ROM_ROOT_PICKER,
    FRONTEND_VIEW_OPEN_WITH,
    FRONTEND_VIEW_OPEN_WITH_OTHER,
+   FRONTEND_VIEW_MEDIA_PLAYER,
    FRONTEND_VIEW_THEME,
    FRONTEND_VIEW_LANGUAGE,
    FRONTEND_VIEW_FIRMWARE,
@@ -240,6 +241,7 @@ struct native_frontend {
 static void show_launch(struct native_frontend *fe);
 static void show_open_with(struct native_frontend *fe,
    const struct frontend_item *item);
+static void show_media_player(struct native_frontend *fe, const char *path);
 static void reset_items(struct native_frontend *fe, const char *title);
 static struct frontend_item *add_item(struct native_frontend *fe,
    const char *name, const char *meta, enum frontend_item_kind kind,
@@ -307,16 +309,26 @@ static void frontend_invalidate_draw(struct native_frontend *fe)
       fe->last_draw_valid = 0;
 }
 
+static void frontend_force_return_present(struct native_frontend *fe,
+   const char *tag)
+{
+   if (!fe)
+      return;
+   frontend_invalidate_draw(fe);
+   fe->needs_draw = 1;
+   unifrog_log("frontend return present tag=%s view=%d selected=%u\n",
+      tag ? tag : "", fe->view, fe->selected);
+}
+
 static const struct frontend_catalog frontend_catalog[] = {
    { "gpsp", { ".gba" } },
    { "gambatte", { ".gb", ".gbc" } },
    { "quicknes", { ".nes" } },
    { "fceumm", { ".fds" } },
    { "snes9x2005", { ".sfc", ".smc" } },
-   { "picodrive", { ".md", ".gen", ".smd", ".32x", ".sms", ".gg", ".sg" } },
+   { "picodrive", { ".gen", ".smd", ".32x", ".sms", ".gg", ".sg" } },
    { "pce-fast", { ".pce", ".sgx" } },
    { "qpsx", { ".cue", ".iso", ".img", ".pbp" } },
-   { "pmp-video", { ".avi" } },
 };
 
 static const struct frontend_core_alias frontend_core_aliases[] = {
@@ -2920,6 +2932,26 @@ static void frontend_loading_show(struct native_frontend *fe, const char *title,
    unifrog_gfx_draw_text(&surface, 18, bar_y + 24, percent_text,
       UNIFROG_RGB565(236, 241, 246), 1);
    unifrog_ui_present(&fe->ui);
+}
+
+static void frontend_loading_handoff_black(struct native_frontend *fe,
+   const char *tag)
+{
+   if (!fe)
+      return;
+
+   frontend_invalidate_draw(fe);
+   if (fe->ui.fb.pixels) {
+      unifrog_ui_begin(&fe->ui, UNIFROG_RGB565(0, 0, 0));
+      unifrog_ui_present(&fe->ui);
+      unifrog_ui_close(&fe->ui);
+      unifrog_log("frontend loading handoff tag=%s closed=1\n",
+         tag && tag[0] ? tag : "");
+   } else {
+      unifrog_ui_close(&fe->ui);
+      unifrog_log("frontend loading handoff tag=%s closed=0\n",
+         tag && tag[0] ? tag : "");
+   }
 }
 
 static void frontend_install_progress_update(void *userdata, const char *stage,
@@ -5749,6 +5781,8 @@ static void show_apps(struct native_frontend *fe)
 {
    reset_items(fe, "Apps");
    fe->view = FRONTEND_VIEW_APPS;
+   add_item(fe, "Media Player", "videos and music", FRONTEND_ITEM_ACTION,
+      "media_player", NULL);
    add_item(fe, "File Browser", "SD root", FRONTEND_ITEM_ACTION,
       "explore_sd", NULL);
    add_item(fe, "Updates", "versions", FRONTEND_ITEM_ACTION,
@@ -5780,6 +5814,56 @@ static void show_apps(struct native_frontend *fe)
    add_item(fe, "Power", "battery", FRONTEND_ITEM_ACTION, "power", NULL);
    add_item(fe, "SysInfo", "device", FRONTEND_ITEM_ACTION, "sysinfo", NULL);
    add_item(fe, "Back", "launcher", FRONTEND_ITEM_ACTION, "back", NULL);
+}
+
+static void show_media_player(struct native_frontend *fe, const char *path)
+{
+   DIR *dir;
+   struct dirent *entry;
+   struct frontend_item *info;
+   char label[64];
+
+   reset_items(fe, "Media Player");
+   fe->view = FRONTEND_VIEW_MEDIA_PLAYER;
+   if (!path || !path[0])
+      path = FRONTEND_ROOT;
+   unifrog_text_copy(fe->current_dir, sizeof(fe->current_dir), path);
+   snprintf(label, sizeof(label), "%s", basename_const(path));
+   if (!label[0])
+      snprintf(label, sizeof(label), "SD Card");
+   info = add_item(fe, label, "current folder", FRONTEND_ITEM_ACTION,
+      "noop", NULL);
+   if (info)
+      info->name[sizeof(info->name) - 1u] = '\0';
+   if (fe->nav_count > 0 || strcmp(path, FRONTEND_ROOT) != 0)
+      add_item(fe, "Back", "folder", FRONTEND_ITEM_DIR, "", NULL);
+   dir = opendir(path);
+   if (dir) {
+      while ((entry = readdir(dir)) != NULL) {
+         char full[FRONTEND_MAX_PATH];
+         struct stat st;
+
+         if (entry->d_name[0] == '.' && !fe->show_hidden)
+            continue;
+         if (strcmp(entry->d_name, ".") == 0 ||
+             strcmp(entry->d_name, "..") == 0)
+            continue;
+         if (path_join(full, sizeof(full), path, entry->d_name) != 0)
+            continue;
+         if (stat(full, &st) != 0)
+            continue;
+         if (S_ISDIR(st.st_mode)) {
+            add_item(fe, entry->d_name, "folder", FRONTEND_ITEM_DIR, full,
+               NULL);
+         } else if (S_ISREG(st.st_mode) && is_media_file(full)) {
+            add_item(fe, entry->d_name, media_path_is_audio(full) ?
+               "audio" : "media", FRONTEND_ITEM_MEDIA, full, NULL);
+         }
+      }
+      closedir(dir);
+   }
+   sort_items(fe);
+   set_status(fe, "A play  X open with  B back");
 }
 
 static void show_updates(struct native_frontend *fe)
@@ -6117,6 +6201,10 @@ static void show_view(struct native_frontend *fe, enum frontend_view view)
    case FRONTEND_VIEW_UPDATES:
       show_updates(fe);
       break;
+   case FRONTEND_VIEW_MEDIA_PLAYER:
+      show_media_player(fe, fe->current_dir[0] ? fe->current_dir :
+         FRONTEND_ROOT);
+      break;
    case FRONTEND_VIEW_CORES:
       show_core_manager(fe);
       break;
@@ -6247,6 +6335,25 @@ static void browser_back(struct native_frontend *fe)
    if (fe->view == FRONTEND_VIEW_POWER || fe->view == FRONTEND_VIEW_STORAGE ||
        fe->view == FRONTEND_VIEW_LAUNCH_SETTINGS || fe->view == FRONTEND_VIEW_UPDATES) {
       restore_parent_view(fe, FRONTEND_VIEW_CONFIG);
+      return;
+   }
+   if (fe->view == FRONTEND_VIEW_MEDIA_PLAYER) {
+      if (fe->nav_count > 0) {
+         char path[FRONTEND_MAX_PATH];
+         unsigned selected;
+
+         fe->nav_count--;
+         unifrog_text_copy(path, sizeof(path), fe->nav_path[fe->nav_count]);
+         selected = fe->nav_selected[fe->nav_count];
+         unifrog_log("frontend nav back media_player depth=%u path=%s selected=%u\n",
+            fe->nav_count, path, selected);
+         show_media_player(fe, path);
+         fe->selected = selected;
+         clamp_selection(fe);
+         log_selection(fe, "back");
+         return;
+      }
+      restore_parent_view(fe, FRONTEND_VIEW_APPS);
       return;
    }
    if (fe->view == FRONTEND_VIEW_FIRMWARE) {
@@ -6463,11 +6570,13 @@ static void launch_game(struct native_frontend *fe, struct frontend_item *item)
    set_status(fe, "returned %d", ret);
    (void)unifrog_ui_open(&fe->ui, 0);
    unifrog_input_clear();
+   frontend_force_return_present(fe, "game");
 }
 
 struct frontend_media_progress {
    struct native_frontend *fe;
    char name[96];
+   int handoff_done;
 };
 
 static void frontend_media_progress_update(void *userdata, const char *stage,
@@ -6482,6 +6591,16 @@ static void frontend_media_progress_update(void *userdata, const char *stage,
       percent = (unsigned)(((uint64_t)done * 100ull) / (uint64_t)total);
    if (percent > 100u)
       percent = 100u;
+   if (percent >= 100u) {
+      if (!progress->handoff_done) {
+         progress->handoff_done = 1;
+         frontend_loading_handoff_black(progress->fe,
+            stage && stage[0] ? stage : "media");
+      }
+      return;
+   }
+   if (progress->handoff_done)
+      return;
    frontend_loading_show(progress->fe, "Media", progress->name,
       stage && stage[0] ? stage : "loading", percent);
 }
@@ -6504,13 +6623,8 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
    memset(&progress, 0, sizeof(progress));
    progress.fe = fe;
    unifrog_text_copy(progress.name, sizeof(progress.name), item->name);
-   if (fe->launch_splash) {
-      if (media_path_is_audio(item->path))
-         frontend_loading_show(fe, "Now Playing", item->name,
-            "B stop  Left/Right seek", 100);
-      else
-         frontend_loading_show(fe, "Media", item->name, "loading", 20);
-   }
+   if (fe->launch_splash && !media_path_is_audio(item->path))
+      frontend_loading_show(fe, "Media", item->name, "loading", 20);
    memset(&options, 0, sizeof(options));
    options.preset = -1;
    if (fe->launch_splash && !media_path_is_audio(item->path)) {
@@ -6537,11 +6651,14 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
    ret = unifrog_media_play_video_ex(item->path, &options);
 #endif
    set_status(fe, "media returned %d", ret);
+   if (fe->ui.fb.pixels)
+      unifrog_ui_close(&fe->ui);
    (void)unifrog_ui_open(&fe->ui, 0);
    unifrog_input_clear();
    if (fe->view == FRONTEND_VIEW_OPEN_WITH ||
        fe->view == FRONTEND_VIEW_OPEN_WITH_OTHER)
       return_from_open_with(fe);
+   frontend_force_return_present(fe, "media");
 }
 
 static void launch_script(struct native_frontend *fe, struct frontend_item *item)
@@ -6570,6 +6687,7 @@ static void launch_script(struct native_frontend *fe, struct frontend_item *item
    set_status(fe, "script returned %d", ret);
    (void)unifrog_ui_open(&fe->ui, 0);
    unifrog_input_clear();
+   frontend_force_return_present(fe, "script");
 }
 
 static void launch_last_game(struct native_frontend *fe)
@@ -6979,6 +7097,8 @@ static void activate(struct native_frontend *fe)
             show_firmware_browser(fe, item.path);
          else if (fe->view == FRONTEND_VIEW_SCRIPTS)
             show_script_browser(fe, item.path);
+         else if (fe->view == FRONTEND_VIEW_MEDIA_PLAYER)
+            show_media_player(fe, item.path);
          else
             show_explore(fe, item.path);
       } else {
@@ -7041,6 +7161,13 @@ static void activate(struct native_frontend *fe)
       set_parent_view(fe);
       nav_reset(fe);
       show_script_browser(fe, FRONTEND_SCRIPT_ROOT);
+   } else if (strcmp(item.path, "media_player") == 0) {
+      const char *root = file_exists(FRONTEND_ROOT "/VIDEOS") ?
+         FRONTEND_ROOT "/VIDEOS" : FRONTEND_ROOT;
+
+      set_parent_view(fe);
+      nav_reset(fe);
+      show_media_player(fe, root);
    } else if (strcmp(item.path, "updates") == 0) {
       set_parent_view(fe);
       show_updates(fe);
@@ -7617,7 +7744,16 @@ static void loop_once(struct native_frontend *fe)
       show_rom_system_mappings(fe);
       fe->needs_draw = 1;
    }
-   if (!combo_handled && !select_down &&
+   if (!combo_handled && !select_down && fe->view == FRONTEND_VIEW_MEDIA_PLAYER &&
+       unifrog_ui_pressed(&fe->ui, UNIFROG_UI_X)) {
+      if (fe->selected < fe->item_count &&
+          fe->items[fe->selected].kind == FRONTEND_ITEM_MEDIA) {
+         set_parent_view(fe);
+         show_open_with(fe, &fe->items[fe->selected]);
+      } else {
+         set_status(fe, "select a media file");
+      }
+   } else if (!combo_handled && !select_down &&
        unifrog_ui_pressed(&fe->ui, UNIFROG_UI_X)) {
       clear_parent_view(fe);
       show_config(fe);

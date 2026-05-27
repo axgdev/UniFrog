@@ -84,7 +84,8 @@ HCRTOS_MEDIA ?= native
 FRONTEND_IMPL ?= native
 MEDIA_VIDEO_FEED_LEAD_MS ?= 500
 MEDIA_AUDIO_FEED_LEAD_MS ?= 3000
-MEDIA_VIDEO_LOWRES_KSHM_SIZE ?= 8388608
+MEDIA_VIDEO_KSHM_SIZE ?= 8388608
+MEDIA_VIDEO_LOWRES_KSHM_SIZE ?= $(MEDIA_VIDEO_KSHM_SIZE)
 MEDIA_FILE_BUFFER_SIZE ?= 65536
 MEDIA_FILE_BUFFER_MIN_SIZE ?= 16384
 MEDIA_FILE_READAHEAD_SIZE ?= 2097152
@@ -413,7 +414,6 @@ CONFIG_DEFINES := \
 	-DUNIFROG_FRONTEND_IMPL=\"$(FRONTEND_IMPL)\" \
 	-DUNIFROG_FRONTEND_NATIVE=$(if $(filter native,$(FRONTEND_IMPL)),1,0) \
 	-DUNIFROG_FRONTEND_MUOS=0 \
-	-DUNIFROG_FRONTEND_JS2300=$(if $(filter js2300,$(FRONTEND_IMPL)),1,0) \
 	-DUNIFROG_SD_MODE=\"$(SD_MODE)\" \
 	-DUNIFROG_SD_READ_MODE=\"$(SD_READ_MODE)\" \
 	-DUNIFROG_SD_FORCE_PIO=$(SD_FORCE_PIO) \
@@ -427,6 +427,7 @@ CONFIG_DEFINES := \
 	-DUNIFROG_SD_EXPERIMENTAL=$(SD_EXPERIMENTAL) \
 	-DUNIFROG_MEDIA_VIDEO_FEED_LEAD_MS=$(MEDIA_VIDEO_FEED_LEAD_MS) \
 	-DUNIFROG_MEDIA_AUDIO_FEED_LEAD_MS=$(MEDIA_AUDIO_FEED_LEAD_MS) \
+	-DUNIFROG_MEDIA_VIDEO_KSHM_SIZE=$(MEDIA_VIDEO_KSHM_SIZE) \
 	-DUNIFROG_MEDIA_VIDEO_LOWRES_KSHM_SIZE=$(MEDIA_VIDEO_LOWRES_KSHM_SIZE) \
 	-DUNIFROG_MEDIA_FILE_BUFFER_SIZE=$(MEDIA_FILE_BUFFER_SIZE) \
 	-DUNIFROG_MEDIA_FILE_BUFFER_MIN_SIZE=$(MEDIA_FILE_BUFFER_MIN_SIZE) \
@@ -584,7 +585,6 @@ JS2300_HOST_SOURCES := \
 	src/frontend/js2300_frontend.c \
 	src/frontend/js2300_frontend_actions.c \
 	src/frontend/js2300_frontend_bindings.c \
-	src/frontend/js2300_frontend_catalog.c \
 	src/frontend/js2300_frontend_storage.c
 FRONTEND_HOST_SOURCES :=
 NATIVE_FRONTEND_SOURCES := \
@@ -725,8 +725,7 @@ LIBRETRO_MODULES := \
 	fceumm:FCEUMM:fceumm:fceumm:nes\|fds:fceumm:- \
 	gearboy:GEARBOY:gearboy:gearboy:gb\|gbc:gearboy:- \
 	pce-fast:PCE_FAST:pce_fast:pce-fast:pce\|sgx\|cue\|chd:pce_fast:$(CHD_SUPPORT_CORE_LIB) \
-	qpsx:QPSX:qpsx:qpsx:bin\|iso\|img\|cue\|pbp:qpsx:- \
-	pmp-video:PMP_VIDEO:pmp_video:pmp-video:avi:pmp_video:-
+	qpsx:QPSX:qpsx:qpsx:bin\|iso\|img\|cue\|pbp:qpsx:-
 
 define LIBRETRO_MODULE_REGISTER
 $(2)_CORE_ID := $(1)
@@ -748,8 +747,6 @@ $(foreach module,$(LIBRETRO_MODULES),$(eval $(call LIBRETRO_MODULE_REGISTER,$(wo
 PCE_FAST_CORE_LIB := $(CORES)/output/pce_fast_libretro_sf2000.a
 PCE_FAST_CORE_BIN := $(CORE_PACKAGE)/pce-fast.bin
 QPSX_CORE_LIB := $(CORES)/output/pcsx4all_libretro_sf2000.a
-PMP_VIDEO_CORE_LIB := $(CORES)/output/pmp_libretro_sf2000.a
-PMP_VIDEO_CORE_BIN := $(CORE_PACKAGE)/pmp-video.bin
 LIBRETRO_CORE_VARS := $(foreach module,$(LIBRETRO_MODULES),$(word 2,$(subst :, ,$(module))))
 LIBRETRO_CORE_IDS := $(foreach var,$(LIBRETRO_CORE_VARS),$($(var)_CORE_ID))
 PACKAGE_LIBRETRO_CORE_LIBS := $(foreach var,$(LIBRETRO_CORE_VARS),$($(var)_CORE_LIB))
@@ -1020,9 +1017,9 @@ help:
 	@echo "  make HCRTOS_MEDIA=module  Keep HCRTOS media in an SD-loaded module"
 	@echo "  make HCRTOS_MEDIA=firmware  Link hcplayer/HCRTOS media into unifrog.bin"
 	@echo "  make FRONTEND_IMPL=native   Build the native frontend (default)"
-	@echo "  make FRONTEND_IMPL=native   Build the native C frontend fallback"
 	@echo "  make MEDIA_AUDIO_FEED_LEAD_MS=3000  Tune hardware audio feed lead"
-	@echo "  make MEDIA_VIDEO_LOWRES_KSHM_SIZE=8388608  Tune low-res viddec compressed ring"
+	@echo "  make MEDIA_VIDEO_KSHM_SIZE=8388608  Tune viddec compressed ring"
+	@echo "  make MEDIA_VIDEO_LOWRES_KSHM_SIZE=8388608  Override low-res viddec compressed ring"
 	@echo "  make MEDIA_FILE_READAHEAD_SIZE=2097152  Tune media SD readahead bytes"
 	@echo "  make MEDIA_VIDEO_READAHEAD_SIZE=524288  Tune video SD read window bytes"
 	@echo "  make MEDIA_VIDEO_READAHEAD_SLOTS=16  Tune retained video read windows"
@@ -1073,6 +1070,7 @@ print-config:
 	@echo "FRONTEND_IMPL=$(FRONTEND_IMPL)"
 	@echo "MEDIA_VIDEO_FEED_LEAD_MS=$(MEDIA_VIDEO_FEED_LEAD_MS)"
 	@echo "MEDIA_AUDIO_FEED_LEAD_MS=$(MEDIA_AUDIO_FEED_LEAD_MS)"
+	@echo "MEDIA_VIDEO_KSHM_SIZE=$(MEDIA_VIDEO_KSHM_SIZE)"
 	@echo "MEDIA_VIDEO_LOWRES_KSHM_SIZE=$(MEDIA_VIDEO_LOWRES_KSHM_SIZE)"
 	@echo "MEDIA_FILE_BUFFER_SIZE=$(MEDIA_FILE_BUFFER_SIZE)"
 	@echo "MEDIA_FILE_BUFFER_MIN_SIZE=$(MEDIA_FILE_BUFFER_MIN_SIZE)"
@@ -1510,7 +1508,9 @@ $(FRONTEND_PACKAGE_STAMP): \
 		$(FRONTEND_PACKAGE)/languages $(FRONTEND_PACKAGE)/archive \
 		$(FRONTEND_PACKAGE)/scripts \
 		$(FRONTEND_PACKAGE)/main.js $(FRONTEND_PACKAGE)/main.js.mqbc \
+		$(FRONTEND_PACKAGE)/quick-menu.js \
 		$(FRONTEND_PACKAGE)/bytecode-manifest.txt
+	$(Q)rm -f $(CORE_PACKAGE)/pmp-video.bin
 	$(Q)rm -rf $(USER_PACKAGE)/probes $(USER_PACKAGE)/languages \
 		$(USER_PACKAGE)/scripts
 	$(Q)mkdir -p $(FRONTEND_PACKAGE)/firmware \
@@ -1936,6 +1936,7 @@ install: fastboot-check layout-check
 	$(Q)rm -rf $(SDCARD)/unifrog/cores $(SDCARD)/unifrog/modules
 	$(Q)rm -rf $(SDCARD)/unifrog/app $(SDCARD)/unifrog/main.js \
 		$(SDCARD)/unifrog/main.js.mqbc \
+		$(SDCARD)/unifrog/quick-menu.js \
 		$(SDCARD)/unifrog/bytecode-manifest.txt
 	$(Q)cp -R $(FRONTEND_PACKAGE)/. $(SDCARD)/unifrog/
 	$(Q)cp LICENSE $(SDCARD)/unifrog/LICENSE.txt

@@ -14,8 +14,10 @@ make
 `FRONTEND_IMPL=native` is the only boot frontend. It boots through
 `src/native_frontend.c` and renders through `src/frontend_lvgl.c`. The launcher
 exposes Explore, Collection, History, Apps, Info, Config, Reboot, and Shutdown
-entries. Explore is lazy directory browsing, so entering a large system folder
-does not recursively scan the whole ROM tree.
+entries. Apps includes a native Media Player for media-only browsing and
+playback through the HCRTOS/FFmpeg media stack. Explore is lazy directory
+browsing, so entering a large system folder does not recursively scan the whole
+ROM tree.
 
 Required external frontend input:
 
@@ -29,12 +31,13 @@ MuOS, clone it outside the tracked source tree or under ignored `.deps` by
 hand. Do not add MustardOS frontend files to the UniFrog build unless we make a
 clear license and architecture decision to vendor or depend on them.
 
-The native frontend should provide:
+The native frontend provides:
 
 - LVGL display flush and tick callbacks backed by `unifrog_fb`/`unifrog_perf`.
 - Menu input backed by `unifrog_input_menu_buttons()`.
 - Path mapping to `/media/mmcblk0`, the configured ROM root, `/unifrog`, and `/unifrog_data`.
 - Launch callbacks that call `unifrog_libretro_run_path_ex()`.
+- Native media launch callbacks that call `unifrog_media_play_video_ex()`.
 - Device services for battery, backlight, reboot, standby, storage recovery,
   and log flushing through public `include/unifrog/` headers.
 - Compatibility with common MuOS `.muxthm` theme archives where practical.

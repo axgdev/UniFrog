@@ -79,11 +79,10 @@ to a full-screen 320x240 RGB565 RLE include during the build. The version text
 at the bottom is stamped from an exact git tag when available, otherwise from
 the current commit hash with a `revision` label.
 
-The default `HCRTOS_MEDIA=firmware` links the SDK FFmpeg libraries and HCRTOS
-codec plugins into the boot image. `HCRTOS_MEDIA=module` still packages
-`/unifrog/modules/hcrtos-media.bin` for loader diagnostics of the native media
-stack; frontend video playback fails safely in unsupported module builds and
-returns to the menu instead of entering known black-screen paths.
+The default `HCRTOS_MEDIA=native` uses the native FFmpeg/HCRTOS media path.
+`HCRTOS_MEDIA=module` still packages `/unifrog/modules/hcrtos-media.bin` for
+loader diagnostics; frontend video playback fails safely in unsupported module
+builds and returns to the menu instead of entering known black-screen paths.
 
 The SD-card package also installs `LICENSE.txt` and `THIRD_PARTY.md` under
 `/unifrog`. Keep `THIRD_PARTY.md` current whenever adding, removing, or
@@ -117,19 +116,18 @@ next to the SoC, DRAM, backlight, audio, and emulator load, so 1.8 V is not
 expected to be a meaningful heat or battery win on this board. If a ROM load
 stalls while using an experimental runtime profile, the load watchdog attempts
 to restore the boot storage profile once before showing the core hang screen.
-Developer -> Storage test runs a quick guarded runtime sweep:
-it buffers logs, shows progress on screen, prefers `/ROMS/test.md` when
-present, verifies a safe remount first, switches profiles through the SD bus
-suspend/resume hooks, tries the low-speed 4-bit `wide1`, `wide2`, `wide4`,
-and `wide8` profiles, then restores the boot profile before writing
-`/unifrog/storage-test-result.txt` and the on-device report. Developer ->
-Storage full test uses `/ROMS/probes/test*.md`, restores the boot profile after
-each experimental read, and checkpoints
-`/unifrog/storage-full-test-result.txt` between modes. Developer -> Storage
-mode test selects one profile, switches once, runs all probes, then restores
-the boot profile and writes `/unifrog/storage-mode-test-result.txt`. The on-screen
-stage is the best freeze clue; warm reboot diagnostics may also keep it, but a
-full power cycle can overwrite that memory. Fixed-profile diagnostic boot
+Developer -> Storage test buffers logs, shows progress on screen, prefers
+`/ROMS/test.md` when present, and writes `/unifrog/storage-test-result.txt` plus
+the on-device report. Default `SD_MODE=wide20` builds test the boot profile;
+`SD_MODE=safe` builds enable guarded runtime sweeps through the SD bus
+suspend/resume hooks. Developer -> Storage full test uses
+`/ROMS/probes/test*.md`, restores the boot profile after each experimental read,
+and checkpoints `/unifrog/storage-full-test-result.txt` between modes.
+Developer -> Storage mode test selects one profile, switches once, runs all
+probes, then restores the boot profile and writes
+`/unifrog/storage-mode-test-result.txt`. The on-screen stage is the best freeze
+clue; warm reboot diagnostics may also keep it, but a full power cycle can
+overwrite that memory. Fixed-profile diagnostic boot
 builds are still available with `SD_MODE=safe`, `wide1`, `wide2`, `wide4`,
 `wide8`, `wide10`, `wide12`, `wide14`, `wide16`, `wide18`, `wide20`,
 `wide22`, `wide24`, `wide25`, `wide37`, `hs1`, `wide50`, `wide`, `uhs12`,

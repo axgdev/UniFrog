@@ -118,9 +118,11 @@ Set these in `config.mk` or on the `make` command line:
 - `MEDIA_VIDEO_READAHEAD_SIZE`: bytes per physical video read window.
 - `MEDIA_VIDEO_READAHEAD_SLOTS`: number of retained video windows, capped in
   code at `16`.
-- `MEDIA_VIDEO_LOWRES_KSHM_SIZE`: video decoder compressed KSHM ring size used
-  for streams at or below 640x360. The default is 8 MiB; high-resolution streams
-  still use the 16 MiB ring.
+- `MEDIA_VIDEO_KSHM_SIZE`: default video decoder compressed KSHM ring size. The
+  default is 8 MiB so high-resolution decode leaves more memory for decoded
+  surfaces and SD readahead.
+- `MEDIA_VIDEO_LOWRES_KSHM_SIZE`: optional override for streams at or below
+  640x360. By default it matches `MEDIA_VIDEO_KSHM_SIZE`.
 - `MEDIA_AUDIO_FEED_LEAD_MS`: hardware-audio feed lead used by audio-only and
   native video playback. The default is 3000 ms.
 - `MEDIA_VIDEO_PREFILL_TARGET_MS`: target media time for startup prefill.

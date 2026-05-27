@@ -59,6 +59,7 @@ If you copy or remove files in those locations, Unifrog updates with them.
 ### Apps and scripts
 
 - Open built-in tools and helper screens.
+- Browse and play videos, music, and images from Apps -> Media Player.
 - Run optional local scripts stored on the SD card.
 - Keep scripted actions separate from core launcher content.
 

@@ -2,7 +2,7 @@
 
 This document describes the SF2000 media-capable layout used by UniFrog. It is
 separate from the generic memory notes because the video decoder has stricter
-physical-memory requirements than libretro cores and JavaScript UI code.
+physical-memory requirements than libretro cores and optional scripts.
 
 ## Physical RAM Split
 
@@ -76,12 +76,12 @@ This preserves the useful part of the old behavior: playback does not reserve a
 large compressed-stream ring forever. The part that must be reserved is only the
 media hardware's decoded-surface pool.
 
-Current native playback sizes are 16 MiB for the high-resolution video
-compressed ring, 8 MiB for streams at or below 640x360, and `0xa0000` bytes for
-the audio compressed ring. File IO buffering is separate from these driver
-rings. The low-resolution video ring is intentionally smaller because those
-compressed packets do not need a 16 MiB ring, and the saved normal heap lets the
-post-probe SD cache keep its full retained window set.
+Current native playback sizes are 8 MiB for the default video compressed ring
+and `0xa0000` bytes for the audio compressed ring. File IO buffering is separate
+from these driver rings. The video ring is intentionally bounded because MP4
+compressed packets do not need the full 16 MiB DTS value, and the saved normal
+heap leaves more room for high-resolution decoded surfaces and the post-probe
+SD cache.
 
 ## Application Arena Contract
 

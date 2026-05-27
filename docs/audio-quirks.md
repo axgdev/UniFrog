@@ -181,9 +181,9 @@ For the current device route contract and GB300 hardware-decoder gotchas, see
   and more robust than resolution-specific audio pacing. Video readahead is a
   small multi-window cache with a bounded startup prefill. Native video
   allocates that cache after the audio/video decoder KSHM setup so it cannot
-  starve hardware decode. Low-resolution video also uses a smaller video KSHM
-  ring via `MEDIA_VIDEO_LOWRES_KSHM_SIZE` to leave heap for that cache. For
-  slower cards, tune
+  starve hardware decode. The video KSHM ring defaults to a bounded 8 MiB via
+  `MEDIA_VIDEO_KSHM_SIZE`, with `MEDIA_VIDEO_LOWRES_KSHM_SIZE` available only
+  as a low-resolution override. For slower cards, tune
   `MEDIA_VIDEO_PREFILL_MAX_BYTES`; for no-stutter small-video playback,
   optionally set `MEDIA_VIDEO_PRELOAD_MAX_BYTES`. See
   `docs/media-buffering-algorithm.md`.

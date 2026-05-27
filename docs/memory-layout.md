@@ -25,7 +25,6 @@ The application arena is for one active high-level guest at a time:
 
 - a libretro core image, BSS, and fixed work buffers
 - or a JavaScript/script runtime when no game core is running
-- or the JavaScript quick menu while a game core is suspended
 - or scratch buffers owned by a loader step
 
 On exit, UniFrog can wipe or reuse the whole arena. Nothing needed to redraw the
@@ -58,11 +57,11 @@ HCRTOS KSHM is separate from decoded frame memory. Because the DTS does not
 define a named `kshm` MMZ pool, KSHM falls back to normal aligned heap
 allocation for compressed packet rings while playback is active and releases
 them when `VIDDEC_RLS`/`AUDDEC_RLS` runs. The media DTS advertises a 16 MiB
-`viddec.kshm_size`; native video keeps that size for high-resolution streams
-and requests an 8 MiB compressed ring for streams at or below 640x360. Native
-audio currently opens `/dev/auddec` with the stock-style `0xa0000` compressed
-ring used by HCRTOS cast examples. These rings are dynamic playback
-allocations, not permanent DTS reservations.
+`viddec.kshm_size`, but native video defaults to an 8 MiB compressed ring so
+high-resolution decode leaves more normal heap available for decoded surfaces
+and SD readahead. Native audio currently opens `/dev/auddec` with the
+stock-style `0xa0000` compressed ring used by HCRTOS cast examples. These rings
+are dynamic playback allocations, not permanent DTS reservations.
 
 UniFrog media playback uses streaming buffers instead of loading the whole file
 into memory. The native FFmpeg custom AVIO buffer is intentionally a small
