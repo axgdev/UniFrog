@@ -6,6 +6,11 @@ TOOLCHAIN_URL ?= https://github.com/axgdev/frog-toolchain/releases/download/v1.1
 CROSS_COMPILE ?= $(TOOLCHAIN)/bin/mipsel-mti-elf-
 DEPS ?= .deps
 UNIFROG_DEPS_REPO_URL ?= git@github.com:axgdev/unifrog-deps.git
+ifneq ($(filter git@% ssh://% https://% http://% file://%,$(UNIFROG_DEPS_REPO_URL)),)
+UNIFROG_DEPS_FETCH_URL := $(UNIFROG_DEPS_REPO_URL)
+else
+UNIFROG_DEPS_FETCH_URL := $(abspath $(UNIFROG_DEPS_REPO_URL))
+endif
 DEP_SOURCE ?= auto
 DEP_CHECKOUT ?= sparse
 DEP_DEPTH ?= 1
@@ -723,7 +728,7 @@ CORE_MAKE_ARGS := \
 	TOOLCHAIN=$(TOOLCHAIN) \
 	CROSS_COMPILE=$(CROSS_COMPILE) \
 	SDK=$(abspath $(SDK)) \
-	UNIFROG_DEPS_REPO_URL=$(UNIFROG_DEPS_REPO_URL) \
+	UNIFROG_DEPS_REPO_URL=$(UNIFROG_DEPS_FETCH_URL) \
 	DEP_SOURCE=$(DEP_SOURCE) \
 	DEP_CHECKOUT=$(DEP_CHECKOUT) \
 	DEP_DEPTH=$(DEP_DEPTH) \
@@ -920,6 +925,17 @@ CORE_REV_STAMP := $(BUILD)/core-config.stamp
 SDK_BUILD_STAMP := $(BUILD)/sdk-build.stamp
 SDK_KERNEL_LIB := $(SDK)/lib/core/libkernel.a
 HCRTOS_FFMPEG_STAMP := $(HCRTOS_FFMPEG_INSTALL)/.unifrog-ffmpeg.stamp
+HCRTOS_FFMPEG_SOURCE_CONFIG := $(BUILD)/hcrtos-ffmpeg-source.stamp
+HCRTOS_FFMPEG_SOURCE_STAMP := $(HCRTOS_FFMPEG_SOURCE)/.git/unifrog-source.stamp
+HCRTOS_FFMPEG_SOURCE_TOKEN := $(shell { \
+	printf '%s\n' 'DEP_SOURCE=$(DEP_SOURCE)' \
+		'DEP_DEPTH=$(DEP_DEPTH)' \
+		'UNIFROG_DEPS_FETCH_URL=$(UNIFROG_DEPS_FETCH_URL)' \
+		'HCRTOS_FFMPEG_URL=$(HCRTOS_FFMPEG_URL)' \
+		'HCRTOS_FFMPEG_REF=$(HCRTOS_FFMPEG_REF)' \
+		'HCRTOS_FFMPEG_DEPS_BRANCH=$(HCRTOS_FFMPEG_DEPS_BRANCH)' \
+		'HCRTOS_FFMPEG_DEPS_COMMIT=$(HCRTOS_FFMPEG_DEPS_COMMIT)'; \
+} | cksum | awk '{print $$1}')
 JS2300_CONFIG_STAMP := $(BUILD)/js2300-config.stamp
 FRONTEND_CONFIG_STAMP := $(BUILD)/frontend-config.stamp
 FRONTEND_PACKAGE_STAMP := $(FRONTEND_PACKAGE)/.package.$(FRONTEND_CONFIG_TOKEN).stamp
@@ -967,6 +983,9 @@ $(JS2300_CONFIG_STAMP): FORCE | $(BUILD)
 $(FRONTEND_CONFIG_STAMP): FORCE | $(BUILD)
 	$(Q)$(call update-token-stamp,FRONTEND_CONFIG_TOKEN=$(FRONTEND_CONFIG_TOKEN))
 
+$(HCRTOS_FFMPEG_SOURCE_CONFIG): FORCE | $(BUILD)
+	$(Q)$(call update-token-stamp,HCRTOS_FFMPEG_SOURCE_TOKEN=$(HCRTOS_FFMPEG_SOURCE_TOKEN))
+
 $(DEVICE_OBJECTS): $(BUILD_CONFIG_STAMP)
 $(FASTBOOT_OBJECTS): $(FASTBOOT_CONFIG_STAMP)
 
@@ -986,7 +1005,7 @@ ADVANCED_TARGETS := sdk dtb lib fastboot fastboot-only size ci-deps ci-smoke-dep
 all: $(ASD) sdcard-package
 setup: deps
 setup-min: deps-sdk deps-mquickjs deps-lvgl deps-ffmpeg ffmpeg deps-support
-setup-cores: deps-sdk deps-mquickjs deps-lvgl deps-ffmpeg ffmpeg deps-support deps-cores
+setup-cores: deps-sdk deps-mquickjs deps-lvgl deps-ffmpeg ffmpeg deps-cores
 
 verify:
 	$(Q)$(MAKE) --no-print-directory quick-check
@@ -1097,6 +1116,7 @@ print-config:
 	@echo "SDK=$(SDK)"
 	@echo "DEPS=$(DEPS)"
 	@echo "UNIFROG_DEPS_REPO_URL=$(UNIFROG_DEPS_REPO_URL)"
+	@echo "UNIFROG_DEPS_FETCH_URL=$(UNIFROG_DEPS_FETCH_URL)"
 	@echo "DEP_SOURCE=$(DEP_SOURCE)"
 	@echo "DEP_CHECKOUT=$(DEP_CHECKOUT)"
 	@echo "DEP_DEPTH=$(DEP_DEPTH)"
@@ -1207,12 +1227,12 @@ deps-mquickjs:
 	if test "$(DEP_SOURCE)" != upstream; then \
 		if test -d "$(MQUICKJS_DIR)/.git"; then \
 			echo "  FETCH   $(MQUICKJS_DIR) managed"; \
-			git -C "$(MQUICKJS_DIR)" remote set-url origin "$(UNIFROG_DEPS_REPO_URL)"; \
+			git -C "$(MQUICKJS_DIR)" remote set-url origin "$(UNIFROG_DEPS_FETCH_URL)"; \
 		else \
-			echo "  CLONE   $(UNIFROG_DEPS_REPO_URL)"; \
+			echo "  CLONE   $(UNIFROG_DEPS_FETCH_URL)"; \
 			rm -rf "$(MQUICKJS_DIR)"; \
 			git init -q "$(MQUICKJS_DIR)"; \
-			git -C "$(MQUICKJS_DIR)" remote add origin "$(UNIFROG_DEPS_REPO_URL)"; \
+			git -C "$(MQUICKJS_DIR)" remote add origin "$(UNIFROG_DEPS_FETCH_URL)"; \
 			fresh=1; \
 		fi; \
 		deps_ref="$(MQUICKJS_DEPS_BRANCH)"; \
@@ -1265,12 +1285,12 @@ deps-lvgl:
 	if test "$(DEP_SOURCE)" != upstream; then \
 		if test -d "$(LVGL_DIR)/.git"; then \
 			echo "  FETCH   $(LVGL_DIR) managed"; \
-			git -C "$(LVGL_DIR)" remote set-url origin "$(UNIFROG_DEPS_REPO_URL)"; \
+			git -C "$(LVGL_DIR)" remote set-url origin "$(UNIFROG_DEPS_FETCH_URL)"; \
 		else \
-			echo "  CLONE   $(UNIFROG_DEPS_REPO_URL)"; \
+			echo "  CLONE   $(UNIFROG_DEPS_FETCH_URL)"; \
 			rm -rf "$(LVGL_DIR)"; \
 			git init -q "$(LVGL_DIR)"; \
-			git -C "$(LVGL_DIR)" remote add origin "$(UNIFROG_DEPS_REPO_URL)"; \
+			git -C "$(LVGL_DIR)" remote add origin "$(UNIFROG_DEPS_FETCH_URL)"; \
 			fresh=1; \
 		fi; \
 		deps_ref="$(LVGL_DEPS_BRANCH)"; \
@@ -1313,7 +1333,9 @@ deps-lvgl:
 		git -C "$(LVGL_DIR)" clean -fdx -q; \
 	fi
 
-deps-ffmpeg: $(HCRTOS_FFMPEG_PATCHES)
+deps-ffmpeg: $(HCRTOS_FFMPEG_SOURCE_STAMP)
+
+$(HCRTOS_FFMPEG_SOURCE_STAMP): $(HCRTOS_FFMPEG_SOURCE_CONFIG) $(HCRTOS_FFMPEG_PATCHES) Makefile
 	@mkdir -p "$(dir $(HCRTOS_FFMPEG_SOURCE))"
 	@fresh=0; \
 	source_used=upstream; \
@@ -1324,12 +1346,12 @@ deps-ffmpeg: $(HCRTOS_FFMPEG_PATCHES)
 	if test "$(DEP_SOURCE)" != upstream; then \
 		if test -d "$(HCRTOS_FFMPEG_SOURCE)/.git"; then \
 			echo "  FETCH   $(HCRTOS_FFMPEG_SOURCE) managed"; \
-			git -C "$(HCRTOS_FFMPEG_SOURCE)" remote set-url origin "$(UNIFROG_DEPS_REPO_URL)"; \
+			git -C "$(HCRTOS_FFMPEG_SOURCE)" remote set-url origin "$(UNIFROG_DEPS_FETCH_URL)"; \
 		else \
-			echo "  CLONE   $(UNIFROG_DEPS_REPO_URL)"; \
+			echo "  CLONE   $(UNIFROG_DEPS_FETCH_URL)"; \
 			rm -rf "$(HCRTOS_FFMPEG_SOURCE)"; \
 			git init -q "$(HCRTOS_FFMPEG_SOURCE)"; \
-			git -C "$(HCRTOS_FFMPEG_SOURCE)" remote add origin "$(UNIFROG_DEPS_REPO_URL)"; \
+			git -C "$(HCRTOS_FFMPEG_SOURCE)" remote add origin "$(UNIFROG_DEPS_FETCH_URL)"; \
 			fresh=1; \
 		fi; \
 		deps_ref="$(HCRTOS_FFMPEG_DEPS_BRANCH)"; \
@@ -1374,11 +1396,12 @@ deps-ffmpeg: $(HCRTOS_FFMPEG_PATCHES)
 	fi; \
 	if test "$$source_used" = upstream; then \
 		git -C "$(HCRTOS_FFMPEG_SOURCE)" apply "$(abspath patches/hcrtos-ffmpeg-compat.patch)"; \
-	fi
+	fi; \
+	touch "$@"
 
 ffmpeg: $(HCRTOS_FFMPEG_STAMP)
 
-$(HCRTOS_FFMPEG_STAMP): deps-ffmpeg Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
+$(HCRTOS_FFMPEG_STAMP): $(HCRTOS_FFMPEG_SOURCE_STAMP) Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
 	@test -f "$(HCRTOS_FFMPEG_SOURCE)/configure" || { echo "missing HCRTOS FFmpeg source: $(HCRTOS_FFMPEG_SOURCE)"; exit 1; }
 	@echo "  FFMPEG  configure"
 	$(Q)rm -rf "$(BUILD)/hcrtos-ffmpeg" "$(HCRTOS_FFMPEG_INSTALL)"

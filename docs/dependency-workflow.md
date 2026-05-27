@@ -12,7 +12,7 @@ The preferred dependency mirror is:
 git@github.com:axgdev/unifrog-deps.git
 ```
 
-Each dependency lives on a full-tree snapshot branch:
+Each dependency lives on a sparse snapshot branch:
 
 ```text
 deps/<name>/<upstream-label>
@@ -26,14 +26,17 @@ deps/libretro-common/e2e3eccfd245
 deps/ffmpeg/n4.4.7
 ```
 
-The branch is the UniFrog-ready dependency tree. It may include the small local
-changes that used to be applied as patches. Do not force-push a branch after
-other developers may have fetched it. Create a new branch for a new upstream
-base or a meaningful integration change, then update the pin in the manifest.
+The branch is the UniFrog-ready dependency subset, not a full upstream mirror.
+It intentionally carries only the files needed by the default build so
+`unifrog-deps` stays small. It may include the small local changes that used to
+be applied as patches. Do not force-push a branch after other developers may
+have fetched it. Create a new branch for a new upstream base or a meaningful
+integration change, then update the pin in the manifest.
 
-`cores/manifest.mk` still records the original upstream URL and upstream commit.
-That keeps provenance visible without carrying separate `upstream/<name>`
-branches in the managed repo.
+`cores/manifest.mk` still records the original upstream URL and upstream commit,
+and the root `Makefile` does the same for root-level dependencies such as
+MQuickJS, LVGL, and FFmpeg. That keeps provenance visible without carrying
+separate `upstream/<name>` branches in the managed repo.
 
 ## Fetch Modes
 
@@ -56,8 +59,18 @@ make setup DEP_CHECKOUT=full DEP_DEPTH=0
 ```
 
 `DEP_CHECKOUT=sparse` keeps local checkouts small. `DEP_CHECKOUT=full` keeps the
-whole dependency tree for development. `DEP_DEPTH=1` is shallow by default;
-`DEP_DEPTH=0` fetches normal history.
+whole dependency tree for development when fetching from upstream. The managed
+`unifrog-deps` branches remain sparse snapshots by design. `DEP_DEPTH=1` is
+shallow by default; `DEP_DEPTH=0` fetches normal history.
+
+A local sibling dependency repo is supported for fast iteration:
+
+```sh
+make setup-cores UNIFROG_DEPS_REPO_URL=../unifrog-deps DEP_SOURCE=unifrog
+```
+
+Relative local paths are resolved before the root Makefile recurses into
+`cores/`, so the same override works from the root build.
 
 ## Selected Cores
 

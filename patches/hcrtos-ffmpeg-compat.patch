@@ -43,6 +43,13 @@ index 7f3bf5a..e3a5b44 100755
 -        warn 'generic cpu selected'
 +        # Disable DSP stuff for generic CPU, it can't be detected at runtime.
      fi
+diff --git a/Makefile b/Makefile
+--- a/Makefile
++++ b/Makefile
+@@ -176,0 +177 @@ check: all alltools examples testprogs fate
++ifneq (,$(filter check fate% testprogs,$(MAKECMDGOALS)))
+@@ -177,0 +179 @@ include $(SRC_PATH)/tests/Makefile
++endif
 diff --git a/libavcodec/avcodec.h b/libavcodec/avcodec.h
 index 62f4c9f..86ea91e 100644
 --- a/libavcodec/avcodec.h

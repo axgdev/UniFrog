@@ -7,6 +7,11 @@ CCACHE_PREFIX := $(if $(CCACHE),$(CCACHE) )
 Q := $(if $(V),,@)
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
 UNIFROG_DEPS_REPO_URL ?= git@github.com:axgdev/unifrog-deps.git
+ifneq ($(filter git@% ssh://% https://% http://% file://%,$(UNIFROG_DEPS_REPO_URL)),)
+UNIFROG_DEPS_FETCH_URL := $(UNIFROG_DEPS_REPO_URL)
+else
+UNIFROG_DEPS_FETCH_URL := $(abspath $(UNIFROG_DEPS_REPO_URL))
+endif
 DEP_SOURCE ?= auto
 DEP_CHECKOUT ?= sparse
 DEP_DEPTH ?= 1
@@ -334,6 +339,7 @@ print-config:
 	@echo "CORE_SOURCE_ROOT=$(CORE_SOURCE_ROOT)"
 	@echo "CORE_SUPPORT_ROOT=$(CORE_SUPPORT_ROOT)"
 	@echo "UNIFROG_DEPS_REPO_URL=$(UNIFROG_DEPS_REPO_URL)"
+	@echo "UNIFROG_DEPS_FETCH_URL=$(UNIFROG_DEPS_FETCH_URL)"
 	@echo "DEP_SOURCE=$(DEP_SOURCE)"
 	@echo "DEP_CHECKOUT=$(DEP_CHECKOUT)"
 	@echo "DEP_DEPTH=$(DEP_DEPTH)"
@@ -373,12 +379,12 @@ support-init:
 			source_used=upstream; \
 			if test "$(DEP_SOURCE)" != upstream; then \
 				if test -d "$$dir/.git"; then \
-					git -C "$$dir" remote set-url origin "$(UNIFROG_DEPS_REPO_URL)"; \
+					git -C "$$dir" remote set-url origin "$(UNIFROG_DEPS_FETCH_URL)"; \
 				else \
-					echo "  CLONE   support/$$name $(UNIFROG_DEPS_REPO_URL)"; \
+					echo "  CLONE   support/$$name $(UNIFROG_DEPS_FETCH_URL)"; \
 					rm -rf "$$dir"; \
 					git init -q "$$dir"; \
-					git -C "$$dir" remote add origin "$(UNIFROG_DEPS_REPO_URL)"; \
+					git -C "$$dir" remote add origin "$(UNIFROG_DEPS_FETCH_URL)"; \
 					fresh=1; \
 				fi; \
 				deps_ref="$$deps_branch"; \
@@ -472,12 +478,12 @@ core-init:
 			source_used=upstream; \
 			if test "$(DEP_SOURCE)" != upstream; then \
 				if test -d "$$dir/.git"; then \
-					git -C "$$dir" remote set-url origin "$(UNIFROG_DEPS_REPO_URL)"; \
+					git -C "$$dir" remote set-url origin "$(UNIFROG_DEPS_FETCH_URL)"; \
 				else \
-					echo "  CLONE   $$name $(UNIFROG_DEPS_REPO_URL)"; \
+					echo "  CLONE   $$name $(UNIFROG_DEPS_FETCH_URL)"; \
 					rm -rf "$$dir"; \
 					git init -q "$$dir"; \
-					git -C "$$dir" remote add origin "$(UNIFROG_DEPS_REPO_URL)"; \
+					git -C "$$dir" remote add origin "$(UNIFROG_DEPS_FETCH_URL)"; \
 					fresh=1; \
 				fi; \
 				deps_ref="$$deps_branch"; \
