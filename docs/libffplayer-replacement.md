@@ -126,9 +126,10 @@ For source-level SDK behavior clues, inspect:
   between active audio/video file regions.
   Startup buffering is controlled by `MEDIA_VIDEO_PREFILL_*`, and optional
   full-file preload for small videos is controlled by
-  `MEDIA_VIDEO_PRELOAD_MAX_BYTES`. Low-resolution video can also tune
-  `MEDIA_VIDEO_LOWRES_KSHM_SIZE` to trade viddec compressed-ring depth for more
-  normal heap available to the SD cache. The framebuffer progress/seek overlay
+  `MEDIA_VIDEO_PRELOAD_MAX_BYTES`. Native video can also tune
+  `MEDIA_VIDEO_KSHM_SIZE` to trade viddec compressed-ring depth for more normal
+  heap available to decoded surfaces and the SD cache; `MEDIA_VIDEO_LOWRES_KSHM_SIZE`
+  can override that for low-resolution streams. The framebuffer progress/seek overlay
   is always present during native media playback and can be hidden or shown with
   `A`; routine overlay refreshes avoid framebuffer panning and per-refresh logs
   so the graphics layer is quieter during playback. Set these in `config.mk`

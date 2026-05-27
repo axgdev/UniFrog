@@ -92,8 +92,11 @@
 #ifndef UNIFROG_MEDIA_AUDIO_FEED_LEAD_MS
 #define UNIFROG_MEDIA_AUDIO_FEED_LEAD_MS 3000
 #endif
+#ifndef UNIFROG_MEDIA_VIDEO_KSHM_SIZE
+#define UNIFROG_MEDIA_VIDEO_KSHM_SIZE 0x00800000u
+#endif
 #ifndef UNIFROG_MEDIA_VIDEO_LOWRES_KSHM_SIZE
-#define UNIFROG_MEDIA_VIDEO_LOWRES_KSHM_SIZE 0x00800000u
+#define UNIFROG_MEDIA_VIDEO_LOWRES_KSHM_SIZE UNIFROG_MEDIA_VIDEO_KSHM_SIZE
 #endif
 #ifndef UNIFROG_MEDIA_FILE_BUFFER_SIZE
 #define UNIFROG_MEDIA_FILE_BUFFER_SIZE 65536
@@ -254,7 +257,7 @@
 #define MEDIA_GB300_I2SO_PRIME_NONE 0
 #define MEDIA_GB300_I2SO_PRIME_BEFORE_INIT 1
 #define MEDIA_GB300_I2SO_PRIME_AFTER_START 2
-#define MEDIA_VIDEO_KSHM_SIZE 0x01000000u
+#define MEDIA_VIDEO_KSHM_SIZE ((unsigned)UNIFROG_MEDIA_VIDEO_KSHM_SIZE)
 #define MEDIA_VIDEO_LOWRES_KSHM_SIZE \
    ((unsigned)UNIFROG_MEDIA_VIDEO_LOWRES_KSHM_SIZE)
 #define MEDIA_VIDEO_LOWRES_MAX_PIXELS (640u * 360u)
@@ -4373,8 +4376,8 @@ static void media_flush_auddec_for_seek(struct media_auddec *auddec,
 static void media_flush_viddec_for_seek(int video_fd, const char *tag,
    const char *path)
 {
-   float rate = unifrog_audio_prefers_stereo_output() ? 1.0f : 0.0f;
-   int rate_milli = rate > 0.5f ? 1000 : 0;
+   float rate = 1.0f;
+   int rate_milli = 1000;
    int pause_ret = -1;
    int flush_ret = -1;
    int start_ret = -1;
@@ -6296,17 +6299,19 @@ static int media_video_is_lowres_stream(const AVCodecParameters *par)
 static unsigned media_video_kshm_size_for_stream(
    const AVCodecParameters *par, const char **policy_out)
 {
+   unsigned size = MEDIA_VIDEO_KSHM_SIZE;
    unsigned lowres_size = MEDIA_VIDEO_LOWRES_KSHM_SIZE;
 
    if (policy_out)
       *policy_out = "default";
+   if (size == 0)
+      size = 0x00800000u;
    if (!media_video_is_lowres_stream(par))
-      return MEDIA_VIDEO_KSHM_SIZE;
-   if (lowres_size == 0 || lowres_size > MEDIA_VIDEO_KSHM_SIZE)
-      lowres_size = MEDIA_VIDEO_KSHM_SIZE;
-   if (policy_out)
-      *policy_out = lowres_size < MEDIA_VIDEO_KSHM_SIZE ?
-         "lowres" : "default";
+      return size;
+   if (lowres_size == 0 || lowres_size > size)
+      lowres_size = size;
+   if (policy_out && lowres_size < size)
+      *policy_out = "lowres";
    return lowres_size;
 }
 
@@ -7171,14 +7176,14 @@ static int media_play_native_video(const char *path,
       video_feed_lead_ms = audio_feed_lead_ms;
    if (video_freerun && audio_enabled)
       printf("unifrog media native video forcing freerun due to software audio path\n");
-   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d audio_output_ch=%u video_feed_lead_ms=%u audio_feed_lead_ms=%u duration=%lld overlay=1 overlay_hide=A video_max_hw_ahead_ms=%u audio_max_hw_ahead_ms=%u hw_ahead_max_wait_ms=%u video_stuck_behind_ms=%u video_stall_recover_ms=%u video_recover_gap_ms=%u seek_catchup=%s seek_keyframe=%d seek_settle_ms=0 seek_video_warmup=%u seek_recover_warmup=%u preroll_limit=%lld preroll_key_max=%d seek_supersede=1 seek_avsync=keyframe\n",
+   printf("unifrog media native video clock freerun=%d disable_audio=%d auddec=%d auddec_freerun=%d audio_enabled=%d audio_output_ch=%u video_feed_lead_ms=%u audio_feed_lead_ms=%u duration=%lld overlay=1 overlay_hide=A video_max_hw_ahead_ms=%u audio_max_hw_ahead_ms=%u hw_ahead_max_wait_ms=%u video_stuck_behind_ms=%u video_stall_recover_ms=%u video_recover_gap_ms=%u seek_packet_policy=%s seek_keyframe=%d seek_settle_ms=0 seek_video_warmup=%u seek_recover_warmup=%u preroll_limit=%lld preroll_key_max=%d seek_supersede=1 seek_avsync=keyframe\n",
       video_freerun, disable_audio, auddec.fd >= 0, auddec.freerun,
       audio_enabled, audio_output_channels, video_feed_lead_ms, audio_feed_lead_ms,
       (long long)duration_ms, MEDIA_VIDEO_MAX_HW_AHEAD_MS,
       MEDIA_AUDIO_MAX_HW_AHEAD_MS, MEDIA_HW_AHEAD_MAX_WAIT_MS,
       MEDIA_VIDEO_STUCK_BEHIND_MS, MEDIA_VIDEO_STALL_RECOVER_MS,
       MEDIA_VIDEO_RECOVER_GAP_MS,
-      MEDIA_SEEK_ACCELERATE_FRAMES ? "accelerate" : "skip",
+      MEDIA_SEEK_ACCELERATE_FRAMES ? "accelerate" : "drop_to_anchor",
       seek_video_require_keyframe,
       MEDIA_SEEK_VIDEO_WARMUP_PACKETS,
       MEDIA_SEEK_VIDEO_RECOVER_WARMUP_PACKETS,
@@ -9453,6 +9458,9 @@ int unifrog_media_play_video_ex(const char *path,
       return -1;
    media_sd_read_recover_stale("play_start");
    old_log_auto_flush = unifrog_log_auto_flush_bytes();
+   printf("unifrog media launch stack=native path=%s audio_only=%d image=%d force_native=%d force_ffmpeg=%d\n",
+      path, audio_only, image_file, force_native, force_ffmpeg);
+   (void)unifrog_log_flush();
    media_disk_suspend_begin("media_session", path);
    unifrog_log_set_auto_flush_bytes(VIDEO_LOG_AUTO_FLUSH_BYTES);
    printf("unifrog media start stack=native path=%s audio_only=%d image=%d force_native=%d force_ffmpeg=%d\n",
@@ -9531,6 +9539,9 @@ int unifrog_media_play_video_ex(const char *path,
       return -1;
    media_sd_read_recover_stale("play_start");
    old_log_auto_flush = unifrog_log_auto_flush_bytes();
+   printf("unifrog media launch stack=hcplayer path=%s audio_only=%d image=%d\n",
+      path, audio_only, image_file);
+   (void)unifrog_log_flush();
    media_disk_suspend_begin("media_session", path);
    unifrog_log_set_auto_flush_bytes(VIDEO_LOG_AUTO_FLUSH_BYTES);
    printf("unifrog media start path=%s audio_only=%d image=%d\n",

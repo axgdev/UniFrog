@@ -70,9 +70,10 @@
   playback prebuffer.
 - Native FFmpeg demux now opens video files through a custom `AVIOContext`
   and logs read/seek statistics on close.
-- Native viddec requests a 16 MiB KSHM buffer for high-resolution streams,
-  matching the SF2000 DTS `viddec.kshm_size = <0x1000000>`. Streams at or below
-  640x360 request 8 MiB so the SD read cache can keep its full window set.
+- Native viddec defaults to an 8 MiB KSHM buffer even though the SF2000 DTS
+  advertises `viddec.kshm_size = <0x1000000>`. Keeping the compressed ring
+  bounded leaves more normal heap available for decoded surfaces and the SD
+  read cache.
 - The same logs still show `decoded=0 displayed=0` for 720p and 1080p native
   attempts. If that persists with the larger buffers, investigate quick-mode
   behavior and 1080p/profile/MMZ requirements separately from SD refill.
@@ -119,8 +120,9 @@
   close to underrun.
 - Native playback now uses one conservative audio feed lead for audio-only and
   all video resolutions: `MEDIA_AUDIO_FEED_LEAD_MS=3000`. This removes the
-  low-resolution-only audio lead branch while keeping `MEDIA_VIDEO_LOWRES_KSHM_SIZE`
-  as the low-res memory pressure optimization.
+  low-resolution-only audio lead branch. `MEDIA_VIDEO_KSHM_SIZE` is the default
+  viddec compressed-ring knob, while `MEDIA_VIDEO_LOWRES_KSHM_SIZE` can still
+  override low-resolution streams.
 - The screen scramble/stale black-bar symptom matched a display handoff issue:
   `/dev/viddec` made the video layer visible before the first displayable frame
   (`decoded=0 displayed=0 show=0`). UniFrog now clears the framebuffer after
