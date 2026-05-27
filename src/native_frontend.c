@@ -16,6 +16,8 @@
 
 #include <frontend/js2300_frontend.h>
 
+#include <unifrog_default_options.h>
+
 #include <unifrog/backlight.h>
 #include <unifrog/audio.h>
 #include <unifrog/battery.h>
@@ -7781,28 +7783,46 @@ int unifrog_native_frontend_main(void)
    ensure_data_dirs();
    unifrog_battery_status_init(&fe.battery);
    unifrog_libretro_run_options_init(&fe.run_options);
-   fe.run_options.audio_enabled = 1;
-   fe.run_options.audio_gain = 1;
-   fe.run_options.scpu_mhz = 702;
-   fe.run_options.ge_clock = -1;
-   fe.run_options.backlight_level = -1;
-   fe.run_options.frameskip = UNIFROG_LIBRETRO_FRAMESKIP_AUTO;
-   fe.run_options.display_mode = UNIFROG_LIBRETRO_DISPLAY_FIT;
-   fe.mixed_content = 1;
-   fe.display_empty_folder = 1;
-   fe.menu_counter_folder = 1;
-   fe.menu_counter_file = 1;
-   fe.content_collect = 1;
-   fe.content_history = 1;
-   fe.boxart_hidden = 1;
-   fe.launch_splash = 1;
-   fe.log_flush_every = UNIFROG_LOG_FLUSH_EVERY ? 1 : 0;
-   unifrog_text_copy(fe.theme_name, sizeof(fe.theme_name), "muos");
-   unifrog_text_copy(fe.language_name, sizeof(fe.language_name), "english");
-   unifrog_text_copy(fe.storage_profile, sizeof(fe.storage_profile), "boot");
-   unifrog_text_copy(fe.rom_root, sizeof(fe.rom_root), FRONTEND_ROMS_ROOT);
-   unifrog_text_copy(fe.rom_root_label, sizeof(fe.rom_root_label), "ROMs");
-   (void)frontend_rom_root_add(&fe, FRONTEND_ROMS_ROOT);
+   fe.run_options.audio_enabled = UNIFROG_DEFAULT_AUDIO;
+   fe.run_options.audio_gain = UNIFROG_DEFAULT_GAIN;
+   fe.run_options.scpu_mhz = UNIFROG_DEFAULT_CPU;
+   fe.run_options.ge_clock = UNIFROG_DEFAULT_GE_CLOCK;
+   fe.run_options.backlight_level = UNIFROG_DEFAULT_BACKLIGHT;
+   fe.run_options.frameskip = UNIFROG_DEFAULT_FRAMESKIP;
+   fe.run_options.display_mode = UNIFROG_DEFAULT_DISPLAY;
+   fe.run_options.framebuffer_format = UNIFROG_DEFAULT_FRAMEBUFFER;
+   fe.run_options.input_profile = UNIFROG_DEFAULT_KEYMAP;
+   fe.run_options.state_slot = UNIFROG_DEFAULT_STATE_SLOT;
+   fe.run_options.state_auto_load = UNIFROG_DEFAULT_STATE_AUTO_LOAD;
+   fe.run_options.state_auto_save = UNIFROG_DEFAULT_STATE_AUTO_SAVE;
+   fe.sort_desc = UNIFROG_DEFAULT_SORT_DESC;
+   fe.show_hidden = UNIFROG_DEFAULT_SHOW_HIDDEN;
+   fe.folder_counts = UNIFROG_DEFAULT_FOLDER_COUNTS;
+   fe.mixed_content = UNIFROG_DEFAULT_MIXED_CONTENT;
+   fe.display_empty_folder = UNIFROG_DEFAULT_DISPLAY_EMPTY_FOLDER;
+   fe.menu_counter_folder = UNIFROG_DEFAULT_MENU_COUNTER_FOLDER;
+   fe.menu_counter_file = UNIFROG_DEFAULT_MENU_COUNTER_FILE;
+   fe.content_collect = UNIFROG_DEFAULT_CONTENT_COLLECT;
+   fe.content_history = UNIFROG_DEFAULT_CONTENT_HISTORY;
+   fe.clock_enabled = UNIFROG_DEFAULT_CLOCK_ENABLED;
+   fe.title_include_root = UNIFROG_DEFAULT_TITLE_INCLUDE_ROOT;
+   fe.theme_alternate = UNIFROG_DEFAULT_THEME_ALTERNATE;
+   fe.boxart_hidden = UNIFROG_DEFAULT_BOXART_HIDDEN;
+   fe.launch_splash = UNIFROG_DEFAULT_LAUNCH_SPLASH;
+   fe.sound_enabled = UNIFROG_DEFAULT_SOUND_ENABLED;
+   fe.log_flush_every = UNIFROG_DEFAULT_LOG_FLUSH_EVERY;
+   fe.language_index = UNIFROG_DEFAULT_LANGUAGE;
+   unifrog_text_copy(fe.theme_name, sizeof(fe.theme_name),
+      UNIFROG_DEFAULT_THEME_NAME);
+   unifrog_text_copy(fe.language_name, sizeof(fe.language_name),
+      UNIFROG_DEFAULT_LANGUAGE_NAME);
+   unifrog_text_copy(fe.storage_profile, sizeof(fe.storage_profile),
+      UNIFROG_DEFAULT_STORAGE_PROFILE);
+   unifrog_text_copy(fe.rom_root, sizeof(fe.rom_root),
+      UNIFROG_DEFAULT_ROM_ROOT);
+   unifrog_text_copy(fe.rom_root_label, sizeof(fe.rom_root_label),
+      UNIFROG_DEFAULT_ROM_ROOT_LABEL);
+   (void)frontend_rom_root_add(&fe, UNIFROG_DEFAULT_ROM_ROOT);
    load_settings(&fe);
    frontend_rom_root_sync_primary(&fe);
    unifrog_log_set_auto_flush_bytes(fe.log_flush_every ? 1u :

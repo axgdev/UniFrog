@@ -25,6 +25,16 @@ Fetch the SDK submodule, MQuickJS, libretro cores, and support libraries:
 make deps
 ```
 
+For focused core work, fetch only the core set you need:
+
+```sh
+make setup-cores CORE_IDS="gpsp gambatte"
+make core-package CORE_IDS="gpsp gambatte"
+```
+
+Use `DEP_CHECKOUT=full` when you want complete dependency trees for local
+development. The default sparse checkout keeps `.deps` small.
+
 Local paths can be overridden in untracked `config.mk`:
 
 ```make
@@ -49,10 +59,15 @@ Useful targets:
 make help             Show the common workflow and focused entry points
 make print-config     Show current paths, tools, and optimization settings
 make setup            Fetch required external source inputs
+make setup-min        Fetch SDK, MQuickJS, LVGL, FFmpeg, and support inputs
+make setup-cores      Fetch selected libretro cores with CORE_IDS="..."
 make deps-status      Show pins vs each repository policy
 make upgrade-deps     Bump pins by policy and fetch them
 make doctor           Check tools, SDK, and fetched inputs
 make quick-check      Run fast repository, core smoke, frontend, and JS2300 checks
+make config-check     Generate and verify settings/config examples
+make host-visual-check
+                      Write displayless PPM/PNG visual artifacts
 make                  Build firmware, modules, and core package
 make verify           Build and verify firmware, fastboot, JS, and layout
 make fastboot-only-check
@@ -161,6 +176,10 @@ Fetched third-party source checkouts live in untracked `.deps/` after
 `make deps`. Generated files live in `build/`, `output/`, `cores/output/`,
 `js2300/output/`, and packaging directories. They are not
 source.
+
+Dependency workflow details, including the `unifrog-deps` branch layout,
+`DEP_SOURCE`, `DEP_CHECKOUT`, and local core development commands, live in
+`docs/dependency-workflow.md`.
 
 ## Component Docs
 

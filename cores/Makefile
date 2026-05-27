@@ -6,6 +6,15 @@ CCACHE ?=
 CCACHE_PREFIX := $(if $(CCACHE),$(CCACHE) )
 Q := $(if $(V),,@)
 PIN_MODE ?= $(if $(MODE),$(MODE),policy)
+UNIFROG_DEPS_REPO_URL ?= git@github.com:axgdev/unifrog-deps.git
+DEP_SOURCE ?= auto
+DEP_CHECKOUT ?= sparse
+DEP_DEPTH ?= 1
+DEP_GIT_ENV ?= GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new'
+CORE_IDS ?=
+DEV_CORE_MAKEFILE ?= Makefile.libretro
+DEV_CORE_TARGET ?= $(CORE)_libretro_sf2000.a
+DEV_CORE_ARGS ?= platform=unix CC="$(CC)" CXX="$(CXX)" AR=$(AR) STATIC_LINKING=1 fpic= TARGET=$(DEV_CORE_TARGET)
 
 include manifest.mk
 
@@ -272,18 +281,31 @@ CORE_TARGETS := gambatte gpsp gpsp_multicore picodrive snes9x2005 snes9x2002 \
 SUPPORT_TARGETS := libretro-common chd-support
 SMOKE_TARGETS := libretro-common quicknes
 MAINTAIN_TARGETS := support-init core-init init smoke-init doctor smoke-doctor core-status pin-status \
-	upgrade-pins diff-core log-core update-core smoke-check check clean \
+	upgrade-pins diff-core log-core update-core dev-core smoke-check check clean \
 	status help print-config
+DEFAULT_CORE_IDS := gambatte gpsp gpsp-gbac-prosty picodrive snes9x2005 snes9x2002 quicknes fceumm gearboy pce-fast qpsx
+core_id_to_target = $(if $(filter gpsp-gbac-prosty,$(1)),gpsp_multicore,$(1))
+CORE_IDS_EFFECTIVE := $(strip $(if $(CORE_IDS),$(CORE_IDS),$(if $(filter $(CORE_TARGETS),$(MAKECMDGOALS)),$(filter $(CORE_TARGETS),$(MAKECMDGOALS)),$(DEFAULT_CORE_IDS))))
+REQUESTED_CORE_TARGETS := $(foreach id,$(CORE_IDS_EFFECTIVE),$(call core_id_to_target,$(id)))
+UNKNOWN_CORE_IDS := $(strip $(filter-out $(CORE_TARGETS),$(REQUESTED_CORE_TARGETS)))
+ifneq ($(UNKNOWN_CORE_IDS),)
+$(error unknown CORE_IDS='$(UNKNOWN_CORE_IDS)'; supported cores: $(DEFAULT_CORE_IDS))
+endif
+REQUESTED_SUPPORT_TARGETS := libretro-common $(if $(filter picodrive pce-fast,$(REQUESTED_CORE_TARGETS)),chd-support)
 
 .PHONY: all $(CORE_TARGETS) $(SUPPORT_TARGETS) $(MAINTAIN_TARGETS)
 
-all: $(SUPPORT_TARGETS) $(CORE_TARGETS)
+all: $(REQUESTED_SUPPORT_TARGETS) $(REQUESTED_CORE_TARGETS)
 
 help:
 	@echo "UniFrog core build:"
 	@echo "  make -C cores init                  Fetch pinned sources and apply patches"
 	@echo "  make -C cores core-init             Fetch only core sources and patches"
+	@echo "  make -C cores init CORE_IDS=\"gpsp gambatte\""
+	@echo "                                      Fetch selected cores plus required support"
 	@echo "  make -C cores                       Build all core archives"
+	@echo "  make -C cores CORE_IDS=\"gpsp gambatte\""
+	@echo "                                      Build selected core archives"
 	@echo "  make -C cores smoke-check           Build libretro-common and QuickNES"
 	@echo "  make -C cores check                 Verify clean patched checkouts"
 	@echo "  make -C cores clean                 Remove core build outputs"
@@ -301,6 +323,7 @@ help:
 	@echo "  make -C cores diff-core CORE=gpsp"
 	@echo "  make -C cores log-core CORE=gpsp"
 	@echo "  make -C cores update-core CORE=gpsp"
+	@echo "  make -C cores dev-core CORE=mycore CORE_DIR=/work/mycore"
 	@echo ""
 	@echo "Config:"
 	@echo "  make -C cores print-config"
@@ -310,11 +333,21 @@ print-config:
 	@echo "SDK=$(SDK)"
 	@echo "CORE_SOURCE_ROOT=$(CORE_SOURCE_ROOT)"
 	@echo "CORE_SUPPORT_ROOT=$(CORE_SUPPORT_ROOT)"
+	@echo "UNIFROG_DEPS_REPO_URL=$(UNIFROG_DEPS_REPO_URL)"
+	@echo "DEP_SOURCE=$(DEP_SOURCE)"
+	@echo "DEP_CHECKOUT=$(DEP_CHECKOUT)"
+	@echo "DEP_DEPTH=$(DEP_DEPTH)"
+	@echo "CORE_IDS=$(CORE_IDS)"
+	@echo "CORE_IDS_EFFECTIVE=$(CORE_IDS_EFFECTIVE)"
+	@echo "REQUESTED_CORE_TARGETS=$(REQUESTED_CORE_TARGETS)"
+	@echo "REQUESTED_SUPPORT_TARGETS=$(REQUESTED_SUPPORT_TARGETS)"
 	@echo "CCACHE=$(if $(CCACHE),$(CCACHE),disabled)"
 	@echo "JOBS=$(JOBS)"
 
 support-init:
 	@set -e; \
+	case "$(DEP_SOURCE)" in auto|unifrog|upstream) ;; *) echo "DEP_SOURCE must be auto, unifrog, or upstream"; exit 1;; esac; \
+	case "$(DEP_CHECKOUT)" in sparse|full) ;; *) echo "DEP_CHECKOUT must be sparse or full"; exit 1;; esac; \
 	mkdir -p "$(CORE_SUPPORT_ROOT)"; \
 	status=0; \
 	pids=""; \
@@ -326,39 +359,68 @@ support-init:
 			url=$${rest%%|*}; rest=$${rest#*|}; \
 			policy=$${rest%%|*}; rest=$${rest#*|}; \
 			commit=$${rest%%|*}; rest=$${rest#*|}; \
+			deps_branch=$${rest%%|*}; rest=$${rest#*|}; \
+			deps_commit=$${rest%%|*}; rest=$${rest#*|}; \
 			sparse=$$rest; \
+			if test "$$name" = libchdr; then \
+				case " $(REQUESTED_SUPPORT_TARGETS) " in *" chd-support "*) ;; *) echo "  SKIP    support/$$name CORE_IDS=$(CORE_IDS_EFFECTIVE)"; exit 0;; esac; \
+			fi; \
 			fresh=0; \
+			depth_arg=""; \
+			filter_arg=""; \
+			if test "$(DEP_DEPTH)" != 0; then depth_arg="--depth $(DEP_DEPTH)"; fi; \
+			if test "$(DEP_CHECKOUT)" = sparse; then filter_arg="--filter=blob:none"; fi; \
+			source_used=upstream; \
+			if test "$(DEP_SOURCE)" != upstream; then \
+				if test -d "$$dir/.git"; then \
+					git -C "$$dir" remote set-url origin "$(UNIFROG_DEPS_REPO_URL)"; \
+				else \
+					echo "  CLONE   support/$$name $(UNIFROG_DEPS_REPO_URL)"; \
+					rm -rf "$$dir"; \
+					git init -q "$$dir"; \
+					git -C "$$dir" remote add origin "$(UNIFROG_DEPS_REPO_URL)"; \
+					fresh=1; \
+				fi; \
+				deps_ref="$$deps_branch"; \
+				if test "$$deps_commit" != "-"; then deps_ref="$$deps_commit"; fi; \
+				echo "  FETCH   support/$$name managed $$deps_ref"; \
+				if $(DEP_GIT_ENV) git -C "$$dir" fetch $$depth_arg $$filter_arg origin "$$deps_ref"; then \
+					source_used=unifrog; \
+					commit=FETCH_HEAD; \
+				elif test "$(DEP_SOURCE)" = unifrog; then \
+					echo "missing managed dependency branch: $$deps_branch"; \
+					exit 1; \
+				else \
+					echo "  FALLBK  support/$$name upstream $$commit"; \
+					git -C "$$dir" remote set-url origin "$$url"; \
+				fi; \
+			fi; \
 			if test -d "$$dir/.git"; then \
-				git -C "$$dir" remote set-url origin "$$url"; \
+				if test "$$source_used" = upstream; then git -C "$$dir" remote set-url origin "$$url"; fi; \
 				if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
 					echo "  REUSE   support/$$name $$commit"; \
 				else \
 					echo "  FETCH   support/$$name $$commit"; \
-					git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
+					$(DEP_GIT_ENV) git -C "$$dir" fetch $$depth_arg $$filter_arg origin "$$commit"; \
 				fi; \
 			else \
 				echo "  FETCH   support/$$name $$commit"; \
 				rm -rf "$$dir"; \
 				git init -q "$$dir"; \
 				git -C "$$dir" remote add origin "$$url"; \
-				git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
+				$(DEP_GIT_ENV) git -C "$$dir" fetch $$depth_arg $$filter_arg origin "$$commit"; \
 				fresh=1; \
 			fi; \
-			case "$$sparse" in \
-			:files\ *) \
-				git -C "$$dir" sparse-checkout set --no-cone $${sparse#*:files }; \
-				;; \
-			:root-files) \
-				git -C "$$dir" sparse-checkout init --no-cone; \
-				printf '/*\n!/*/\n' >"$$dir/.git/info/sparse-checkout"; \
-				;; \
-			.) \
-				;; \
-			*) \
-				git -C "$$dir" sparse-checkout init --cone; \
-				git -C "$$dir" sparse-checkout set --skip-checks $$sparse; \
-				;; \
-			esac; \
+			if test "$(DEP_CHECKOUT)" = sparse; then \
+				case "$$sparse" in \
+				:files\ *) git -C "$$dir" sparse-checkout set --no-cone $${sparse#*:files } ;; \
+				:root-files) git -C "$$dir" sparse-checkout init --no-cone; printf '/*\n!/*/\n' >"$$dir/.git/info/sparse-checkout" ;; \
+				.) git -C "$$dir" sparse-checkout disable >/dev/null 2>&1 || true ;; \
+				*) git -C "$$dir" sparse-checkout init --cone; git -C "$$dir" sparse-checkout set --skip-checks $$sparse ;; \
+				esac; \
+			else \
+				git -C "$$dir" sparse-checkout disable >/dev/null 2>&1 || true; \
+			fi; \
 			git -C "$$dir" checkout -q "$$commit"; \
 			git -C "$$dir" reset --hard -q "$$commit"; \
 			if test "$$fresh" -eq 0; then \
@@ -380,6 +442,8 @@ smoke-init:
 
 core-init:
 	@set -e; \
+	case "$(DEP_SOURCE)" in auto|unifrog|upstream) ;; *) echo "DEP_SOURCE must be auto, unifrog, or upstream"; exit 1;; esac; \
+	case "$(DEP_CHECKOUT)" in sparse|full) ;; *) echo "DEP_CHECKOUT must be sparse or full"; exit 1;; esac; \
 	mkdir -p "$(CORE_SOURCE_ROOT)"; \
 	status=0; \
 	pids=""; \
@@ -391,35 +455,65 @@ core-init:
 			url=$${rest%%|*}; rest=$${rest#*|}; \
 			policy=$${rest%%|*}; rest=$${rest#*|}; \
 			commit=$${rest%%|*}; rest=$${rest#*|}; \
+			deps_branch=$${rest%%|*}; rest=$${rest#*|}; \
+			deps_commit=$${rest%%|*}; rest=$${rest#*|}; \
 			sparse=$$rest; \
+			case " libretro-common $(REQUESTED_CORE_TARGETS) " in *" $$name "*) ;; *) echo "  SKIP    $$name CORE_IDS=$(CORE_IDS_EFFECTIVE)"; exit 0;; esac; \
 			fresh=0; \
+			depth_arg=""; \
+			filter_arg=""; \
+			if test "$(DEP_DEPTH)" != 0; then depth_arg="--depth $(DEP_DEPTH)"; fi; \
+			if test "$(DEP_CHECKOUT)" = sparse; then filter_arg="--filter=blob:none"; fi; \
+			source_used=upstream; \
+			if test "$(DEP_SOURCE)" != upstream; then \
+				if test -d "$$dir/.git"; then \
+					git -C "$$dir" remote set-url origin "$(UNIFROG_DEPS_REPO_URL)"; \
+				else \
+					echo "  CLONE   $$name $(UNIFROG_DEPS_REPO_URL)"; \
+					rm -rf "$$dir"; \
+					git init -q "$$dir"; \
+					git -C "$$dir" remote add origin "$(UNIFROG_DEPS_REPO_URL)"; \
+					fresh=1; \
+				fi; \
+				deps_ref="$$deps_branch"; \
+				if test "$$deps_commit" != "-"; then deps_ref="$$deps_commit"; fi; \
+				echo "  FETCH   $$name managed $$deps_ref"; \
+				if $(DEP_GIT_ENV) git -C "$$dir" fetch $$depth_arg $$filter_arg origin "$$deps_ref"; then \
+					source_used=unifrog; \
+					commit=FETCH_HEAD; \
+				elif test "$(DEP_SOURCE)" = unifrog; then \
+					echo "missing managed dependency branch: $$deps_branch"; \
+					exit 1; \
+				else \
+					echo "  FALLBK  $$name upstream $$commit"; \
+					git -C "$$dir" remote set-url origin "$$url"; \
+				fi; \
+			fi; \
 			if test -d "$$dir/.git"; then \
-				git -C "$$dir" remote set-url origin "$$url"; \
+				if test "$$source_used" = upstream; then git -C "$$dir" remote set-url origin "$$url"; fi; \
 				if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
 					echo "  REUSE   $$name $$commit"; \
 				else \
 					echo "  FETCH   $$name $$commit"; \
-					git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
+					$(DEP_GIT_ENV) git -C "$$dir" fetch $$depth_arg $$filter_arg origin "$$commit"; \
 				fi; \
 			else \
 				echo "  FETCH   $$name $$commit"; \
 				rm -rf "$$dir"; \
 				git init -q "$$dir"; \
 				git -C "$$dir" remote add origin "$$url"; \
-				git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
+				$(DEP_GIT_ENV) git -C "$$dir" fetch $$depth_arg $$filter_arg origin "$$commit"; \
 				fresh=1; \
 			fi; \
-			case "$$sparse" in \
-			:files\ *) \
-				git -C "$$dir" sparse-checkout set --no-cone $${sparse#*:files }; \
-				;; \
-			.) \
-				;; \
-			*) \
-				git -C "$$dir" sparse-checkout init --cone; \
-				git -C "$$dir" sparse-checkout set --skip-checks $$sparse; \
-				;; \
-			esac; \
+			if test "$(DEP_CHECKOUT)" = sparse; then \
+				case "$$sparse" in \
+				:files\ *) git -C "$$dir" sparse-checkout set --no-cone $${sparse#*:files } ;; \
+				.) git -C "$$dir" sparse-checkout disable >/dev/null 2>&1 || true ;; \
+				*) git -C "$$dir" sparse-checkout init --cone; git -C "$$dir" sparse-checkout set --skip-checks $$sparse ;; \
+				esac; \
+			else \
+				git -C "$$dir" sparse-checkout disable >/dev/null 2>&1 || true; \
+			fi; \
 			git -C "$$dir" checkout -q "$$commit"; \
 			git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
 			git -C "$$dir" reset --hard -q "$$commit"; \
@@ -428,7 +522,7 @@ core-init:
 			fi; \
 			git -C "$$dir" config user.name "UniFrog CI"; \
 			git -C "$$dir" config user.email "ci@unifrog.local"; \
-			if ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
+			if test "$$source_used" = upstream && ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
 				am_err="$$dir/.git/unifrog-am.err"; \
 				if ! git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch 2>"$$am_err"; then \
 					cat "$$am_err" >&2; \
@@ -450,7 +544,7 @@ core-init:
 					git -C "$$dr_dir" remote add origin "$$dr_url"; \
 				fi; \
 				if ! git -C "$$dr_dir" cat-file -e "$$dr_commit^{commit}" 2>/dev/null; then \
-					git -C "$$dr_dir" fetch --depth 1 --filter=blob:none origin "$$dr_commit"; \
+					$(DEP_GIT_ENV) git -C "$$dr_dir" fetch --depth 1 --filter=blob:none origin "$$dr_commit"; \
 				fi; \
 				git -C "$$dr_dir" sparse-checkout init --no-cone; \
 				printf '/dr_mp3.h\n/LICENSE\n' >"$$dr_dir/.git/info/sparse-checkout"; \
@@ -473,20 +567,30 @@ doctor:
 	@command -v $(CROSS_COMPILE)g++ >/dev/null || { echo "missing: $(CROSS_COMPILE)g++"; exit 1; }
 	@command -v $(CROSS_COMPILE)ar >/dev/null || { echo "missing: $(CROSS_COMPILE)ar"; exit 1; }
 	@test -d "$(SDK)/include" || { echo "missing SDK include: $(SDK)/include"; exit 1; }
-	@test -e $(LIBRETRO_COMMON_DIR)/.git || { echo "missing core checkout: $(LIBRETRO_COMMON_DIR); run: make init"; exit 1; }
-	@test -e $(GAMBATTE_DIR)/.git || { echo "missing core checkout: $(GAMBATTE_DIR); run: make init"; exit 1; }
-	@test -e $(GPSP_DIR)/.git || { echo "missing core checkout: $(GPSP_DIR); run: make init"; exit 1; }
-	@test -e $(GPSP_MULTICORE_DIR)/.git || { echo "missing core checkout: $(GPSP_MULTICORE_DIR); run: make init"; exit 1; }
-	@test -e $(PICODRIVE_DIR)/.git || { echo "missing core checkout: $(PICODRIVE_DIR); run: make init"; exit 1; }
-	@test -e $(SNES9X2005_DIR)/.git || { echo "missing core checkout: $(SNES9X2005_DIR); run: make init"; exit 1; }
-	@test -e $(SNES9X2002_DIR)/.git || { echo "missing core checkout: $(SNES9X2002_DIR); run: make init"; exit 1; }
-	@test -e $(QUICKNES_DIR)/.git || { echo "missing core checkout: $(QUICKNES_DIR); run: make init"; exit 1; }
-	@test -e $(FCEUMM_DIR)/.git || { echo "missing core checkout: $(FCEUMM_DIR); run: make init"; exit 1; }
-	@test -e $(GEARBOY_ROOT)/.git || { echo "missing core checkout: $(GEARBOY_ROOT); run: make init"; exit 1; }
-	@test -e $(PCE_FAST_DIR)/.git || { echo "missing core checkout: $(PCE_FAST_DIR); run: make init"; exit 1; }
-	@test -e $(QPSX_DIR)/.git || { echo "missing core checkout: $(QPSX_DIR); run: make init"; exit 1; }
-	@test -f $(GPSP_DIR)/libretro/libretro-common/include/libretro.h || { echo "missing gpSP bundled libretro-common; run: make init"; exit 1; }
-	@test -f $(LIBCHDR_DIR)/src/libchdr_chd.c || { echo "missing support checkout: $(LIBCHDR_DIR); run: make init"; exit 1; }
+	@for target in libretro-common $(REQUESTED_CORE_TARGETS); do \
+		case "$$target" in \
+		libretro-common) dir="$(LIBRETRO_COMMON_DIR)" ;; \
+		gambatte) dir="$(GAMBATTE_DIR)" ;; \
+		gpsp) dir="$(GPSP_DIR)" ;; \
+		gpsp_multicore) dir="$(GPSP_MULTICORE_DIR)" ;; \
+		picodrive) dir="$(PICODRIVE_DIR)" ;; \
+		snes9x2005) dir="$(SNES9X2005_DIR)" ;; \
+		snes9x2002) dir="$(SNES9X2002_DIR)" ;; \
+		quicknes) dir="$(QUICKNES_DIR)" ;; \
+		fceumm) dir="$(FCEUMM_DIR)" ;; \
+		gearboy) dir="$(GEARBOY_ROOT)" ;; \
+		pce-fast) dir="$(PCE_FAST_DIR)" ;; \
+		qpsx) dir="$(QPSX_DIR)" ;; \
+		*) echo "unknown core target: $$target"; exit 1 ;; \
+		esac; \
+		test -e "$$dir/.git" || { echo "missing core checkout: $$dir; run: make init CORE_IDS=\"$(CORE_IDS_EFFECTIVE)\""; exit 1; }; \
+	done
+	@if printf '%s\n' "$(REQUESTED_CORE_TARGETS)" | grep -Eq '(^| )gpsp( |$$)'; then \
+		test -f $(GPSP_DIR)/libretro/libretro-common/include/libretro.h || { echo "missing gpSP bundled libretro-common; run: make init"; exit 1; }; \
+	fi
+	@if printf '%s\n' "$(REQUESTED_SUPPORT_TARGETS)" | grep -q chd-support; then \
+		test -f $(LIBCHDR_DIR)/src/libchdr_chd.c || { echo "missing support checkout: $(LIBCHDR_DIR); run: make init"; exit 1; }; \
+	fi
 	@test -f $(ZSTD_DIR)/decompress/zstd_decompress.c || { echo "missing support checkout: $(ZSTD_DIR); run: make init"; exit 1; }
 	@test -f $(ZLIB_DIR)/inflate.c || { echo "missing support checkout: $(ZLIB_DIR); run: make init"; exit 1; }
 	@echo "OK"
@@ -507,9 +611,11 @@ core-status:
 		dir=$${rest%%|*}; rest=$${rest#*|}; \
 		url=$${rest%%|*}; rest=$${rest#*|}; \
 		policy=$${rest%%|*}; rest=$${rest#*|}; \
-		commit=$${rest%%|*}; \
+		commit=$${rest%%|*}; rest=$${rest#*|}; \
+		deps_branch=$${rest%%|*}; rest=$${rest#*|}; \
+		deps_commit=$${rest%%|*}; \
 		head=$$(git -C "$$dir" rev-parse --short HEAD); \
-		echo "$$name policy=$$policy upstream=$$commit head=$$head dir=$$dir"; \
+		echo "$$name policy=$$policy upstream=$$commit managed=$$deps_branch:$$deps_commit head=$$head dir=$$dir"; \
 	done
 
 pin-status:
@@ -621,6 +727,8 @@ update-core:
 		url=$${rest%%|*}; rest=$${rest#*|}; \
 		policy=$${rest%%|*}; rest=$${rest#*|}; \
 		commit=$${rest%%|*}; rest=$${rest#*|}; \
+		deps_branch=$${rest%%|*}; rest=$${rest#*|}; \
+		deps_commit=$${rest%%|*}; rest=$${rest#*|}; \
 		sparse=$$rest; \
 		if test "$$name" = "$(CORE)"; then \
 			found=1; \
@@ -628,7 +736,7 @@ update-core:
 			if git -C "$$dir" cat-file -e "$$commit^{commit}" 2>/dev/null; then \
 				:; \
 			else \
-				git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
+				$(DEP_GIT_ENV) git -C "$$dir" fetch --depth 1 --filter=blob:none origin "$$commit"; \
 			fi; \
 			if test "$${sparse#":files "}" != "$$sparse"; then \
 				git -C "$$dir" sparse-checkout set --no-cone $${sparse#":files "}; \
@@ -662,7 +770,7 @@ update-core:
 					git -C "$$dr_dir" remote add origin "$$dr_url"; \
 				fi; \
 				if ! git -C "$$dr_dir" cat-file -e "$$dr_commit^{commit}" 2>/dev/null; then \
-					git -C "$$dr_dir" fetch --depth 1 --filter=blob:none origin "$$dr_commit"; \
+					$(DEP_GIT_ENV) git -C "$$dr_dir" fetch --depth 1 --filter=blob:none origin "$$dr_commit"; \
 				fi; \
 				git -C "$$dr_dir" sparse-checkout init --no-cone; \
 				printf '/dr_mp3.h\n/LICENSE\n' >"$$dr_dir/.git/info/sparse-checkout"; \
@@ -675,6 +783,15 @@ update-core:
 		fi; \
 	done; \
 	test "$$found" = 1 || { echo "unknown core: $(CORE)"; exit 1; }
+
+dev-core:
+	@test -n "$(CORE)" || { echo "usage: make dev-core CORE=<id> CORE_DIR=<path>"; exit 1; }
+	@test -n "$(CORE_DIR)" || { echo "usage: make dev-core CORE=<id> CORE_DIR=<path>"; exit 1; }
+	@test -d "$(CORE_DIR)" || { echo "missing CORE_DIR: $(CORE_DIR)"; exit 1; }
+	@mkdir -p $(OUT)
+	$(MAKE) -C "$(CORE_DIR)" -f "$(DEV_CORE_MAKEFILE)" $(DEV_CORE_ARGS)
+	@test -s "$(CORE_DIR)/$(DEV_CORE_TARGET)" || { echo "missing built core archive: $(CORE_DIR)/$(DEV_CORE_TARGET)"; exit 1; }
+	cp "$(CORE_DIR)/$(DEV_CORE_TARGET)" "$(OUT)/$(DEV_CORE_TARGET)"
 
 $(OUT):
 	mkdir -p $@
@@ -823,6 +940,7 @@ check: doctor
 	for spec in $(CORE_SPECS); do \
 		name=$${spec%%|*}; rest=$${spec#*|}; \
 		dir=$${rest%%|*}; \
+		case " libretro-common $(REQUESTED_CORE_TARGETS) " in *" $$name "*) ;; *) continue;; esac; \
 		test -d "$$dir/.git" -o -f "$$dir/.git" || { echo "missing core checkout: $$dir"; exit 1; }; \
 		if test -n "$$(git -C "$$dir" status --porcelain)"; then \
 			echo "dirty core checkout: $$dir"; exit 1; \

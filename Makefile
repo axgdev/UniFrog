@@ -5,9 +5,16 @@ TOOLCHAIN_HOST_ARCH := $(if $(filter aarch64 arm64,$(TOOLCHAIN_UNAME_M)),arm64,$
 TOOLCHAIN_URL ?= https://github.com/axgdev/frog-toolchain/releases/download/v1.1.1/toolchain-stable-static-$(TOOLCHAIN_HOST_ARCH)-gcc15.2.0-binutils2.45-newlib4.5.0.20241231.tar.xz
 CROSS_COMPILE ?= $(TOOLCHAIN)/bin/mipsel-mti-elf-
 DEPS ?= .deps
+UNIFROG_DEPS_REPO_URL ?= git@github.com:axgdev/unifrog-deps.git
+DEP_SOURCE ?= auto
+DEP_CHECKOUT ?= sparse
+DEP_DEPTH ?= 1
+DEP_GIT_ENV ?= GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new'
 SDK ?= unifrog-hcrtos-sdk
 HCRTOS_FFMPEG_URL ?= https://git.ffmpeg.org/ffmpeg.git
 HCRTOS_FFMPEG_REF ?= n4.4.7
+HCRTOS_FFMPEG_DEPS_BRANCH ?= deps/ffmpeg/n4.4.7
+HCRTOS_FFMPEG_DEPS_COMMIT ?= -
 HCRTOS_FFMPEG_SOURCE ?= $(CORE_SUPPORT_ROOT)/ffmpeg-upstream
 HCRTOS_FFMPEG_INSTALL ?= $(CORE_SUPPORT_ROOT)/hcrtos-ffmpeg
 HCRTOS_FFMPEG_PATCHES := patches/hcrtos-ffmpeg-compat.patch
@@ -28,6 +35,7 @@ HCRTOS_FFMPEG_WARN_CFLAGS := \
 	-Wno-unused-function \
 	-Wno-unused-variable
 CORES ?= cores
+CORE_IDS ?=
 CORE_SOURCE_ROOT ?= $(DEPS)/cores
 CORE_SUPPORT_ROOT ?= $(DEPS)/support
 JS2300 ?= js2300
@@ -35,9 +43,13 @@ MQUICKJS_DIR ?= $(DEPS)/mquickjs
 MQUICKJS_URL ?= https://github.com/bellard/mquickjs.git
 MQUICKJS_POLICY ?= head
 MQUICKJS_REF ?= ee50431eac9b14b99f722b537ec4cac0c8dd75ab
+MQUICKJS_DEPS_BRANCH ?= deps/mquickjs/ee50431eac9b
+MQUICKJS_DEPS_COMMIT ?= -
 LVGL_DIR ?= $(DEPS)/support/lvgl
 LVGL_URL ?= https://github.com/lvgl/lvgl.git
 LVGL_REF ?= 0019fc541f759b3323add63034502b0248afc58f
+LVGL_DEPS_BRANCH ?= deps/lvgl/0019fc541f75
+LVGL_DEPS_COMMIT ?= -
 HCRTOS_FFMPEG_DEMUXERS ?= \
 	gsm mp3 aac ac3 avi asf amr ape amrnb amrwb dts dvbsub dvbtxt eac3 \
 	flac flv h261 h263 h264 hls mjpeg m4v mov mpegps mpegts mpegtsraw \
@@ -111,6 +123,7 @@ MEDIA_VIDEO_BUFFERING_START_MS ?= 500
 MEDIA_VIDEO_BUFFERING_END_MS ?= 3000
 
 -include config.mk
+include config/options.mk
 
 ifeq ($(filter -j% --jobs%,$(MAKEFLAGS)),)
 MAKEFLAGS += -j$(JOBS)
@@ -134,6 +147,10 @@ CORE_PACKAGE := $(OUT)/sdcard/unifrog/cores
 MODULE_PACKAGE := $(OUT)/sdcard/unifrog/modules
 USER_PACKAGE := $(OUT)/sdcard/unifrog_data
 FRONTEND_MANIFEST := $(FRONTEND_PACKAGE)/manifest.ini
+SETTINGS_EXAMPLE := $(BUILD)/config/settings.example.ini
+CONFIG_EXAMPLE := $(BUILD)/config/config.example.mk
+DEFAULT_OPTIONS_HEADER := $(BUILD)/unifrog_default_options.h
+SETTINGS_PACKAGE := $(FRONTEND_PACKAGE)/settings.example.ini
 LANGUAGE_FILES := $(wildcard languages/*.ini)
 SCRIPT_FILES := $(shell find scripts -type f 2>/dev/null | sort)
 SDCARD_BIOS_PACKAGE := $(OUT)/sdcard/bios/bisrv.asd
@@ -695,6 +712,10 @@ BOOT_LOGO_STAMPED_PPM := $(BUILD)/boot/unifrog-logo-stamped.ppm
 BOOT_LOGO_STAMPED_PNG := $(BUILD)/boot/unifrog-logo-stamped.png
 BOOT_LOGO_RGB565_INC := $(BUILD)/boot/unifrog-logo-rgb565.inc
 BOOT_LOGO_STAMP := $(BUILD)/boot/unifrog-logo.stamp
+HOST_VISUAL_CHECK := $(BUILD)/host_visual_check
+HOST_VISUAL_DIR ?= $(BUILD)/host-visual
+HOST_VISUAL_PPM := $(HOST_VISUAL_DIR)/native-frontend.ppm
+HOST_VISUAL_PNG := $(HOST_VISUAL_DIR)/native-frontend.png
 CHD_SUPPORT_CORE_LIB := $(CORES)/output/libchdr-support-sf2000.a
 FIRMWARE_LIBRETRO_CORE_LIBS ?=
 CORE_BUILD_DEPS = $(CORES)/Makefile $(CORES)/manifest.mk $(CORE_REV_STAMP)
@@ -702,12 +723,18 @@ CORE_MAKE_ARGS := \
 	TOOLCHAIN=$(TOOLCHAIN) \
 	CROSS_COMPILE=$(CROSS_COMPILE) \
 	SDK=$(abspath $(SDK)) \
+	UNIFROG_DEPS_REPO_URL=$(UNIFROG_DEPS_REPO_URL) \
+	DEP_SOURCE=$(DEP_SOURCE) \
+	DEP_CHECKOUT=$(DEP_CHECKOUT) \
+	DEP_DEPTH=$(DEP_DEPTH) \
+	DEP_GIT_ENV="$(DEP_GIT_ENV)" \
+	CORE_IDS="$(strip $(if $(CORE_IDS),$(CORE_IDS),$(CORE)))" \
 	CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT)) \
 	CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT)) \
 	CCACHE=$(CCACHE) \
 	JOBS=$(JOBS)
 CORE_BATCH_GOALS := all check verify sdcard-package sd-zip install refresh-sd refresh-sd-clean
-CORE_BATCH_BUILD := $(if $(filter $(CORE_BATCH_GOALS),$(MAKECMDGOALS)),1,0)
+CORE_BATCH_BUILD := $(if $(strip $(CORE_IDS)),0,$(if $(filter $(CORE_BATCH_GOALS),$(MAKECMDGOALS)),1,0))
 CORE_SMOKE_MAKE_FLAGS := --no-print-directory
 ifeq ($(V),)
 CORE_SMOKE_MAKE_FLAGS += --silent
@@ -749,11 +776,19 @@ PCE_FAST_CORE_BIN := $(CORE_PACKAGE)/pce-fast.bin
 QPSX_CORE_LIB := $(CORES)/output/pcsx4all_libretro_sf2000.a
 LIBRETRO_CORE_VARS := $(foreach module,$(LIBRETRO_MODULES),$(word 2,$(subst :, ,$(module))))
 LIBRETRO_CORE_IDS := $(foreach var,$(LIBRETRO_CORE_VARS),$($(var)_CORE_ID))
-PACKAGE_LIBRETRO_CORE_LIBS := $(foreach var,$(LIBRETRO_CORE_VARS),$($(var)_CORE_LIB))
-LIBRETRO_CORE_BINS := $(foreach var,$(LIBRETRO_CORE_VARS),$($(var)_CORE_BIN))
-LIBRETRO_CORE_MODULE_OUTS := $(foreach var,$(LIBRETRO_CORE_VARS),$($(var)_CORE_OUT))
-LIBRETRO_CORE_ENTRY_OBJECTS := $(foreach var,$(LIBRETRO_CORE_VARS),$($(var)_CORE_ENTRY))
-CORE_MODULE_IDS := $(foreach var,$(LIBRETRO_CORE_VARS),$($(var)_CORE_MODULE))
+EFFECTIVE_CORE_IDS := $(strip $(if $(CORE_IDS),$(CORE_IDS),$(LIBRETRO_CORE_IDS)))
+UNKNOWN_CORE_IDS := $(strip $(foreach id,$(EFFECTIVE_CORE_IDS),$(if $(CORE_VAR_$(id)),,$(id))))
+ifneq ($(UNKNOWN_CORE_IDS),)
+$(error unknown CORE_IDS='$(UNKNOWN_CORE_IDS)'; supported cores: $(LIBRETRO_CORE_IDS))
+endif
+PACKAGE_LIBRETRO_CORE_VARS := $(foreach id,$(EFFECTIVE_CORE_IDS),$(CORE_VAR_$(id)))
+PACKAGE_LIBRETRO_CORE_LIBS := $(foreach var,$(PACKAGE_LIBRETRO_CORE_VARS),$($(var)_CORE_LIB))
+PACKAGE_LIBRETRO_SUPPORT_LIBS := $(foreach var,$(PACKAGE_LIBRETRO_CORE_VARS),$($(var)_CORE_SUPPORT_LIBS))
+PACKAGE_NEEDS_CHD := $(if $(filter $(CHD_SUPPORT_CORE_LIB),$(PACKAGE_LIBRETRO_SUPPORT_LIBS)),1,0)
+LIBRETRO_CORE_BINS := $(foreach var,$(PACKAGE_LIBRETRO_CORE_VARS),$($(var)_CORE_BIN))
+LIBRETRO_CORE_MODULE_OUTS := $(foreach var,$(PACKAGE_LIBRETRO_CORE_VARS),$($(var)_CORE_OUT))
+LIBRETRO_CORE_ENTRY_OBJECTS := $(foreach var,$(PACKAGE_LIBRETRO_CORE_VARS),$($(var)_CORE_ENTRY))
+CORE_MODULE_IDS := $(foreach var,$(PACKAGE_LIBRETRO_CORE_VARS),$($(var)_CORE_MODULE))
 ifneq ($(CORE),)
 SELECTED_CORE_VAR := $(CORE_VAR_$(CORE))
 ifeq ($(SELECTED_CORE_VAR),)
@@ -941,15 +976,17 @@ $(FASTBOOT_OBJECTS): $(FASTBOOT_CONFIG_STAMP)
 $(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 
 .DELETE_ON_ERROR:
-COMMON_TARGETS := all help setup doctor smoke-doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild list-cores core core-archive core-out ffmpeg
+COMMON_TARGETS := all help setup setup-min setup-cores doctor smoke-doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild list-cores core core-archive core-out ffmpeg config-check host-visual-check
 SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores deps-core-smoke deps-lvgl deps-ffmpeg
 PACKAGE_TARGETS := frontend-package core-package module-package sdcard-package sd-zip install refresh-sd refresh-sd-clean
-VERIFY_TARGETS := asdcheck fastboot-check fastboot-only-check layout-check boot-logo-check js2300-check frontend-check native-frontend-check core-smoke-check
+VERIFY_TARGETS := asdcheck fastboot-check fastboot-only-check layout-check boot-logo-check js2300-check frontend-check native-frontend-check core-smoke-check config-check host-visual-check
 ADVANCED_TARGETS := sdk dtb lib fastboot fastboot-only size ci-deps ci-smoke-deps ci-toolchain ci-commit-smoke ci-commit-check ci-sd-zip print-config
 .PHONY: $(COMMON_TARGETS) $(SETUP_TARGETS) $(PACKAGE_TARGETS) $(VERIFY_TARGETS) $(ADVANCED_TARGETS)
 
 all: $(ASD) sdcard-package
 setup: deps
+setup-min: deps-sdk deps-mquickjs deps-lvgl deps-ffmpeg ffmpeg deps-support
+setup-cores: deps-sdk deps-mquickjs deps-lvgl deps-ffmpeg ffmpeg deps-support deps-cores
 
 verify:
 	$(Q)$(MAKE) --no-print-directory quick-check
@@ -964,6 +1001,12 @@ help:
 	@echo "  make               Build $(ASD), $(OUT)/unifrog.bin, and SD files"
 	@echo "  make verify        Build and verify firmware, fastboot, JS, and layout"
 	@echo "  make deps          Same as make setup"
+	@echo "  make setup-min     Fetch required non-core source inputs"
+	@echo "  make setup-cores CORE_IDS=\"gpsp gambatte\""
+	@echo "                     Fetch required inputs plus selected libretro cores"
+	@echo "  make config-check  Generate and verify config examples"
+	@echo "  make host-visual-check"
+	@echo "                     Render displayless PPM/PNG frontend artifacts"
 	@echo "  make deps-status   Show pins vs policy, or override MODE=head|tag"
 	@echo "  make ffmpeg        Build patched HCRTOS FFmpeg for local media"
 	@echo "  make upgrade-deps  Bump pins by policy, or override MODE=head|tag"
@@ -971,6 +1014,8 @@ help:
 	@echo "  make list-cores    List libretro CORE= ids"
 	@echo "  make core CORE=picodrive"
 	@echo "                     Build and package one libretro core module"
+	@echo "  make core-package CORE_IDS=\"gpsp gambatte\""
+	@echo "                     Package only selected libretro core modules"
 	@echo "  make core-archive CORE=picodrive"
 	@echo "                     Build only that core's upstream static archive"
 	@echo ""
@@ -979,6 +1024,8 @@ help:
 	@echo "  make deps-ubuntu   Print Ubuntu host package command"
 	@echo "  make deps-sdk      Initialize only the HCRTOS SDK submodule"
 	@echo "  make deps-cores    Fetch only libretro core sources"
+	@echo "  make deps-cores CORE_IDS=\"gpsp gambatte\""
+	@echo "                     Fetch only selected libretro core sources plus libretro-common"
 	@echo "  make deps-lvgl     Fetch only the LVGL checkout"
 	@echo ""
 	@echo "Packaging and device:"
@@ -989,7 +1036,7 @@ help:
 	@echo ""
 	@echo "Focused checks:"
 	@echo "  make repo-check core-smoke-check native-frontend-check js2300-check"
-	@echo "  make boot-logo-check"
+	@echo "  make boot-logo-check host-visual-check config-check"
 	@echo "  make fastboot-only-check"
 	@echo "  make layout-check asdcheck fastboot-check"
 	@echo "  make -C cores help"
@@ -1017,6 +1064,10 @@ help:
 	@echo "  make HCRTOS_MEDIA=module  Keep HCRTOS media in an SD-loaded module"
 	@echo "  make HCRTOS_MEDIA=firmware  Link hcplayer/HCRTOS media into unifrog.bin"
 	@echo "  make FRONTEND_IMPL=native   Build the native frontend (default)"
+	@echo "  make CORE_IDS=\"gpsp gambatte\"  Limit fetched, built, and packaged cores"
+	@echo "  make DEP_CHECKOUT=full  Keep full dependency source trees for development"
+	@echo "  make DEP_SOURCE=unifrog  Require $(UNIFROG_DEPS_REPO_URL)"
+	@echo "  make DEP_SOURCE=upstream  Fetch directly from original upstream remotes"
 	@echo "  make MEDIA_AUDIO_FEED_LEAD_MS=3000  Tune hardware audio feed lead"
 	@echo "  make MEDIA_VIDEO_KSHM_SIZE=8388608  Tune viddec compressed ring"
 	@echo "  make MEDIA_VIDEO_LOWRES_KSHM_SIZE=8388608  Override low-res viddec compressed ring"
@@ -1045,7 +1096,14 @@ print-config:
 	@echo "TOOLCHAIN=$(TOOLCHAIN)"
 	@echo "SDK=$(SDK)"
 	@echo "DEPS=$(DEPS)"
+	@echo "UNIFROG_DEPS_REPO_URL=$(UNIFROG_DEPS_REPO_URL)"
+	@echo "DEP_SOURCE=$(DEP_SOURCE)"
+	@echo "DEP_CHECKOUT=$(DEP_CHECKOUT)"
+	@echo "DEP_DEPTH=$(DEP_DEPTH)"
 	@echo "CORES=$(CORES)"
+	@echo "CORE_IDS=$(CORE_IDS)"
+	@echo "EFFECTIVE_CORE_IDS=$(EFFECTIVE_CORE_IDS)"
+	@echo "PACKAGE_NEEDS_CHD=$(PACKAGE_NEEDS_CHD)"
 	@echo "CORE_SOURCE_ROOT=$(CORE_SOURCE_ROOT)"
 	@echo "CORE_SUPPORT_ROOT=$(CORE_SUPPORT_ROOT)"
 	@echo "JS2300=$(JS2300)"
@@ -1142,9 +1200,40 @@ deps-sdk:
 deps-mquickjs:
 	@mkdir -p $(DEPS)
 	@fresh=0; \
+	source_used=upstream; \
+	depth_arg=""; \
+	if test "$(DEP_DEPTH)" != 0; then depth_arg="--depth $(DEP_DEPTH)"; fi; \
+	case "$(DEP_SOURCE)" in auto|unifrog|upstream) ;; *) echo "DEP_SOURCE must be auto, unifrog, or upstream"; exit 1;; esac; \
+	if test "$(DEP_SOURCE)" != upstream; then \
+		if test -d "$(MQUICKJS_DIR)/.git"; then \
+			echo "  FETCH   $(MQUICKJS_DIR) managed"; \
+			git -C "$(MQUICKJS_DIR)" remote set-url origin "$(UNIFROG_DEPS_REPO_URL)"; \
+		else \
+			echo "  CLONE   $(UNIFROG_DEPS_REPO_URL)"; \
+			rm -rf "$(MQUICKJS_DIR)"; \
+			git init -q "$(MQUICKJS_DIR)"; \
+			git -C "$(MQUICKJS_DIR)" remote add origin "$(UNIFROG_DEPS_REPO_URL)"; \
+			fresh=1; \
+		fi; \
+		deps_ref="$(MQUICKJS_DEPS_BRANCH)"; \
+		if test "$(MQUICKJS_DEPS_COMMIT)" != "-"; then deps_ref="$(MQUICKJS_DEPS_COMMIT)"; fi; \
+		if $(DEP_GIT_ENV) git -C "$(MQUICKJS_DIR)" fetch $$depth_arg origin "$$deps_ref"; then \
+			source_used=unifrog; \
+			MQUICKJS_CHECKOUT=FETCH_HEAD; \
+		elif test "$(DEP_SOURCE)" = unifrog; then \
+			echo "missing managed dependency branch: $(MQUICKJS_DEPS_BRANCH)"; \
+			exit 1; \
+		else \
+			echo "  FALLBK  $(MQUICKJS_DIR) upstream $(MQUICKJS_REF)"; \
+			git -C "$(MQUICKJS_DIR)" remote set-url origin "$(MQUICKJS_URL)"; \
+			MQUICKJS_CHECKOUT="$(MQUICKJS_REF)"; \
+		fi; \
+	else \
+		MQUICKJS_CHECKOUT="$(MQUICKJS_REF)"; \
+	fi; \
 	if test -d "$(MQUICKJS_DIR)/.git"; then \
 		echo "  FETCH   $(MQUICKJS_DIR)"; \
-		git -C "$(MQUICKJS_DIR)" remote set-url origin "$(MQUICKJS_URL)"; \
+		if test "$$source_used" = upstream; then git -C "$(MQUICKJS_DIR)" remote set-url origin "$(MQUICKJS_URL)"; fi; \
 	else \
 		echo "  CLONE   $(MQUICKJS_URL)"; \
 		rm -rf "$(MQUICKJS_DIR)"; \
@@ -1152,11 +1241,11 @@ deps-mquickjs:
 		git -C "$(MQUICKJS_DIR)" remote add origin "$(MQUICKJS_URL)"; \
 		fresh=1; \
 	fi; \
-	if ! git -C "$(MQUICKJS_DIR)" cat-file -e "$(MQUICKJS_REF)^{commit}" 2>/dev/null; then \
-		git -C "$(MQUICKJS_DIR)" fetch --depth 1 origin "$(MQUICKJS_REF)"; \
+	if ! git -C "$(MQUICKJS_DIR)" cat-file -e "$$MQUICKJS_CHECKOUT^{commit}" 2>/dev/null; then \
+		$(DEP_GIT_ENV) git -C "$(MQUICKJS_DIR)" fetch $$depth_arg origin "$$MQUICKJS_CHECKOUT"; \
 	fi; \
-	git -C "$(MQUICKJS_DIR)" checkout -q "$(MQUICKJS_REF)"; \
-	git -C "$(MQUICKJS_DIR)" reset --hard -q "$(MQUICKJS_REF)"; \
+	git -C "$(MQUICKJS_DIR)" checkout -q "$$MQUICKJS_CHECKOUT"; \
+	git -C "$(MQUICKJS_DIR)" reset --hard -q "$$MQUICKJS_CHECKOUT"; \
 	if test "$$fresh" -eq 0; then \
 		git -C "$(MQUICKJS_DIR)" clean -fdx -q; \
 	fi
@@ -1164,9 +1253,40 @@ deps-mquickjs:
 deps-lvgl:
 	@mkdir -p "$(dir $(LVGL_DIR))"
 	@fresh=0; \
+	source_used=upstream; \
+	depth_arg=""; \
+	if test "$(DEP_DEPTH)" != 0; then depth_arg="--depth $(DEP_DEPTH)"; fi; \
+	case "$(DEP_SOURCE)" in auto|unifrog|upstream) ;; *) echo "DEP_SOURCE must be auto, unifrog, or upstream"; exit 1;; esac; \
+	if test "$(DEP_SOURCE)" != upstream; then \
+		if test -d "$(LVGL_DIR)/.git"; then \
+			echo "  FETCH   $(LVGL_DIR) managed"; \
+			git -C "$(LVGL_DIR)" remote set-url origin "$(UNIFROG_DEPS_REPO_URL)"; \
+		else \
+			echo "  CLONE   $(UNIFROG_DEPS_REPO_URL)"; \
+			rm -rf "$(LVGL_DIR)"; \
+			git init -q "$(LVGL_DIR)"; \
+			git -C "$(LVGL_DIR)" remote add origin "$(UNIFROG_DEPS_REPO_URL)"; \
+			fresh=1; \
+		fi; \
+		deps_ref="$(LVGL_DEPS_BRANCH)"; \
+		if test "$(LVGL_DEPS_COMMIT)" != "-"; then deps_ref="$(LVGL_DEPS_COMMIT)"; fi; \
+		if $(DEP_GIT_ENV) git -C "$(LVGL_DIR)" fetch $$depth_arg origin "$$deps_ref"; then \
+			source_used=unifrog; \
+			LVGL_CHECKOUT=FETCH_HEAD; \
+		elif test "$(DEP_SOURCE)" = unifrog; then \
+			echo "missing managed dependency branch: $(LVGL_DEPS_BRANCH)"; \
+			exit 1; \
+		else \
+			echo "  FALLBK  $(LVGL_DIR) upstream $(LVGL_REF)"; \
+			git -C "$(LVGL_DIR)" remote set-url origin "$(LVGL_URL)"; \
+			LVGL_CHECKOUT="$(LVGL_REF)"; \
+		fi; \
+	else \
+		LVGL_CHECKOUT="$(LVGL_REF)"; \
+	fi; \
 	if test -d "$(LVGL_DIR)/.git"; then \
 		echo "  FETCH   $(LVGL_DIR)"; \
-		git -C "$(LVGL_DIR)" remote set-url origin "$(LVGL_URL)"; \
+		if test "$$source_used" = upstream; then git -C "$(LVGL_DIR)" remote set-url origin "$(LVGL_URL)"; fi; \
 	else \
 		echo "  CLONE   $(LVGL_URL)"; \
 		rm -rf "$(LVGL_DIR)"; \
@@ -1174,11 +1294,11 @@ deps-lvgl:
 		git -C "$(LVGL_DIR)" remote add origin "$(LVGL_URL)"; \
 		fresh=1; \
 	fi; \
-	if ! git -C "$(LVGL_DIR)" cat-file -e "$(LVGL_REF)^{commit}" 2>/dev/null; then \
-		git -C "$(LVGL_DIR)" fetch --depth 1 origin "$(LVGL_REF)"; \
+	if ! git -C "$(LVGL_DIR)" cat-file -e "$$LVGL_CHECKOUT^{commit}" 2>/dev/null; then \
+		$(DEP_GIT_ENV) git -C "$(LVGL_DIR)" fetch $$depth_arg origin "$$LVGL_CHECKOUT"; \
 	fi; \
-	git -C "$(LVGL_DIR)" checkout -q "$(LVGL_REF)"; \
-	git -C "$(LVGL_DIR)" reset --hard -q "$(LVGL_REF)"; \
+	git -C "$(LVGL_DIR)" checkout -q "$$LVGL_CHECKOUT"; \
+	git -C "$(LVGL_DIR)" reset --hard -q "$$LVGL_CHECKOUT"; \
 	if test "$$fresh" -eq 0; then \
 		git -C "$(LVGL_DIR)" clean -fdx -q; \
 	fi
@@ -1186,9 +1306,39 @@ deps-lvgl:
 deps-ffmpeg: $(HCRTOS_FFMPEG_PATCHES)
 	@mkdir -p "$(dir $(HCRTOS_FFMPEG_SOURCE))"
 	@fresh=0; \
+	source_used=upstream; \
+	depth_arg=""; \
+	FFMPEG_CHECKOUT="$(HCRTOS_FFMPEG_REF)"; \
+	if test "$(DEP_DEPTH)" != 0; then depth_arg="--depth $(DEP_DEPTH)"; fi; \
+	case "$(DEP_SOURCE)" in auto|unifrog|upstream) ;; *) echo "DEP_SOURCE must be auto, unifrog, or upstream"; exit 1;; esac; \
+	if test "$(DEP_SOURCE)" != upstream; then \
+		if test -d "$(HCRTOS_FFMPEG_SOURCE)/.git"; then \
+			echo "  FETCH   $(HCRTOS_FFMPEG_SOURCE) managed"; \
+			git -C "$(HCRTOS_FFMPEG_SOURCE)" remote set-url origin "$(UNIFROG_DEPS_REPO_URL)"; \
+		else \
+			echo "  CLONE   $(UNIFROG_DEPS_REPO_URL)"; \
+			rm -rf "$(HCRTOS_FFMPEG_SOURCE)"; \
+			git init -q "$(HCRTOS_FFMPEG_SOURCE)"; \
+			git -C "$(HCRTOS_FFMPEG_SOURCE)" remote add origin "$(UNIFROG_DEPS_REPO_URL)"; \
+			fresh=1; \
+		fi; \
+		deps_ref="$(HCRTOS_FFMPEG_DEPS_BRANCH)"; \
+		if test "$(HCRTOS_FFMPEG_DEPS_COMMIT)" != "-"; then deps_ref="$(HCRTOS_FFMPEG_DEPS_COMMIT)"; fi; \
+		if $(DEP_GIT_ENV) git -C "$(HCRTOS_FFMPEG_SOURCE)" fetch $$depth_arg origin "$$deps_ref"; then \
+			source_used=unifrog; \
+			FFMPEG_CHECKOUT=FETCH_HEAD; \
+		elif test "$(DEP_SOURCE)" = unifrog; then \
+			echo "missing managed dependency branch: $(HCRTOS_FFMPEG_DEPS_BRANCH)"; \
+			exit 1; \
+		else \
+			echo "  FALLBK  $(HCRTOS_FFMPEG_SOURCE) upstream $(HCRTOS_FFMPEG_REF)"; \
+			git -C "$(HCRTOS_FFMPEG_SOURCE)" remote set-url origin "$(HCRTOS_FFMPEG_URL)"; \
+			FFMPEG_CHECKOUT="$(HCRTOS_FFMPEG_REF)"; \
+		fi; \
+	fi; \
 	if test -d "$(HCRTOS_FFMPEG_SOURCE)/.git"; then \
 		echo "  FETCH   $(HCRTOS_FFMPEG_SOURCE)"; \
-		git -C "$(HCRTOS_FFMPEG_SOURCE)" remote set-url origin "$(HCRTOS_FFMPEG_URL)"; \
+		if test "$$source_used" = upstream; then git -C "$(HCRTOS_FFMPEG_SOURCE)" remote set-url origin "$(HCRTOS_FFMPEG_URL)"; fi; \
 	else \
 		echo "  CLONE   $(HCRTOS_FFMPEG_URL)"; \
 		rm -rf "$(HCRTOS_FFMPEG_SOURCE)"; \
@@ -1196,18 +1346,20 @@ deps-ffmpeg: $(HCRTOS_FFMPEG_PATCHES)
 		git -C "$(HCRTOS_FFMPEG_SOURCE)" remote add origin "$(HCRTOS_FFMPEG_URL)"; \
 		fresh=1; \
 	fi; \
-	if ! git -C "$(HCRTOS_FFMPEG_SOURCE)" cat-file -e "$(HCRTOS_FFMPEG_REF)^{commit}" 2>/dev/null; then \
-		case "$(HCRTOS_FFMPEG_REF)" in \
-			n[0-9]*|v[0-9]*|[0-9]*) git -C "$(HCRTOS_FFMPEG_SOURCE)" fetch --depth 1 origin "refs/tags/$(HCRTOS_FFMPEG_REF):refs/tags/$(HCRTOS_FFMPEG_REF)" ;; \
-			*) git -C "$(HCRTOS_FFMPEG_SOURCE)" fetch --depth 1 origin "$(HCRTOS_FFMPEG_REF)" ;; \
+	if ! git -C "$(HCRTOS_FFMPEG_SOURCE)" cat-file -e "$$FFMPEG_CHECKOUT^{commit}" 2>/dev/null; then \
+		case "$$FFMPEG_CHECKOUT" in \
+			n[0-9]*|v[0-9]*|[0-9]*) $(DEP_GIT_ENV) git -C "$(HCRTOS_FFMPEG_SOURCE)" fetch $$depth_arg origin "refs/tags/$$FFMPEG_CHECKOUT:refs/tags/$$FFMPEG_CHECKOUT" ;; \
+			*) $(DEP_GIT_ENV) git -C "$(HCRTOS_FFMPEG_SOURCE)" fetch $$depth_arg origin "$$FFMPEG_CHECKOUT" ;; \
 		esac; \
 	fi; \
-	git -C "$(HCRTOS_FFMPEG_SOURCE)" checkout -q "$(HCRTOS_FFMPEG_REF)"; \
-	git -C "$(HCRTOS_FFMPEG_SOURCE)" reset --hard -q "$(HCRTOS_FFMPEG_REF)"; \
+	git -C "$(HCRTOS_FFMPEG_SOURCE)" checkout -q "$$FFMPEG_CHECKOUT"; \
+	git -C "$(HCRTOS_FFMPEG_SOURCE)" reset --hard -q "$$FFMPEG_CHECKOUT"; \
 	if test "$$fresh" -eq 0; then \
 		git -C "$(HCRTOS_FFMPEG_SOURCE)" clean -fdx -q; \
 	fi; \
-	git -C "$(HCRTOS_FFMPEG_SOURCE)" apply "$(abspath patches/hcrtos-ffmpeg-compat.patch)"
+	if test "$$source_used" = upstream; then \
+		git -C "$(HCRTOS_FFMPEG_SOURCE)" apply "$(abspath patches/hcrtos-ffmpeg-compat.patch)"; \
+	fi
 
 ffmpeg: $(HCRTOS_FFMPEG_STAMP)
 
@@ -1386,7 +1538,9 @@ doctor:
 	@test -e "$(CORE_SOURCE_ROOT)/libretro-common/.git" || { echo "missing core checkout; run: make deps-cores"; exit 1; }
 	@test -f "$(CORE_SUPPORT_ROOT)/zstd/build/single_file_libs/zstddeclib-in.c" || { echo "missing core support checkout; run: make deps"; exit 1; }
 	@test -f "$(CORE_SUPPORT_ROOT)/zlib/inflate.c" || { echo "missing core support checkout; run: make deps"; exit 1; }
-	@test -f "$(CORE_SUPPORT_ROOT)/libchdr/src/libchdr_chd.c" || { echo "missing core support checkout; run: make deps"; exit 1; }
+	@if test "$(PACKAGE_NEEDS_CHD)" = 1; then \
+		test -f "$(CORE_SUPPORT_ROOT)/libchdr/src/libchdr_chd.c" || { echo "missing core support checkout; run: make deps"; exit 1; }; \
+	fi
 	@if test "$(FRONTEND_IMPL)" = native; then \
 		test -f "$(JS2300)/Makefile" || { echo "missing JS2300 source: $(JS2300)"; exit 1; }; \
 		test -f "$(MQUICKJS_DIR)/mquickjs.c" || { echo "missing MQuickJS checkout: $(MQUICKJS_DIR)"; exit 1; }; \
@@ -1423,8 +1577,34 @@ repo-check:
 	}
 	@echo "OK"
 
+$(SETTINGS_EXAMPLE): config/options.mk | $(BUILD)
+	@echo "  GEN     $@"
+	$(Q)mkdir -p $(dir $@)
+	$(Q)printf '%s\n' $(RUNTIME_SETTINGS_LINES) > "$@"
+
+$(CONFIG_EXAMPLE): config/options.mk | $(BUILD)
+	@echo "  GEN     $@"
+	$(Q)mkdir -p $(dir $@)
+	$(Q)printf '%s\n' $(CONFIG_EXAMPLE_LINES) > "$@"
+
+$(DEFAULT_OPTIONS_HEADER): config/options.mk | $(BUILD)
+	@echo "  GEN     $@"
+	$(Q)mkdir -p $(dir $@)
+	$(Q)printf '%s\n' $(DEFAULT_OPTIONS_HEADER_LINES) > "$@"
+
+config-check: $(SETTINGS_EXAMPLE) $(CONFIG_EXAMPLE) $(DEFAULT_OPTIONS_HEADER)
+	@echo "  CHECK   config manifest"
+	@set -e; \
+	for key in $(RUNTIME_SETTING_KEYS); do \
+		grep -Eq "read_key_value\\(line, \"$$key\"" src/native_frontend.c || { echo "runtime setting not loaded: $$key"; exit 1; }; \
+	done
+	@test -s "$(SETTINGS_EXAMPLE)"
+	@test -s "$(CONFIG_EXAMPLE)"
+	@echo "OK"
+
 quick-check:
 	$(Q)$(MAKE) --no-print-directory repo-check
+	$(Q)$(MAKE) --no-print-directory config-check
 	$(Q)$(MAKE) --no-print-directory doctor
 	@echo "  CHECK   core smoke"
 	$(Q)$(MAKE) --no-print-directory core-smoke-check
@@ -1434,6 +1614,8 @@ quick-check:
 	$(Q)$(MAKE) --no-print-directory js2300-check
 	@echo "  CHECK   boot logo"
 	$(Q)$(MAKE) --no-print-directory boot-logo-check
+	@echo "  CHECK   host visuals"
+	$(Q)$(MAKE) --no-print-directory host-visual-check
 	@echo "OK"
 
 core-smoke-check:
@@ -1496,11 +1678,21 @@ frontend-theme-check: $(THEME_ARCHIVE_CHECK) $(THEME_VISUAL_CHECK)
 		done; \
 	fi
 
+host-visual-check: $(HOST_VISUAL_CHECK)
+	@echo "  CHECK   host visual artifacts"
+	$(Q)rm -rf "$(HOST_VISUAL_DIR)"
+	$(Q)mkdir -p "$(HOST_VISUAL_DIR)"
+	$(Q)$(HOST_VISUAL_CHECK) "$(HOST_VISUAL_PPM)" "$(HOST_VISUAL_PNG)"
+	@test -s "$(HOST_VISUAL_PPM)"
+	@test -s "$(HOST_VISUAL_PNG)"
+	@echo "  OK      $(HOST_VISUAL_PPM) $(HOST_VISUAL_PNG)"
+
 frontend-package: $(FRONTEND_PACKAGE_STAMP)
 
 $(FRONTEND_PACKAGE_STAMP): \
 	Makefile $(FRONTEND_CONFIG_STAMP) $(BUILD_IDENTITY_STAMP) LICENSE \
-	$(THIRD_PARTY_NOTICE) $(LANGUAGE_FILES) $(SCRIPT_FILES) | $(OUT)
+	$(THIRD_PARTY_NOTICE) $(LANGUAGE_FILES) $(SCRIPT_FILES) \
+	$(SETTINGS_EXAMPLE) | $(OUT)
 	$(Q)rm -rf $(FRONTEND_PACKAGE)/app $(FRONTEND_PACKAGE)/user \
 		$(FRONTEND_PACKAGE)/saves $(FRONTEND_PACKAGE)/cache \
 		$(FRONTEND_PACKAGE)/logs $(FRONTEND_PACKAGE)/updates \
@@ -1544,6 +1736,7 @@ $(FRONTEND_PACKAGE_STAMP): \
 	} > $(FRONTEND_MANIFEST)
 	$(Q)cp LICENSE $(FRONTEND_PACKAGE)/LICENSE.txt
 	$(Q)cp $(THIRD_PARTY_NOTICE) $(FRONTEND_PACKAGE)/THIRD_PARTY.md
+	$(Q)cp $(SETTINGS_EXAMPLE) $(SETTINGS_PACKAGE)
 	$(Q)rm -f $(FRONTEND_PACKAGE)/.package.*.stamp
 	$(Q)touch $@
 
@@ -1647,6 +1840,7 @@ $(BUILD)/%.o: src/%.c | $(BUILD)
 	$(Q)$(CC) $(CFLAGS) -MD -MP -c $< -o $@
 
 $(BUILD)/unifrog_boot_logo.o: $(BOOT_LOGO_RGB565_INC)
+$(BUILD)/native_frontend.o: $(DEFAULT_OPTIONS_HEADER)
 $(BUILD)/unifrog_fb.o $(BUILD)/unifrog_ge.o $(BUILD)/unifrog_presenter.o $(BUILD)/unifrog_surface_alloc.o: CFLAGS := $(CFLAGS_VIDEO)
 $(BUILD)/unifrog_gfx.o $(BUILD)/unifrog_perf.o $(BUILD)/unifrog_scpu.o: CFLAGS := $(CFLAGS_FAST)
 $(BUILD)/unifrog_audio.o: CFLAGS := $(CFLAGS_AUDIO)
@@ -1724,6 +1918,11 @@ $(THEME_ARCHIVE_CHECK): tools/theme_archive_check.c $(CORE_SUPPORT_ROOT)/zlib/in
 		-o $@
 
 $(THEME_VISUAL_CHECK): tools/theme_visual_check.c $(BUILD_CONFIG_STAMP) | $(BUILD)
+	@echo "  HOSTCC  $@"
+	$(Q)mkdir -p $(dir $@)
+	$(Q)$(HOSTCC) $(HOSTCFLAGS) $< -o $@
+
+$(HOST_VISUAL_CHECK): tools/host_visual_check.c $(BUILD_CONFIG_STAMP) | $(BUILD)
 	@echo "  HOSTCC  $@"
 	$(Q)mkdir -p $(dir $@)
 	$(Q)$(HOSTCC) $(HOSTCFLAGS) $< -o $@

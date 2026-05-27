@@ -8,6 +8,7 @@ binary package notice requirements.
 Current component docs:
 
 - `../cores/README.md`: libretro source workflow, patches, and core ABI rules
+- `dependency-workflow.md`: unifrog-deps, selected cores, and displayless checks
 - `../js2300/README.md`: MQuickJS embedding layer
 - `js2300-scripting.md`: optional JS2300 script contract
 - `muos-integration.md`: upstream MuOS/LVGL checkout and shim policy
