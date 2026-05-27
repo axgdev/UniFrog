@@ -6991,11 +6991,13 @@ out_content_prepare:
       if (vsync_count < active_count)
          active_count -= vsync_count;
       host.run_frames++;
+/*
       if (host.run_frames - host.memory_autosave_frame >=
           LIBRETRO_MEMORY_AUTOSAVE_FRAMES) {
          host.memory_autosave_frame = host.run_frames;
          quick_autosave_memory_files(core, path);
       }
+*/
       host.run_total_count += run_count;
       host.active_total_count += active_count;
       if (run_count > host.run_max_count)
