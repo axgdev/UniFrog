@@ -4342,6 +4342,7 @@ static void save_settings(struct native_frontend *fe)
    fprintf(file, "cpu=%u\n", fe->run_options.scpu_mhz);
    fprintf(file, "frameskip=%d\n", fe->run_options.frameskip);
    fprintf(file, "display=%d\n", fe->run_options.display_mode);
+   fprintf(file, "framebuffer=%d\n", fe->run_options.framebuffer_format);
    fprintf(file, "gain=%u\n", fe->run_options.audio_gain);
    fprintf(file, "ge_clock=%d\n", fe->run_options.ge_clock);
    fprintf(file, "backlight=%d\n", fe->run_options.backlight_level);
@@ -4421,6 +4422,9 @@ static void load_settings(struct native_frontend *fe)
       else if ((value = read_key_value(line, "display")) != NULL)
          fe->run_options.display_mode = parse_int(value,
             fe->run_options.display_mode);
+      else if ((value = read_key_value(line, "framebuffer")) != NULL)
+         fe->run_options.framebuffer_format = parse_int(value,
+            fe->run_options.framebuffer_format);
       else if ((value = read_key_value(line, "gain")) != NULL)
          fe->run_options.audio_gain = (unsigned)parse_int(value,
             (int)fe->run_options.audio_gain);

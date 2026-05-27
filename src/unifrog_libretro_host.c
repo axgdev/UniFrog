@@ -1056,6 +1056,15 @@ static int framebuffer_format_from_text(const char *text, int fallback)
    return fallback;
 }
 
+static bool host_pixel_format_allowed(enum retro_pixel_format format)
+{
+   if (format == RETRO_PIXEL_FORMAT_RGB565)
+      return true;
+   if (format == RETRO_PIXEL_FORMAT_XRGB8888)
+      return host.framebuffer_format == UNIFROG_LIBRETRO_FB_XRGB8888;
+   return false;
+}
+
 static int sanitize_input_profile(int input_profile)
 {
    switch (input_profile) {
@@ -3003,11 +3012,19 @@ bool unifrog_libretro_environment_cb(unsigned cmd, void *data)
    case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT:
       if (!data)
          return false;
+      if (!host_pixel_format_allowed(
+          *(const enum retro_pixel_format *)data)) {
+         printf("unifrog libretro reject_pixel_format=%u framebuffer=%s\n",
+            *(const enum retro_pixel_format *)data,
+            framebuffer_format_label(host.framebuffer_format));
+         (void)unifrog_log_flush();
+         return false;
+      }
       host.pixel_format = *(const enum retro_pixel_format *)data;
-      printf("unifrog libretro set_pixel_format=%u\n", host.pixel_format);
+      printf("unifrog libretro set_pixel_format=%u framebuffer=%s\n",
+         host.pixel_format, framebuffer_format_label(host.framebuffer_format));
       (void)unifrog_log_flush();
-      return host.pixel_format == RETRO_PIXEL_FORMAT_RGB565 ||
-         host.pixel_format == RETRO_PIXEL_FORMAT_XRGB8888;
+      return true;
    case RETRO_ENVIRONMENT_GET_CAN_DUPE:
       if (!data)
          return false;
