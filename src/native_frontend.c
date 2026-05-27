@@ -2923,6 +2923,26 @@ static void frontend_loading_show(struct native_frontend *fe, const char *title,
    unifrog_ui_present(&fe->ui);
 }
 
+static void frontend_loading_handoff_black(struct native_frontend *fe,
+   const char *tag)
+{
+   if (!fe)
+      return;
+
+   frontend_invalidate_draw(fe);
+   if (fe->ui.fb.pixels) {
+      unifrog_ui_begin(&fe->ui, UNIFROG_RGB565(0, 0, 0));
+      unifrog_ui_present(&fe->ui);
+      unifrog_ui_close(&fe->ui);
+      unifrog_log("frontend loading handoff tag=%s closed=1\n",
+         tag && tag[0] ? tag : "");
+   } else {
+      unifrog_ui_close(&fe->ui);
+      unifrog_log("frontend loading handoff tag=%s closed=0\n",
+         tag && tag[0] ? tag : "");
+   }
+}
+
 static void frontend_install_progress_update(void *userdata, const char *stage,
    unsigned done, unsigned total)
 {
@@ -6544,6 +6564,7 @@ static void launch_game(struct native_frontend *fe, struct frontend_item *item)
 struct frontend_media_progress {
    struct native_frontend *fe;
    char name[96];
+   int handoff_done;
 };
 
 static void frontend_media_progress_update(void *userdata, const char *stage,
@@ -6558,6 +6579,16 @@ static void frontend_media_progress_update(void *userdata, const char *stage,
       percent = (unsigned)(((uint64_t)done * 100ull) / (uint64_t)total);
    if (percent > 100u)
       percent = 100u;
+   if (percent >= 100u) {
+      if (!progress->handoff_done) {
+         progress->handoff_done = 1;
+         frontend_loading_handoff_black(progress->fe,
+            stage && stage[0] ? stage : "media");
+      }
+      return;
+   }
+   if (progress->handoff_done)
+      return;
    frontend_loading_show(progress->fe, "Media", progress->name,
       stage && stage[0] ? stage : "loading", percent);
 }
@@ -6608,6 +6639,8 @@ static void launch_media(struct native_frontend *fe, struct frontend_item *item)
    ret = unifrog_media_play_video_ex(item->path, &options);
 #endif
    set_status(fe, "media returned %d", ret);
+   if (fe->ui.fb.pixels)
+      unifrog_ui_close(&fe->ui);
    (void)unifrog_ui_open(&fe->ui, 0);
    unifrog_input_clear();
    if (fe->view == FRONTEND_VIEW_OPEN_WITH ||
