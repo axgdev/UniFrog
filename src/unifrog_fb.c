@@ -347,7 +347,6 @@ int unifrog_fb_pan(struct unifrog_fb *fb, unsigned buffer_index)
       return -1;
    if (get_var(fb->fd, &var) != 0)
       return -1;
-   (void)unifrog_fb_wait_vsync(fb);
    var.xoffset = 0;
    var.yoffset = buffer_index * fb->height;
    if (ioctl(fb->fd, FBIOPAN_DISPLAY, &var) != 0)

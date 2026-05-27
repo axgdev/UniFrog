@@ -201,14 +201,15 @@ static int unifrog_presenter_present_ge(struct unifrog_presenter *presenter,
       (uint64_t)unifrog_perf_elapsed(sync_start, unifrog_perf_count());
    if (ret != 0)
       return ret;
+   if (presenter->flags & UNIFROG_PRESENT_VSYNC) {
+      (void)unifrog_fb_wait_vsync(&presenter->fb);
+      vsync_count = unifrog_perf_elapsed(vsync_start, unifrog_perf_count());
+      presenter->present_vsync_count += (uint64_t)vsync_count;
+   }
    pan_start = unifrog_perf_count();
    ret = unifrog_fb_pan(&presenter->fb, next_buffer);
    presenter->present_pan_count +=
       (uint64_t)unifrog_perf_elapsed(pan_start, unifrog_perf_count());
-   if (presenter->flags & UNIFROG_PRESENT_VSYNC) {
-      vsync_count = unifrog_perf_elapsed(vsync_start, unifrog_perf_count());
-      presenter->present_vsync_count += (uint64_t)vsync_count;
-   }
    if (ret == 0)
       presenter->active_buffer = next_buffer;
    total_count = unifrog_perf_elapsed(total_start, unifrog_perf_count());
