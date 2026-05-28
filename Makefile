@@ -24,6 +24,7 @@ HCRTOS_FFMPEG_SOURCE ?= $(CORE_SUPPORT_ROOT)/ffmpeg-upstream
 HCRTOS_FFMPEG_INSTALL ?= $(CORE_SUPPORT_ROOT)/hcrtos-ffmpeg
 HCRTOS_FFMPEG_PATCHES := patches/hcrtos-ffmpeg-compat.patch
 HCRTOS_FFMPEG_INCLUDE ?= $(HCRTOS_FFMPEG_INSTALL)/include
+HCRTOS_FFMPEG_INSTALL_TARGETS ?= install-libs install-headers
 HCRTOS_FFMPEG_ABI_CFLAGS := \
 	-U__INT32_TYPE__ -U__UINT32_TYPE__ \
 	-D__INT32_TYPE__=int -D__UINT32_TYPE__=unsigned \
@@ -1476,7 +1477,7 @@ $(HCRTOS_FFMPEG_STAMP): $(HCRTOS_FFMPEG_SOURCE_STAMP) Makefile $(HCRTOS_FFMPEG_P
 	@echo "  FFMPEG  build"
 	$(Q)$(MAKE) -C "$(BUILD)/hcrtos-ffmpeg"
 	@echo "  FFMPEG  install"
-	$(Q)$(MAKE) -C "$(BUILD)/hcrtos-ffmpeg" install
+	$(Q)$(MAKE) -C "$(BUILD)/hcrtos-ffmpeg" $(HCRTOS_FFMPEG_INSTALL_TARGETS)
 	$(Q)touch $@
 
 deps-status:
