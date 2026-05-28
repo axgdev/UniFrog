@@ -12,7 +12,7 @@ UNIFROG_DEPS_FETCH_URL := $(UNIFROG_DEPS_REPO_URL)
 else
 UNIFROG_DEPS_FETCH_URL := $(abspath $(UNIFROG_DEPS_REPO_URL))
 endif
-DEP_SOURCE ?= auto
+DEP_SOURCE ?= unifrog
 DEP_CHECKOUT ?= sparse
 DEP_DEPTH ?= 1
 DEP_GIT_ENV ?= GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new'
@@ -304,15 +304,15 @@ all: $(REQUESTED_SUPPORT_TARGETS) $(REQUESTED_CORE_TARGETS)
 
 help:
 	@echo "UniFrog core build:"
-	@echo "  make -C cores init                  Fetch pinned sources and apply patches"
-	@echo "  make -C cores core-init             Fetch only core sources and patches"
+	@echo "  make -C cores init                  Fetch pinned managed source branches"
+	@echo "  make -C cores core-init             Fetch only managed core source branches"
 	@echo "  make -C cores init CORE_IDS=\"gpsp gambatte\""
 	@echo "                                      Fetch selected cores plus required support"
 	@echo "  make -C cores                       Build all core archives"
 	@echo "  make -C cores CORE_IDS=\"gpsp gambatte\""
 	@echo "                                      Build selected core archives"
 	@echo "  make -C cores smoke-check           Build libretro-common and QuickNES"
-	@echo "  make -C cores check                 Verify clean patched checkouts"
+	@echo "  make -C cores check                 Verify clean source checkouts"
 	@echo "  make -C cores clean                 Remove core build outputs"
 	@echo ""
 	@echo "Focused builds:"
@@ -320,7 +320,7 @@ help:
 	@echo "  make -C cores gpsp_multicore"
 	@echo "  make -C cores pce-fast"
 	@echo ""
-	@echo "Patch maintenance:"
+	@echo "Dependency maintenance:"
 	@echo "  make -C cores core-status"
 	@echo "  make -C cores pin-status            Compare pins using manifest policy"
 	@echo "  make -C cores upgrade-pins          Update pins using manifest policy"
@@ -352,7 +352,7 @@ print-config:
 
 support-init:
 	@set -e; \
-	case "$(DEP_SOURCE)" in auto|unifrog|upstream) ;; *) echo "DEP_SOURCE must be auto, unifrog, or upstream"; exit 1;; esac; \
+	case "$(DEP_SOURCE)" in unifrog|upstream) ;; *) echo "DEP_SOURCE must be unifrog or upstream"; exit 1;; esac; \
 	case "$(DEP_CHECKOUT)" in sparse|full) ;; *) echo "DEP_CHECKOUT must be sparse or full"; exit 1;; esac; \
 	mkdir -p "$(CORE_SUPPORT_ROOT)"; \
 	status=0; \
@@ -395,15 +395,11 @@ support-init:
 					rm -f "$$fetch_err"; \
 					source_used=unifrog; \
 					commit=FETCH_HEAD; \
-				elif test "$(DEP_SOURCE)" = unifrog; then \
+				else \
 					if test -s "$$fetch_err"; then cat "$$fetch_err" >&2; fi; \
 					rm -f "$$fetch_err"; \
 					echo "missing managed dependency branch: $$deps_branch"; \
 					exit 1; \
-				else \
-					rm -f "$$fetch_err"; \
-					echo "  FALLBK  support/$$name upstream $$commit"; \
-					git -C "$$dir" remote set-url origin "$$url"; \
 				fi; \
 			fi; \
 			if test -d "$$dir/.git"; then \
@@ -432,11 +428,12 @@ support-init:
 			else \
 				git -C "$$dir" sparse-checkout disable >/dev/null 2>&1 || true; \
 			fi; \
-			git -C "$$dir" checkout -q "$$commit"; \
-			git -C "$$dir" reset --hard -q "$$commit"; \
 			if test "$$fresh" -eq 0; then \
+				git -C "$$dir" reset --hard -q; \
 				git -C "$$dir" clean -fdx -q; \
 			fi; \
+			git -C "$$dir" checkout -q "$$commit"; \
+			git -C "$$dir" reset --hard -q "$$commit"; \
 		) & \
 		pids="$$pids $$!"; \
 	done; \
@@ -453,7 +450,7 @@ smoke-init:
 
 core-init:
 	@set -e; \
-	case "$(DEP_SOURCE)" in auto|unifrog|upstream) ;; *) echo "DEP_SOURCE must be auto, unifrog, or upstream"; exit 1;; esac; \
+	case "$(DEP_SOURCE)" in unifrog|upstream) ;; *) echo "DEP_SOURCE must be unifrog or upstream"; exit 1;; esac; \
 	case "$(DEP_CHECKOUT)" in sparse|full) ;; *) echo "DEP_CHECKOUT must be sparse or full"; exit 1;; esac; \
 	mkdir -p "$(CORE_SOURCE_ROOT)"; \
 	status=0; \
@@ -494,15 +491,11 @@ core-init:
 					rm -f "$$fetch_err"; \
 					source_used=unifrog; \
 					commit=FETCH_HEAD; \
-				elif test "$(DEP_SOURCE)" = unifrog; then \
+				else \
 					if test -s "$$fetch_err"; then cat "$$fetch_err" >&2; fi; \
 					rm -f "$$fetch_err"; \
 					echo "missing managed dependency branch: $$deps_branch"; \
 					exit 1; \
-				else \
-					rm -f "$$fetch_err"; \
-					echo "  FALLBK  $$name upstream $$commit"; \
-					git -C "$$dir" remote set-url origin "$$url"; \
 				fi; \
 			fi; \
 			if test -d "$$dir/.git"; then \
@@ -530,23 +523,12 @@ core-init:
 			else \
 				git -C "$$dir" sparse-checkout disable >/dev/null 2>&1 || true; \
 			fi; \
-			git -C "$$dir" checkout -q "$$commit"; \
-			git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
-			git -C "$$dir" reset --hard -q "$$commit"; \
 			if test "$$fresh" -eq 0; then \
+				git -C "$$dir" reset --hard -q; \
 				git -C "$$dir" clean -fdx -q; \
 			fi; \
-			git -C "$$dir" config user.name "UniFrog CI"; \
-			git -C "$$dir" config user.email "ci@unifrog.local"; \
-			if test "$$source_used" = upstream && ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
-				am_err="$$dir/.git/unifrog-am.err"; \
-				if ! git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch 2>"$$am_err"; then \
-					cat "$$am_err" >&2; \
-					exit 1; \
-				fi; \
-				grep -v '^warning: quoted CRLF detected$$' "$$am_err" >&2 || true; \
-				rm -f "$$am_err"; \
-			fi; \
+			git -C "$$dir" checkout -q "$$commit"; \
+			git -C "$$dir" reset --hard -q "$$commit"; \
 			if test "$$name" = picodrive; then \
 				git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" -- cpu/cyclone pico/sound/emu2413 platform/libpicofe; \
 				dr_dir="$$dir/platform/common/dr_libs"; \
@@ -760,19 +742,10 @@ update-core:
 				git -C "$$dir" sparse-checkout init --cone; \
 				git -C "$$dir" sparse-checkout set --skip-checks $$sparse; \
 			fi; \
-			git -C "$$dir" checkout -q "$$commit"; \
-			git -C "$$dir" am --abort >/dev/null 2>&1 || true; \
-			git -C "$$dir" reset --hard -q "$$commit"; \
+			git -C "$$dir" reset --hard -q; \
 			git -C "$$dir" clean -fdx -q; \
-			if ls "patches/$$name"/*.patch >/dev/null 2>&1; then \
-				am_err="$$dir/.git/unifrog-am.err"; \
-				if ! git -C "$$dir" am --keep-cr -q "$(abspath patches/$$name)"/*.patch 2>"$$am_err"; then \
-					cat "$$am_err" >&2; \
-					exit 1; \
-				fi; \
-				grep -v '^warning: quoted CRLF detected$$' "$$am_err" >&2 || true; \
-				rm -f "$$am_err"; \
-			fi; \
+			git -C "$$dir" checkout -q "$$commit"; \
+			git -C "$$dir" reset --hard -q "$$commit"; \
 			if test "$$name" = picodrive; then \
 				git -C "$$dir" submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" -- cpu/cyclone pico/sound/emu2413 platform/libpicofe; \
 				dr_dir="$$dir/platform/common/dr_libs"; \

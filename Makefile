@@ -11,7 +11,7 @@ UNIFROG_DEPS_FETCH_URL := $(UNIFROG_DEPS_REPO_URL)
 else
 UNIFROG_DEPS_FETCH_URL := $(abspath $(UNIFROG_DEPS_REPO_URL))
 endif
-DEP_SOURCE ?= auto
+DEP_SOURCE ?= unifrog
 DEP_CHECKOUT ?= sparse
 DEP_DEPTH ?= 1
 DEP_GIT_ENV ?= GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new'
@@ -22,7 +22,6 @@ HCRTOS_FFMPEG_DEPS_BRANCH ?= deps/ffmpeg/n4.4.7
 HCRTOS_FFMPEG_DEPS_COMMIT ?= -
 HCRTOS_FFMPEG_SOURCE ?= $(CORE_SUPPORT_ROOT)/ffmpeg-upstream
 HCRTOS_FFMPEG_INSTALL ?= $(CORE_SUPPORT_ROOT)/hcrtos-ffmpeg
-HCRTOS_FFMPEG_PATCHES := patches/hcrtos-ffmpeg-compat.patch
 HCRTOS_FFMPEG_INCLUDE ?= $(HCRTOS_FFMPEG_INSTALL)/include
 HCRTOS_FFMPEG_INSTALL_TARGETS ?= install-libs install-headers
 HCRTOS_FFMPEG_ABI_CFLAGS := \
@@ -851,7 +850,6 @@ CORE_MODULE_ENTRY_OBJECTS := $(LIBRETRO_CORE_ENTRY_OBJECTS)
 CORE_MODULE_SUPPORT_OBJECT := $(BUILD)/core_modules/support.o
 
 DTS_INPUTS := $(DTS) $(shell test ! -d dts/include || find dts/include -type f | sort)
-SDK_PATCHES := $(shell test ! -d "$(SDK)/patches/open-source" || find "$(SDK)/patches/open-source" -type f -name '*.patch' | sort)
 JS2300_INPUTS := $(addprefix $(JS2300)/,$(shell test ! -d "$(JS2300)/.git" || git -C "$(JS2300)" ls-files))
 MQUICKJS_INPUTS := $(addprefix $(MQUICKJS_DIR)/,$(shell test ! -d "$(MQUICKJS_DIR)/.git" || git -C "$(MQUICKJS_DIR)" ls-files '*.c' '*.h' Makefile))
 
@@ -895,14 +893,14 @@ CORE_CONFIG_TOKEN := $(shell { \
 		'SDK=$(abspath $(SDK))' 'CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT))' \
 		'CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT))' 'CCACHE=$(CCACHE)' \
 		'JOBS=$(JOBS)'; \
-	for f in $(CORES)/manifest.mk $(SDK_PATCHES) $(DTS_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
+	for f in $(CORES)/manifest.mk $(DTS_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
 } | cksum | awk '{print $$1}')
 SDK_CONFIG_TOKEN := $(shell { \
 	printf '%s\n' 'TOOLCHAIN=$(TOOLCHAIN)' 'CROSS_COMPILE=$(CROSS_COMPILE)' \
 		'CCACHE=$(CCACHE)' 'JOBS=$(JOBS)' 'SD_MODE=$(SD_MODE)' \
 		'SDK=$(abspath $(SDK))'; \
 	git -C "$(SDK)" rev-parse --short=12 HEAD 2>/dev/null || echo unknown; \
-	for f in $(SDK_PATCHES) $(DTS_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
+	for f in $(DTS_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
 } | cksum | awk '{print $$1}')
 CORE_ARCHIVE_STAMP := $(BUILD)/core-archives.$(CORE_CONFIG_TOKEN).stamp
 JS2300_CONFIG_TOKEN := $(shell { \
@@ -1028,7 +1026,7 @@ help:
 	@echo "  make host-visual-check"
 	@echo "                     Render displayless PPM/PNG frontend artifacts"
 	@echo "  make deps-status   Show pins vs policy, or override MODE=head|tag"
-	@echo "  make ffmpeg        Build patched HCRTOS FFmpeg for local media"
+	@echo "  make ffmpeg        Build UniFrog FFmpeg for local media"
 	@echo "  make upgrade-deps  Bump pins by policy, or override MODE=head|tag"
 	@echo "  make check         Build firmware, SD files, and link layout check"
 	@echo "  make list-cores    List libretro CORE= ids"
@@ -1086,8 +1084,8 @@ help:
 	@echo "  make FRONTEND_IMPL=native   Build the native frontend (default)"
 	@echo "  make CORE_IDS=\"gpsp gambatte\"  Limit fetched, built, and packaged cores"
 	@echo "  make DEP_CHECKOUT=full  Keep full dependency source trees for development"
-	@echo "  make DEP_SOURCE=unifrog  Require $(UNIFROG_DEPS_REPO_URL)"
-	@echo "  make DEP_SOURCE=upstream  Fetch directly from original upstream remotes"
+	@echo "  make DEP_SOURCE=unifrog  Fetch managed branches from $(UNIFROG_DEPS_REPO_URL)"
+	@echo "  make DEP_SOURCE=upstream  Fetch directly from original upstream remotes for development"
 	@echo "  make MEDIA_AUDIO_FEED_LEAD_MS=3000  Tune hardware audio feed lead"
 	@echo "  make MEDIA_VIDEO_KSHM_SIZE=8388608  Tune viddec compressed ring"
 	@echo "  make MEDIA_VIDEO_LOWRES_KSHM_SIZE=8388608  Override low-res viddec compressed ring"
@@ -1207,10 +1205,10 @@ endif
 deps: deps-sdk deps-mquickjs deps-lvgl deps-cores deps-ffmpeg ffmpeg
 
 deps-alpine:
-	apk add git make dtc tcc tcc-libs-static musl-dev zlib-dev ccache curl tar xz zip patch
+	apk add git make dtc tcc tcc-libs-static musl-dev zlib-dev ccache curl tar xz zip
 
 deps-ubuntu:
-	@echo "sudo apt-get update && sudo apt-get install -y git make device-tree-compiler tcc zlib1g-dev ccache curl xz-utils zip patch"
+	@echo "sudo apt-get update && sudo apt-get install -y git make device-tree-compiler tcc zlib1g-dev ccache curl xz-utils zip"
 
 deps-sdk:
 	git config --global --add safe.directory "$(abspath .)" 2>/dev/null || true
@@ -1224,7 +1222,7 @@ deps-mquickjs:
 	source_used=upstream; \
 	depth_arg=""; \
 	if test "$(DEP_DEPTH)" != 0; then depth_arg="--depth $(DEP_DEPTH)"; fi; \
-	case "$(DEP_SOURCE)" in auto|unifrog|upstream) ;; *) echo "DEP_SOURCE must be auto, unifrog, or upstream"; exit 1;; esac; \
+	case "$(DEP_SOURCE)" in unifrog|upstream) ;; *) echo "DEP_SOURCE must be unifrog or upstream"; exit 1;; esac; \
 	if test "$(DEP_SOURCE)" != upstream; then \
 		if test -d "$(MQUICKJS_DIR)/.git"; then \
 			echo "  FETCH   $(MQUICKJS_DIR) managed"; \
@@ -1243,16 +1241,11 @@ deps-mquickjs:
 			rm -f "$$fetch_err"; \
 			source_used=unifrog; \
 			MQUICKJS_CHECKOUT=FETCH_HEAD; \
-		elif test "$(DEP_SOURCE)" = unifrog; then \
+		else \
 			if test -s "$$fetch_err"; then cat "$$fetch_err" >&2; fi; \
 			rm -f "$$fetch_err"; \
 			echo "missing managed dependency branch: $(MQUICKJS_DEPS_BRANCH)"; \
 			exit 1; \
-		else \
-			rm -f "$$fetch_err"; \
-			echo "  FALLBK  $(MQUICKJS_DIR) upstream $(MQUICKJS_REF)"; \
-			git -C "$(MQUICKJS_DIR)" remote set-url origin "$(MQUICKJS_URL)"; \
-			MQUICKJS_CHECKOUT="$(MQUICKJS_REF)"; \
 		fi; \
 	else \
 		MQUICKJS_CHECKOUT="$(MQUICKJS_REF)"; \
@@ -1270,11 +1263,12 @@ deps-mquickjs:
 	if ! git -C "$(MQUICKJS_DIR)" cat-file -e "$$MQUICKJS_CHECKOUT^{commit}" 2>/dev/null; then \
 		$(DEP_GIT_ENV) git -C "$(MQUICKJS_DIR)" fetch $$depth_arg origin "$$MQUICKJS_CHECKOUT"; \
 	fi; \
-	git -C "$(MQUICKJS_DIR)" checkout -q "$$MQUICKJS_CHECKOUT"; \
-	git -C "$(MQUICKJS_DIR)" reset --hard -q "$$MQUICKJS_CHECKOUT"; \
 	if test "$$fresh" -eq 0; then \
+		git -C "$(MQUICKJS_DIR)" reset --hard -q; \
 		git -C "$(MQUICKJS_DIR)" clean -fdx -q; \
-	fi
+	fi; \
+	git -C "$(MQUICKJS_DIR)" checkout -q "$$MQUICKJS_CHECKOUT"; \
+	git -C "$(MQUICKJS_DIR)" reset --hard -q "$$MQUICKJS_CHECKOUT"
 
 deps-lvgl:
 	@mkdir -p "$(dir $(LVGL_DIR))"
@@ -1282,7 +1276,7 @@ deps-lvgl:
 	source_used=upstream; \
 	depth_arg=""; \
 	if test "$(DEP_DEPTH)" != 0; then depth_arg="--depth $(DEP_DEPTH)"; fi; \
-	case "$(DEP_SOURCE)" in auto|unifrog|upstream) ;; *) echo "DEP_SOURCE must be auto, unifrog, or upstream"; exit 1;; esac; \
+	case "$(DEP_SOURCE)" in unifrog|upstream) ;; *) echo "DEP_SOURCE must be unifrog or upstream"; exit 1;; esac; \
 	if test "$(DEP_SOURCE)" != upstream; then \
 		if test -d "$(LVGL_DIR)/.git"; then \
 			echo "  FETCH   $(LVGL_DIR) managed"; \
@@ -1301,16 +1295,11 @@ deps-lvgl:
 			rm -f "$$fetch_err"; \
 			source_used=unifrog; \
 			LVGL_CHECKOUT=FETCH_HEAD; \
-		elif test "$(DEP_SOURCE)" = unifrog; then \
+		else \
 			if test -s "$$fetch_err"; then cat "$$fetch_err" >&2; fi; \
 			rm -f "$$fetch_err"; \
 			echo "missing managed dependency branch: $(LVGL_DEPS_BRANCH)"; \
 			exit 1; \
-		else \
-			rm -f "$$fetch_err"; \
-			echo "  FALLBK  $(LVGL_DIR) upstream $(LVGL_REF)"; \
-			git -C "$(LVGL_DIR)" remote set-url origin "$(LVGL_URL)"; \
-			LVGL_CHECKOUT="$(LVGL_REF)"; \
 		fi; \
 	else \
 		LVGL_CHECKOUT="$(LVGL_REF)"; \
@@ -1328,22 +1317,23 @@ deps-lvgl:
 	if ! git -C "$(LVGL_DIR)" cat-file -e "$$LVGL_CHECKOUT^{commit}" 2>/dev/null; then \
 		$(DEP_GIT_ENV) git -C "$(LVGL_DIR)" fetch $$depth_arg origin "$$LVGL_CHECKOUT"; \
 	fi; \
-	git -C "$(LVGL_DIR)" checkout -q "$$LVGL_CHECKOUT"; \
-	git -C "$(LVGL_DIR)" reset --hard -q "$$LVGL_CHECKOUT"; \
 	if test "$$fresh" -eq 0; then \
+		git -C "$(LVGL_DIR)" reset --hard -q; \
 		git -C "$(LVGL_DIR)" clean -fdx -q; \
-	fi
+	fi; \
+	git -C "$(LVGL_DIR)" checkout -q "$$LVGL_CHECKOUT"; \
+	git -C "$(LVGL_DIR)" reset --hard -q "$$LVGL_CHECKOUT"
 
 deps-ffmpeg: $(HCRTOS_FFMPEG_SOURCE_STAMP)
 
-$(HCRTOS_FFMPEG_SOURCE_STAMP): $(HCRTOS_FFMPEG_SOURCE_CONFIG) $(HCRTOS_FFMPEG_PATCHES) Makefile
+$(HCRTOS_FFMPEG_SOURCE_STAMP): $(HCRTOS_FFMPEG_SOURCE_CONFIG) Makefile
 	@mkdir -p "$(dir $(HCRTOS_FFMPEG_SOURCE))"
 	@fresh=0; \
 	source_used=upstream; \
 	depth_arg=""; \
 	FFMPEG_CHECKOUT="$(HCRTOS_FFMPEG_REF)"; \
 	if test "$(DEP_DEPTH)" != 0; then depth_arg="--depth $(DEP_DEPTH)"; fi; \
-	case "$(DEP_SOURCE)" in auto|unifrog|upstream) ;; *) echo "DEP_SOURCE must be auto, unifrog, or upstream"; exit 1;; esac; \
+	case "$(DEP_SOURCE)" in unifrog|upstream) ;; *) echo "DEP_SOURCE must be unifrog or upstream"; exit 1;; esac; \
 	if test "$(DEP_SOURCE)" != upstream; then \
 		if test -d "$(HCRTOS_FFMPEG_SOURCE)/.git"; then \
 			echo "  FETCH   $(HCRTOS_FFMPEG_SOURCE) managed"; \
@@ -1362,16 +1352,11 @@ $(HCRTOS_FFMPEG_SOURCE_STAMP): $(HCRTOS_FFMPEG_SOURCE_CONFIG) $(HCRTOS_FFMPEG_PA
 			rm -f "$$fetch_err"; \
 			source_used=unifrog; \
 			FFMPEG_CHECKOUT=FETCH_HEAD; \
-		elif test "$(DEP_SOURCE)" = unifrog; then \
+		else \
 			if test -s "$$fetch_err"; then cat "$$fetch_err" >&2; fi; \
 			rm -f "$$fetch_err"; \
 			echo "missing managed dependency branch: $(HCRTOS_FFMPEG_DEPS_BRANCH)"; \
 			exit 1; \
-		else \
-			rm -f "$$fetch_err"; \
-			echo "  FALLBK  $(HCRTOS_FFMPEG_SOURCE) upstream $(HCRTOS_FFMPEG_REF)"; \
-			git -C "$(HCRTOS_FFMPEG_SOURCE)" remote set-url origin "$(HCRTOS_FFMPEG_URL)"; \
-			FFMPEG_CHECKOUT="$(HCRTOS_FFMPEG_REF)"; \
 		fi; \
 	fi; \
 	if test -d "$(HCRTOS_FFMPEG_SOURCE)/.git"; then \
@@ -1390,19 +1375,17 @@ $(HCRTOS_FFMPEG_SOURCE_STAMP): $(HCRTOS_FFMPEG_SOURCE_CONFIG) $(HCRTOS_FFMPEG_PA
 			*) $(DEP_GIT_ENV) git -C "$(HCRTOS_FFMPEG_SOURCE)" fetch $$depth_arg origin "$$FFMPEG_CHECKOUT" ;; \
 		esac; \
 	fi; \
-	git -C "$(HCRTOS_FFMPEG_SOURCE)" checkout -q "$$FFMPEG_CHECKOUT"; \
-	git -C "$(HCRTOS_FFMPEG_SOURCE)" reset --hard -q "$$FFMPEG_CHECKOUT"; \
 	if test "$$fresh" -eq 0; then \
+		git -C "$(HCRTOS_FFMPEG_SOURCE)" reset --hard -q; \
 		git -C "$(HCRTOS_FFMPEG_SOURCE)" clean -fdx -q; \
 	fi; \
-	if test "$$source_used" = upstream; then \
-		git -C "$(HCRTOS_FFMPEG_SOURCE)" apply "$(abspath patches/hcrtos-ffmpeg-compat.patch)"; \
-	fi; \
+	git -C "$(HCRTOS_FFMPEG_SOURCE)" checkout -q "$$FFMPEG_CHECKOUT"; \
+	git -C "$(HCRTOS_FFMPEG_SOURCE)" reset --hard -q "$$FFMPEG_CHECKOUT"; \
 	touch "$@"
 
 ffmpeg: $(HCRTOS_FFMPEG_STAMP)
 
-$(HCRTOS_FFMPEG_STAMP): $(HCRTOS_FFMPEG_SOURCE_STAMP) Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
+$(HCRTOS_FFMPEG_STAMP): $(HCRTOS_FFMPEG_SOURCE_STAMP) Makefile | $(BUILD)
 	@test -f "$(HCRTOS_FFMPEG_SOURCE)/configure" || { echo "missing HCRTOS FFmpeg source: $(HCRTOS_FFMPEG_SOURCE)"; exit 1; }
 	@echo "  FFMPEG  configure"
 	$(Q)rm -rf "$(BUILD)/hcrtos-ffmpeg" "$(HCRTOS_FFMPEG_INSTALL)"
@@ -1665,7 +1648,7 @@ sdk: $(SDK_BUILD_STAMP)
 $(SDK_BUILD_STAMP): $(SDK_KERNEL_LIB) | $(BUILD)
 	$(Q)touch $@
 
-$(SDK_KERNEL_LIB): $(DTS_INPUTS) $(SDK_PATCHES) | $(BUILD)
+$(SDK_KERNEL_LIB): $(DTS_INPUTS) | $(BUILD)
 	$(Q)$(MAKE) -C $(SDK) check TOOLCHAIN=$(TOOLCHAIN) \
 		CROSS_COMPILE=$(CROSS_COMPILE) CCACHE=$(CCACHE) JOBS=$(JOBS) \
 		SD_MODE=$(SD_MODE) BOARD_DTS=$(abspath $(DTS)) \

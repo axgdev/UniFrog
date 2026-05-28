@@ -158,7 +158,7 @@ firmware and SDK kernel rebuild.
 
 ```text
 board/                 Local SF2000 device tree input
-cores/                 Libretro source manifest, patches, and core build
+cores/                 Libretro source manifest and core build
 docs/                  Hardware, ABI, loader, and diagnostics notes
 include/unifrog/       Public UniFrog C interfaces
 js2300/                MQuickJS embedding layer
@@ -184,7 +184,7 @@ Dependency workflow details, including the `unifrog-deps` branch layout,
 ## Component Docs
 
 - `docs/README.md` maps the retained hardware and architecture notes.
-- `cores/README.md` explains core source fetching, patching, and ABI rules.
+- `cores/README.md` explains core source fetching, dependency branches, and ABI rules.
 - `docs/js2300-scripting.md` covers optional JS2300 scripts.
 - `js2300/README.md` covers the embedded JavaScript runtime layer.
 

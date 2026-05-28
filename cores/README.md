@@ -19,20 +19,20 @@ Useful core-maintenance targets:
 ```text
 make -C cores help                  Show the core workflow
 make -C cores print-config          Show paths and tool settings
-make -C cores init                  Fetch pinned sources and apply patches
+make -C cores init                  Fetch pinned managed source branches
 make -C cores init CORE_IDS="gpsp gambatte"
                                     Fetch only selected cores plus support
 make -C cores                       Build every configured core archive
 make -C cores CORE_IDS="gpsp gambatte"
                                     Build only selected core archives
 make -C cores smoke-check           Build libretro-common and QuickNES
-make -C cores check                 Verify clean patched checkouts
+make -C cores check                 Verify clean source checkouts
 make -C cores core-status           Show source checkout status
 make -C cores pin-status            Compare pins using manifest policy
 make -C cores upgrade-pins          Update manifest pins by policy
-make -C cores diff-core CORE=gpsp   Show UniFrog patch delta for one core
-make -C cores log-core CORE=gpsp    Show UniFrog patch commits for one core
-make -C cores update-core CORE=gpsp Refresh one patched checkout
+make -C cores diff-core CORE=gpsp   Show local delta for one core checkout
+make -C cores log-core CORE=gpsp    Show local commits for one core checkout
+make -C cores update-core CORE=gpsp Refresh one core checkout from upstream
 make -C cores dev-core CORE=mycore CORE_DIR=/work/mycore
                                     Build a local external core checkout
 ```
@@ -48,17 +48,15 @@ name|checkout-directory|upstream-url|pin-policy|upstream-commit|deps-branch|deps
 `pin-policy` is `head` or `tag`. The default update path follows that policy;
 `MODE=head` or `MODE=tag` is only for an explicit override.
 
-`deps-branch` points at the full-tree dependency branch in
-`git@github.com:axgdev/unifrog-deps.git`. `DEP_SOURCE=auto` tries that managed
-branch first and falls back to the original upstream URL. `DEP_SOURCE=upstream`
-uses the original URL directly, and `DEP_SOURCE=unifrog` requires the managed
-branch to exist. `DEP_CHECKOUT=sparse` is the default; use
-`DEP_CHECKOUT=full DEP_DEPTH=0` for normal full-history development checkouts.
+`deps-branch` points at the sparse dependency branch in
+`git@github.com:axgdev/unifrog-deps.git`. `DEP_SOURCE=unifrog` is the default
+and requires that managed branch to exist. `DEP_SOURCE=upstream` uses the
+original URL directly for development checkouts. `DEP_CHECKOUT=sparse` is the
+default; use `DEP_CHECKOUT=full DEP_DEPTH=0` when you intentionally want the
+full upstream tree.
 
-Legacy UniFrog-specific changes may still live as committed patch series under
-`cores/patches/<name>/`; those patches are applied only for upstream-source
-checkouts. New dependency integrations should prefer a managed dependency
-branch so upstream churn does not repeatedly break local patch application.
+UniFrog-specific dependency changes should live as commits on the managed
+dependency branch rather than as patch files in this repository.
 Prefer build-wrapper changes in `cores/Makefile` for toolchain flags, excluded
 host-only sources, warning policy, and static libretro symbol renames.
 
@@ -73,8 +71,8 @@ and source location to `../THIRD_PARTY.md`.
 The release package includes binary core modules, so license obligations follow
 the enabled module set. Several configured cores are GPL-family or
 non-commercial licensed. Keep the source path reproducible through
-`cores/manifest.mk` pins plus `cores/patches/<name>/`, and avoid copying
-upstream source into this repository.
+`cores/manifest.mk` pins plus the managed branches in `unifrog-deps`, and avoid
+copying upstream source into this repository.
 
 ## ABI Contract
 

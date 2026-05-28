@@ -70,8 +70,9 @@ Generic emulator modules are libretro cores. UniFrog-specific modules, such as
 table in `include/unifrog/abi.h` for device services.
 
 Module binaries retain the licenses of their upstream sources. The active
-inventory lives in `../THIRD_PARTY.md`; `cores/manifest.mk` and
-`cores/patches/` are the reproducible source contract for libretro modules.
+inventory lives in `../THIRD_PARTY.md`; `cores/manifest.mk` and the managed
+branches in `unifrog-deps` are the reproducible source contract for libretro
+modules.
 
 ABI rules:
 

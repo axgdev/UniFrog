@@ -28,10 +28,11 @@ deps/ffmpeg/n4.4.7
 
 The branch is the UniFrog-ready dependency subset, not a full upstream mirror.
 It intentionally carries only the files needed by the default build so
-`unifrog-deps` stays small. It may include the small local changes that used to
-be applied as patches. Do not force-push a branch after other developers may
-have fetched it. Create a new branch for a new upstream base or a meaningful
-integration change, then update the pin in the manifest.
+`unifrog-deps` stays small. UniFrog-specific dependency changes live as normal
+commits on these branches instead of build-time patches. Do not force-push a
+branch after other developers may have fetched it. Create a new branch for a new
+upstream base or a meaningful integration change, then update the pin in the
+manifest.
 
 `cores/manifest.mk` still records the original upstream URL and upstream commit,
 and the root `Makefile` does the same for root-level dependencies such as
@@ -40,15 +41,15 @@ separate `upstream/<name>` branches in the managed repo.
 
 ## Fetch Modes
 
-Default fetch behavior is conservative:
+Default fetch behavior uses the managed dependency branches:
 
 ```sh
 make setup
 ```
 
-`DEP_SOURCE=auto` tries `unifrog-deps` first and falls back to the original
-upstream URL when a managed branch is not present. Fetches use non-interactive
-Git settings so missing SSH credentials fail quickly instead of blocking.
+`DEP_SOURCE=unifrog` is the default and requires each managed branch to be
+present. Fetches use non-interactive Git settings so missing SSH credentials
+fail quickly instead of blocking.
 
 Useful overrides:
 
