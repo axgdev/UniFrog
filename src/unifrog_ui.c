@@ -76,14 +76,10 @@ int unifrog_ui_open(struct unifrog_ui *ui, int preserve_logo)
    flags = preserve_logo ? UNIFROG_FB_OPEN_PRESERVE : UNIFROG_FB_OPEN_DEFAULT;
    if (unifrog_fb_open(&ui->fb, flags) != 0)
       return -1;
-   /* The menu renderer draws text, icons, and rows through the CPU already.
-    * Using HCGE only for its 320x240 background clear adds a second hardware
-    * owner for no meaningful throughput benefit.  More importantly, runs
-    * 211/212 proved the first hcge_fill_rect can wait forever after a NuttX
-    * chain handoff, leaving the last boot-logo buffer scanned out.  Keep GE
-    * ownership with the presenters and emulator paths that materially need
-    * it; an occasional 150 KiB software clear is bounded and deterministic. */
-   ui->ge.fd = -1;
+   if (unifrog_ge_open(&ui->ge) == 0) {
+      ui->ge_ready = 1;
+      (void)unifrog_ge_set_fast_clock(&ui->ge);
+   }
    ui_set_handoff_buffers(&ui->fb, preserve_logo);
    ui->draw_buffer = ui->fb.current_buffer;
    if (preserve_logo) {
@@ -110,6 +106,8 @@ struct unifrog_surface unifrog_ui_surface(struct unifrog_ui *ui)
 void unifrog_ui_begin(struct unifrog_ui *ui, uint16_t color)
 {
    struct unifrog_surface surface;
+   int fill_ret;
+   int sync_ret;
 
    if (!ui || ui->frame_open)
       return;
@@ -120,6 +118,31 @@ void unifrog_ui_begin(struct unifrog_ui *ui, uint16_t color)
    surface = unifrog_ui_surface(ui);
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_UI_BEGIN,
       ui->draw_buffer, ui->ge_ready, color);
+   if (ui->ge_ready) {
+      struct unifrog_ge_surface dst =
+         unifrog_fb_ge_surface_for_buffer(&ui->fb, ui->draw_buffer);
+      struct unifrog_ge_rect rect = {
+         0, 0, (int)surface.width, (int)surface.height
+      };
+      uint32_t r = ((uint32_t)((color >> 11) & 0x1fu) * 255u + 15u) / 31u;
+      uint32_t g = ((uint32_t)((color >> 5) & 0x3fu) * 255u + 31u) / 63u;
+      uint32_t b = ((uint32_t)(color & 0x1fu) * 255u + 15u) / 31u;
+
+      fill_ret = unifrog_ge_fill(&ui->ge, &dst, &rect,
+         0xff000000u | (r << 16) | (g << 8) | b);
+      unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_FILL_DONE,
+         (uint32_t)fill_ret, ui->draw_buffer, 0);
+      if (fill_ret == 0) {
+         sync_ret = unifrog_ge_sync(&ui->ge);
+         unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_SYNC_DONE,
+            (uint32_t)sync_ret, ui->draw_buffer, 0);
+         if (sync_ret == 0) {
+            unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_UI_FILL_DONE,
+               ui->draw_buffer, surface.width, surface.height);
+            return;
+         }
+      }
+   }
    unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height, color);
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_UI_FILL_DONE,
       ui->draw_buffer, surface.width, surface.height);
@@ -127,6 +150,7 @@ void unifrog_ui_begin(struct unifrog_ui *ui, uint16_t color)
 
 void unifrog_ui_present(struct unifrog_ui *ui)
 {
+   int sync_ret = 0;
    int pan_ret;
 
    if (!ui)
@@ -137,11 +161,13 @@ void unifrog_ui_present(struct unifrog_ui *ui)
    }
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_UI_PRESENT,
       ui->draw_buffer, ui->ge_ready, ui->fb.current_buffer);
+   if (ui->ge_ready)
+      sync_ret = unifrog_ge_sync(&ui->ge);
    unifrog_fb_flush_buffer(&ui->fb, ui->draw_buffer);
    pan_ret = unifrog_fb_pan(&ui->fb, ui->draw_buffer);
    ui->frame_open = 0;
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_UI_PRESENT_DONE,
-      0, (uint32_t)pan_ret, ui->fb.current_buffer);
+      (uint32_t)sync_ret, (uint32_t)pan_ret, ui->fb.current_buffer);
 }
 
 void unifrog_ui_wait(struct unifrog_ui *ui)
