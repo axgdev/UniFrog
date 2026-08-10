@@ -102,6 +102,36 @@ static const char *boot_trace_name(uint32_t event)
       return "unifrog.fb_clear.done";
    case FASTBOOT_TRACE_UNIFROG_BOOT_LOGO_DONE:
       return "unifrog.boot_logo.done";
+   case FASTBOOT_TRACE_UNIFROG_NATIVE_BEGIN:
+      return "unifrog.native.begin";
+   case FASTBOOT_TRACE_UNIFROG_DIRS_DONE:
+      return "unifrog.dirs.done";
+   case FASTBOOT_TRACE_UNIFROG_SETTINGS_DONE:
+      return "unifrog.settings.done";
+   case FASTBOOT_TRACE_UNIFROG_THEME_DONE:
+      return "unifrog.theme.done";
+   case FASTBOOT_TRACE_UNIFROG_INPUT_DONE:
+      return "unifrog.input.done";
+   case FASTBOOT_TRACE_UNIFROG_BOOT_OK_DONE:
+      return "unifrog.boot_ok.done";
+   case FASTBOOT_TRACE_UNIFROG_UI_OPEN_DONE:
+      return "unifrog.ui_open.done";
+   case FASTBOOT_TRACE_UNIFROG_LAUNCH_DONE:
+      return "unifrog.launch.done";
+   case FASTBOOT_TRACE_UNIFROG_LOOP_BEGIN:
+      return "unifrog.loop.begin";
+   case FASTBOOT_TRACE_UNIFROG_LOOP_DONE:
+      return "unifrog.loop.done";
+   case FASTBOOT_TRACE_UNIFROG_UI_BEGIN:
+      return "unifrog.ui.begin";
+   case FASTBOOT_TRACE_UNIFROG_GE_FILL_DONE:
+      return "unifrog.ge_fill.done";
+   case FASTBOOT_TRACE_UNIFROG_GE_SYNC_DONE:
+      return "unifrog.ge_sync.done";
+   case FASTBOOT_TRACE_UNIFROG_UI_PRESENT:
+      return "unifrog.ui_present.begin";
+   case FASTBOOT_TRACE_UNIFROG_UI_PRESENT_DONE:
+      return "unifrog.ui_present.done";
    case FASTBOOT_TRACE_SDK_PWM_PROBE_BEGIN:
       return "sdk.pwm.probe_begin";
    case FASTBOOT_TRACE_SDK_PWM_PINMUX_ACTIVE:

@@ -21,6 +21,7 @@
 #include <unifrog/battery.h>
 #include <unifrog/boot.h>
 #include <unifrog/boot_logo.h>
+#include <unifrog/boot_trace.h>
 #include <unifrog/build_info.h>
 #include <unifrog/core_module.h>
 #include <unifrog/diag.h>
@@ -7658,10 +7659,15 @@ static void draw(struct native_frontend *fe)
 
 static void loop_once(struct native_frontend *fe)
 {
+   static int first_loop = 1;
    uint32_t now = unifrog_perf_time_ms();
    int nav_handled = 0;
    int select_down;
    int combo_handled = 0;
+
+   if (first_loop)
+      unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_LOOP_BEGIN,
+         now, fe ? fe->needs_draw : 0, fe ? fe->item_count : 0);
 
    unifrog_ui_poll(&fe->ui);
    select_down = unifrog_ui_down(&fe->ui, UNIFROG_UI_SELECT);
@@ -7769,6 +7775,11 @@ static void loop_once(struct native_frontend *fe)
    if (fe->needs_draw)
       draw(fe);
    usleep(16000);
+   if (first_loop) {
+      unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_LOOP_DONE,
+         unifrog_perf_time_ms(), fe->needs_draw, fe->item_count);
+      first_loop = 0;
+   }
 }
 
 int unifrog_native_frontend_main(void)
@@ -7778,7 +7789,11 @@ int unifrog_native_frontend_main(void)
 
    memset(&fe, 0, sizeof(fe));
    fe.theme = &frontend_theme;
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_NATIVE_BEGIN,
+      unifrog_perf_time_ms(), 0, 0);
    ensure_data_dirs();
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_DIRS_DONE,
+      unifrog_perf_time_ms(), 0, 0);
    unifrog_battery_status_init(&fe.battery);
    unifrog_libretro_run_options_init(&fe.run_options);
    fe.run_options.audio_enabled = 1;
@@ -7804,6 +7819,8 @@ int unifrog_native_frontend_main(void)
    unifrog_text_copy(fe.rom_root_label, sizeof(fe.rom_root_label), "ROMs");
    (void)frontend_rom_root_add(&fe, FRONTEND_ROMS_ROOT);
    load_settings(&fe);
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_SETTINGS_DONE,
+      unifrog_perf_time_ms(), fe.run_options.backlight_level, 0);
    frontend_rom_root_sync_primary(&fe);
    unifrog_log_set_auto_flush_bytes(fe.log_flush_every ? 1u :
       (size_t)UNIFROG_LOG_AUTO_FLUSH_BYTES);
@@ -7811,12 +7828,21 @@ int unifrog_native_frontend_main(void)
       fe.language_index = 0;
    load_language(&fe);
    load_theme(&fe);
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_THEME_DONE,
+      unifrog_perf_time_ms(), fe.language_index, 0);
    unifrog_input_init();
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_INPUT_DONE,
+      unifrog_perf_time_ms(), 0, 0);
    if (fe.run_options.backlight_level >= 0)
       (void)unifrog_backlight_set((unsigned)fe.run_options.backlight_level);
    mark_boot_ok();
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_BOOT_OK_DONE,
+      unifrog_perf_time_ms(), 0, 0);
 
    ret = unifrog_ui_open(&fe.ui, unifrog_boot_logo_is_active());
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_UI_OPEN_DONE,
+      unifrog_perf_time_ms(), (uint32_t)ret,
+      (fe.ui.ge_ready ? 0x10000u : 0u) | fe.ui.fb.buffer_count);
    if (ret != 0) {
       printf("unifrog native_frontend fb_open failed ret=%d\n", ret);
       return ret;
@@ -7831,6 +7857,8 @@ int unifrog_native_frontend_main(void)
       (void)apply_storage_profile(&fe, "startup");
    }
    show_launch(&fe);
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_LAUNCH_DONE,
+      unifrog_perf_time_ms(), fe.item_count, fe.selected);
    fe.running = 1;
    while (fe.running)
       loop_once(&fe);

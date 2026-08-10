@@ -6,6 +6,7 @@
 #include <kernel/lib/console.h>
 
 #include <unifrog/boot_logo.h>
+#include <unifrog/boot_trace.h>
 #include <unifrog/gfx.h>
 #include <unifrog/input.h>
 #include <unifrog/perf.h>
@@ -105,6 +106,8 @@ struct unifrog_surface unifrog_ui_surface(struct unifrog_ui *ui)
 void unifrog_ui_begin(struct unifrog_ui *ui, uint16_t color)
 {
    struct unifrog_surface surface;
+   int fill_ret;
+   int sync_ret;
 
    if (!ui || ui->frame_open)
       return;
@@ -113,6 +116,8 @@ void unifrog_ui_begin(struct unifrog_ui *ui, uint16_t color)
       ui->draw_buffer = (ui->fb.current_buffer + 1u) % ui->fb.buffer_count;
    ui->frame_open = 1;
    surface = unifrog_ui_surface(ui);
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_UI_BEGIN,
+      ui->draw_buffer, ui->ge_ready, color);
    if (ui->ge_ready) {
       struct unifrog_ge_surface dst =
          unifrog_fb_ge_surface_for_buffer(&ui->fb, ui->draw_buffer);
@@ -123,27 +128,41 @@ void unifrog_ui_begin(struct unifrog_ui *ui, uint16_t color)
       uint32_t g = ((uint32_t)((color >> 5) & 0x3fu) * 255u + 31u) / 63u;
       uint32_t b = ((uint32_t)(color & 0x1fu) * 255u + 15u) / 31u;
 
-      if (unifrog_ge_fill(&ui->ge, &dst, &rect,
-          0xff000000u | (r << 16) | (g << 8) | b) == 0 &&
-          unifrog_ge_sync(&ui->ge) == 0)
-         return;
+      fill_ret = unifrog_ge_fill(&ui->ge, &dst, &rect,
+         0xff000000u | (r << 16) | (g << 8) | b);
+      unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_FILL_DONE,
+         (uint32_t)fill_ret, ui->draw_buffer, 0);
+      if (fill_ret == 0) {
+         sync_ret = unifrog_ge_sync(&ui->ge);
+         unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_SYNC_DONE,
+            (uint32_t)sync_ret, ui->draw_buffer, 0);
+         if (sync_ret == 0)
+            return;
+      }
    }
    unifrog_gfx_fill_rect(&surface, 0, 0, surface.width, surface.height, color);
 }
 
 void unifrog_ui_present(struct unifrog_ui *ui)
 {
+   int sync_ret = 0;
+   int pan_ret;
+
    if (!ui)
       return;
    if (!ui->frame_open) {
       (void)unifrog_fb_wait_vsync(&ui->fb);
       return;
    }
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_UI_PRESENT,
+      ui->draw_buffer, ui->ge_ready, ui->fb.current_buffer);
    if (ui->ge_ready)
-      (void)unifrog_ge_sync(&ui->ge);
+      sync_ret = unifrog_ge_sync(&ui->ge);
    unifrog_fb_flush_buffer(&ui->fb, ui->draw_buffer);
-   (void)unifrog_fb_pan(&ui->fb, ui->draw_buffer);
+   pan_ret = unifrog_fb_pan(&ui->fb, ui->draw_buffer);
    ui->frame_open = 0;
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_UI_PRESENT_DONE,
+      (uint32_t)sync_ret, (uint32_t)pan_ret, ui->fb.current_buffer);
 }
 
 void unifrog_ui_wait(struct unifrog_ui *ui)
