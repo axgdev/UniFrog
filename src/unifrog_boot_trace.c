@@ -2,6 +2,7 @@
 
 #include <fastboot/handoff.h>
 #include <unifrog/log.h>
+#include <unifrog/perf.h>
 
 static uint32_t boot_trace_logged;
 
@@ -45,6 +46,13 @@ void unifrog_boot_trace_mark(uint32_t event, uint32_t arg0,
    trace->entries[index].arg1 = arg1;
    trace->entries[index].arg2 = arg2;
    trace->entries[index].r05_state = unifrog_boot_trace_r05_state();
+   /* This journal exists specifically to survive a power cycle.  HCRTOS
+    * writes through cached KSEG0, so leaving the new count and entry dirty
+    * made the next loader recover an older prefix of the trace on hardware. */
+   unifrog_perf_cache_flush((const void *)trace,
+      sizeof(trace->magic) + sizeof(trace->version) +
+      sizeof(trace->count) + sizeof(trace->dropped) +
+      (index + 1u) * sizeof(trace->entries[0]));
 }
 
 static const char *boot_trace_name(uint32_t event)
@@ -132,6 +140,18 @@ static const char *boot_trace_name(uint32_t event)
       return "unifrog.ui_present.begin";
    case FASTBOOT_TRACE_UNIFROG_UI_PRESENT_DONE:
       return "unifrog.ui_present.done";
+   case FASTBOOT_TRACE_UNIFROG_INPUT_LOCAL_DONE:
+      return "unifrog.input.local_done";
+   case FASTBOOT_TRACE_UNIFROG_INPUT_WIRELESS_DONE:
+      return "unifrog.input.wireless_done";
+   case FASTBOOT_TRACE_UNIFROG_INPUT_CLEAR_DONE:
+      return "unifrog.input.clear_done";
+   case FASTBOOT_TRACE_UNIFROG_BOOT_OK_BEGIN:
+      return "unifrog.boot_ok.begin";
+   case FASTBOOT_TRACE_UNIFROG_BOOT_OK_WRITE_DONE:
+      return "unifrog.boot_ok.write_done";
+   case FASTBOOT_TRACE_UNIFROG_UI_OPEN_BEGIN:
+      return "unifrog.ui_open.begin";
    case FASTBOOT_TRACE_SDK_PWM_PROBE_BEGIN:
       return "sdk.pwm.probe_begin";
    case FASTBOOT_TRACE_SDK_PWM_PINMUX_ACTIVE:

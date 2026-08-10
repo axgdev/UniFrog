@@ -2093,12 +2093,19 @@ out:
 static void mark_boot_ok(void)
 {
    char text[160];
+   int pending;
+   int ret;
 
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_BOOT_OK_BEGIN,
+      0, 0, 0);
+   pending = file_exists(UNIFROG_PENDING_VERSION_PATH);
    snprintf(text, sizeof(text), "commit=%s\npending=%s\n",
       UNIFROG_GIT_COMMIT,
-      file_exists(UNIFROG_PENDING_VERSION_PATH) ? "yes" : "no");
-   (void)write_text_file(UNIFROG_BOOT_OK_PATH, text);
-   if (file_exists(UNIFROG_PENDING_VERSION_PATH))
+      pending ? "yes" : "no");
+   ret = write_text_file(UNIFROG_BOOT_OK_PATH, text);
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_BOOT_OK_WRITE_DONE,
+      (uint32_t)ret, (uint32_t)pending, 0);
+   if (pending)
       unifrog_log("frontend update boot_ok with pending marker present\n");
 }
 
@@ -7839,6 +7846,8 @@ int unifrog_native_frontend_main(void)
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_BOOT_OK_DONE,
       unifrog_perf_time_ms(), 0, 0);
 
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_UI_OPEN_BEGIN,
+      (uint32_t)unifrog_boot_logo_is_active(), 0, 0);
    ret = unifrog_ui_open(&fe.ui, unifrog_boot_logo_is_active());
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_UI_OPEN_DONE,
       unifrog_perf_time_ms(), (uint32_t)ret,

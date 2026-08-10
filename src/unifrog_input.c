@@ -10,6 +10,7 @@
 #include <hcuapi/pinmux.h>
 
 #include <unifrog/log.h>
+#include <unifrog/boot_trace.h>
 #include <unifrog/perf.h>
 
 #ifndef ARRAY_SIZE
@@ -398,8 +399,15 @@ static uint32_t scan_local_buttons(int update_debounce,
 void unifrog_input_init(void)
 {
    (void)detect_local_input_profile();
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_INPUT_LOCAL_DONE,
+      0, 0, 0);
    unifrog_input_wireless_init();
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_INPUT_WIRELESS_DONE,
+      (uint32_t)unifrog_input_wireless_initialized(),
+      (uint32_t)unifrog_input_wireless_bus_ok(), 0);
    unifrog_input_clear();
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_INPUT_CLEAR_DONE,
+      0, 0, 0);
 }
 
 void unifrog_input_clear(void)
