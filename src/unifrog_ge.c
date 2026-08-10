@@ -6,6 +6,7 @@
 #include <hcuapi/ge.h>
 #include <hcge/ge_api.h>
 
+#include <unifrog/boot_trace.h>
 #include <unifrog/perf.h>
 
 static int format_to_hcge(enum unifrog_ge_format format,
@@ -139,6 +140,16 @@ static hcge_context *ge_context(struct unifrog_ge *ge)
    return ge ? (hcge_context *)ge->context : NULL;
 }
 
+static uint32_t ge_queue_word(const hcge_context *ctx, unsigned index)
+{
+   const volatile uint32_t *queue;
+
+   if (!ctx || !ctx->cmdq_buf_map_vaddr || index >= 7u)
+      return 0;
+   queue = (const volatile uint32_t *)ctx->cmdq_buf_map_vaddr;
+   return queue[index];
+}
+
 int unifrog_ge_open(struct unifrog_ge *ge)
 {
    hcge_context *ctx = NULL;
@@ -153,6 +164,8 @@ int unifrog_ge_open(struct unifrog_ge *ge)
 
    ge->context = ctx;
    ge->fd = ctx->ge_fd;
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_OPEN_DONE,
+      ctx->cmdq_buf_phyaddr, ctx->cmdq_buf_size, ctx->cmdq_buf_map_phyaddr);
    return 0;
 }
 
@@ -217,9 +230,22 @@ int unifrog_ge_fill(struct unifrog_ge *ge,
    drect.w = rect->w;
    drect.h = rect->h;
 
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_FILL_SETUP,
+      (uint32_t)state->dst.phys, state->dst.pitch,
+      ctx->cmdq_buf_phyaddr);
    state->accel = HCGE_DFXL_FILLRECTANGLE;
    hcge_set_state(ctx, state, state->accel);
-   return hcge_fill_rect(ctx, &drect) ? 0 : -1;
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_STATE_DONE,
+      ge_queue_word(ctx, 2), ge_queue_word(ctx, 4), ge_queue_word(ctx, 6));
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_SUBMIT_BEGIN,
+      ge_queue_word(ctx, 2), ge_queue_word(ctx, 4), ge_queue_word(ctx, 6));
+   {
+      int ret = hcge_fill_rect(ctx, &drect) ? 0 : -1;
+
+      unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_SUBMIT_DONE,
+         (uint32_t)ret, ge_queue_word(ctx, 2), ge_queue_word(ctx, 6));
+      return ret;
+   }
 }
 
 int unifrog_ge_blit(struct unifrog_ge *ge,

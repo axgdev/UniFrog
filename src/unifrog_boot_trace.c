@@ -154,6 +154,16 @@ static const char *boot_trace_name(uint32_t event)
       return "unifrog.ui_open.begin";
    case FASTBOOT_TRACE_UNIFROG_UI_FILL_DONE:
       return "unifrog.ui_fill.done";
+   case FASTBOOT_TRACE_UNIFROG_GE_OPEN_DONE:
+      return "unifrog.ge_open.done";
+   case FASTBOOT_TRACE_UNIFROG_GE_FILL_SETUP:
+      return "unifrog.ge_fill.setup";
+   case FASTBOOT_TRACE_UNIFROG_GE_STATE_DONE:
+      return "unifrog.ge_state.done";
+   case FASTBOOT_TRACE_UNIFROG_GE_SUBMIT_BEGIN:
+      return "unifrog.ge_submit.begin";
+   case FASTBOOT_TRACE_UNIFROG_GE_SUBMIT_DONE:
+      return "unifrog.ge_submit.done";
    case FASTBOOT_TRACE_SDK_PWM_PROBE_BEGIN:
       return "sdk.pwm.probe_begin";
    case FASTBOOT_TRACE_SDK_PWM_PINMUX_ACTIVE:
