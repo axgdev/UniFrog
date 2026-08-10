@@ -152,6 +152,8 @@ static const char *boot_trace_name(uint32_t event)
       return "unifrog.boot_ok.write_done";
    case FASTBOOT_TRACE_UNIFROG_UI_OPEN_BEGIN:
       return "unifrog.ui_open.begin";
+   case FASTBOOT_TRACE_UNIFROG_UI_FILL_DONE:
+      return "unifrog.ui_fill.done";
    case FASTBOOT_TRACE_SDK_PWM_PROBE_BEGIN:
       return "sdk.pwm.probe_begin";
    case FASTBOOT_TRACE_SDK_PWM_PINMUX_ACTIVE:
