@@ -512,6 +512,7 @@ int unifrog_png_draw_ge_async(struct unifrog_ge *ge,
    if (w <= 0 || h <= 0)
       return -1;
 
+   memset(&src, 0, sizeof(src));
    src.pixels = image->pixels;
    src.width = image->width;
    src.height = image->height;

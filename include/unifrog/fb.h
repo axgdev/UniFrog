@@ -21,6 +21,8 @@ enum unifrog_fb_open_flags {
 struct unifrog_fb {
    int fd;
    uint16_t *pixels;
+   uintptr_t phys_start;
+   unsigned mmap_flags;
    unsigned width;
    unsigned height;
    unsigned stride_pixels;

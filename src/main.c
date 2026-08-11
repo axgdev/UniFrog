@@ -119,6 +119,8 @@ static void *frontend_thread(void *arg)
    unifrog_diag_memory_snapshot("boot.storage_wait_done");
 
    if (storage_ready == 0) {
+      unifrog_exception_record_log_and_clear("boot.after_log_reset");
+      unifrog_exception_activity_log_and_clear("boot.after_log_reset");
       if (crash_recovery_boot) {
          unifrog_log("unifrog crash_recovery storage_ready ret=%d safe_ret=%d detail=%s disk_suspended=0\n",
             storage_ready, crash_safe_ret, crash_safe_detail);
@@ -131,7 +133,6 @@ static void *frontend_thread(void *arg)
       unifrog_boot_trace_log("boot.after_log_reset");
       unifrog_log("unifrog log reset ret=%d path=%s\n",
          log_reset_ret, log_reset_path ? log_reset_path : "?");
-      unifrog_exception_record_log_and_clear("boot.after_log_reset");
       unifrog_log("unifrog boot_time stage=storage_ready total_ms=%lu board_ms=%lu storage_ms=%lu\n",
          (unsigned long)(storage_done_ms - thread_start_ms),
          (unsigned long)(board_ready_ms - thread_start_ms),

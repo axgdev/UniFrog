@@ -1,5 +1,6 @@
 #include <unifrog/ge.h>
 
+#include <errno.h>
 #include <string.h>
 #include <sys/ioctl.h>
 
@@ -7,6 +8,7 @@
 #include <hcge/ge_api.h>
 
 #include <unifrog/boot_trace.h>
+#include <unifrog/exception_record.h>
 #include <unifrog/perf.h>
 
 static int format_to_hcge(enum unifrog_ge_format format,
@@ -64,6 +66,12 @@ static size_t surface_bytes(const struct unifrog_ge_surface *surface)
    return (size_t)surface->pitch_bytes * (size_t)surface->height;
 }
 
+static uintptr_t surface_phys_addr(const struct unifrog_ge_surface *surface,
+   uintptr_t phys_override)
+{
+   return phys_override ? phys_override : unifrog_perf_phys_addr(surface->pixels);
+}
+
 static int source_rect_is_valid(const struct unifrog_ge_surface *surface,
    const struct unifrog_ge_rect *rect)
 {
@@ -85,7 +93,8 @@ static void flush_surface(const struct unifrog_ge_surface *surface)
 
 static int setup_surface(HCGE_CoreSurface *hcge_surface,
    HCGE_CoreSurfaceBuffer *buffer,
-   const struct unifrog_ge_surface *surface)
+   const struct unifrog_ge_surface *surface,
+   uintptr_t phys_override)
 {
    HCGESurfacePixelFormat format;
 
@@ -97,7 +106,7 @@ static int setup_surface(HCGE_CoreSurface *hcge_surface,
    hcge_surface->config.size.w = surface->width;
    hcge_surface->config.size.h = surface->height;
    hcge_surface->config.format = format;
-   buffer->phys = (unsigned long)unifrog_perf_phys_addr(surface->pixels);
+   buffer->phys = (unsigned long)surface_phys_addr(surface, phys_override);
    buffer->pitch = surface->pitch_bytes;
    return 0;
 }
@@ -150,6 +159,15 @@ static uint32_t ge_queue_word(const hcge_context *ctx, unsigned index)
    return queue[index];
 }
 
+static void ge_submit_activity(hcge_context *ctx, uint32_t stage)
+{
+   /* Queue metadata is ordinary mapped RAM, unlike GE registers.  Preserve
+    * the values already exposed by ge_submit.begin in the retained activity
+    * record without adding another MMIO access or vendor call. */
+   unifrog_exception_activity_set(UNIFROG_ACTIVITY_PHASE_GE_SUBMIT, stage,
+      ge_queue_word(ctx, 2), ge_queue_word(ctx, 4));
+}
+
 int unifrog_ge_open(struct unifrog_ge *ge)
 {
    hcge_context *ctx = NULL;
@@ -184,15 +202,30 @@ void unifrog_ge_close(struct unifrog_ge *ge)
 int unifrog_ge_set_clock(struct unifrog_ge *ge, enum unifrog_ge_clock clock)
 {
    hcge_context *ctx = ge_context(ge);
+   int ret;
 
    if (!ctx || ctx->ge_fd < 0)
       return -1;
-   return ioctl(ctx->ge_fd, HCGE_SET_CLOCK, clock);
+   /* A clock change is a live GE MMIO transition.  Do not change the source
+    * while command-queue work is still in flight. */
+   ret = hcge_engine_sync(ctx);
+   if (ret != 0) {
+      unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_CLOCK,
+         (uint32_t)(unsigned)clock, (uint32_t)ret,
+         ret < 0 ? (uint32_t)errno : 0u);
+      return ret;
+   }
+   ret = ioctl(ctx->ge_fd, HCGE_SET_CLOCK, clock);
+   unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_CLOCK,
+      (uint32_t)(unsigned)clock, (uint32_t)ret,
+      ret < 0 ? (uint32_t)errno : 0u);
+   return ret;
 }
 
 int unifrog_ge_set_fast_clock(struct unifrog_ge *ge)
 {
-   return unifrog_ge_set_clock(ge, UNIFROG_GE_CLOCK_FAST);
+   return unifrog_ge_set_clock(ge,
+      (enum unifrog_ge_clock)UNIFROG_GE_CLOCK_FAST_SELECTOR);
 }
 
 int unifrog_ge_sync(struct unifrog_ge *ge)
@@ -201,13 +234,19 @@ int unifrog_ge_sync(struct unifrog_ge *ge)
 
    if (!ctx)
       return -1;
-   return hcge_engine_sync(ctx);
+   ge_submit_activity(ctx, 2u);
+   {
+      int ret = hcge_engine_sync(ctx);
+      if (ret == 0)
+         unifrog_exception_activity_clear();
+      return ret;
+   }
 }
 
-int unifrog_ge_fill(struct unifrog_ge *ge,
+static int unifrog_ge_fill_internal(struct unifrog_ge *ge,
    const struct unifrog_ge_surface *dst,
    const struct unifrog_ge_rect *rect,
-   uint32_t argb)
+   uint32_t argb, uintptr_t phys_override)
 {
    hcge_context *ctx = ge_context(ge);
    hcge_state *state;
@@ -218,7 +257,8 @@ int unifrog_ge_fill(struct unifrog_ge *ge,
 
    state = &ctx->state;
    setup_common_state(state);
-   if (setup_surface(&state->destination, &state->dst, dst) != 0)
+   if (setup_surface(&state->destination, &state->dst, dst,
+       phys_override) != 0)
       return -1;
    setup_clip(state, dst);
    state->color.a = (argb >> 24) & 0xff;
@@ -239,6 +279,7 @@ int unifrog_ge_fill(struct unifrog_ge *ge,
       ge_queue_word(ctx, 2), ge_queue_word(ctx, 4), ge_queue_word(ctx, 6));
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_SUBMIT_BEGIN,
       ge_queue_word(ctx, 2), ge_queue_word(ctx, 4), ge_queue_word(ctx, 6));
+   ge_submit_activity(ctx, 1u);
    {
       int ret = hcge_fill_rect(ctx, &drect) ? 0 : -1;
 
@@ -248,12 +289,34 @@ int unifrog_ge_fill(struct unifrog_ge *ge,
    }
 }
 
-int unifrog_ge_blit(struct unifrog_ge *ge,
+int unifrog_ge_fill(struct unifrog_ge *ge,
+   const struct unifrog_ge_surface *dst,
+   const struct unifrog_ge_rect *rect,
+   uint32_t argb)
+{
+   return unifrog_ge_fill_internal(ge, dst, rect, argb, 0);
+}
+
+int unifrog_ge_fill_at(struct unifrog_ge *ge,
+   const struct unifrog_ge_surface *dst,
+   const struct unifrog_ge_rect *rect,
+   uint32_t argb, uintptr_t phys_addr)
+   __attribute__((used));
+
+int unifrog_ge_fill_at(struct unifrog_ge *ge,
+   const struct unifrog_ge_surface *dst,
+   const struct unifrog_ge_rect *rect,
+   uint32_t argb, uintptr_t phys_addr)
+{
+   return unifrog_ge_fill_internal(ge, dst, rect, argb, phys_addr);
+}
+
+static int unifrog_ge_blit_internal(struct unifrog_ge *ge,
    const struct unifrog_ge_surface *dst,
    int dst_x, int dst_y,
    const struct unifrog_ge_surface *src,
    const struct unifrog_ge_rect *src_rect,
-   unsigned flags)
+   unsigned flags, uintptr_t dst_phys_override)
 {
    hcge_context *ctx = ge_context(ge);
    hcge_state *state;
@@ -271,8 +334,9 @@ int unifrog_ge_blit(struct unifrog_ge *ge,
    state = &ctx->state;
    setup_common_state(state);
    state->blittingflags = hcge_blit_flags(flags);
-   if (setup_surface(&state->destination, &state->dst, dst) != 0 ||
-       setup_surface(&state->source, &state->src, src) != 0)
+   if (setup_surface(&state->destination, &state->dst, dst,
+       dst_phys_override) != 0 ||
+       setup_surface(&state->source, &state->src, src, 0) != 0)
       return -1;
    setup_clip(state, dst);
    srect.x = src_rect->x;
@@ -285,12 +349,34 @@ int unifrog_ge_blit(struct unifrog_ge *ge,
    return hcge_blit(ctx, &srect, dst_x, dst_y) ? 0 : -1;
 }
 
-int unifrog_ge_stretch(struct unifrog_ge *ge,
+int unifrog_ge_blit(struct unifrog_ge *ge,
+   const struct unifrog_ge_surface *dst,
+   int dst_x, int dst_y,
+   const struct unifrog_ge_surface *src,
+   const struct unifrog_ge_rect *src_rect,
+   unsigned flags)
+{
+   return unifrog_ge_blit_internal(ge, dst, dst_x, dst_y, src, src_rect,
+      flags, 0);
+}
+
+int unifrog_ge_blit_at(struct unifrog_ge *ge,
+   const struct unifrog_ge_surface *dst,
+   int dst_x, int dst_y,
+   const struct unifrog_ge_surface *src,
+   const struct unifrog_ge_rect *src_rect,
+   unsigned flags, uintptr_t dst_phys_addr)
+{
+   return unifrog_ge_blit_internal(ge, dst, dst_x, dst_y, src, src_rect,
+      flags, dst_phys_addr);
+}
+
+static int unifrog_ge_stretch_internal(struct unifrog_ge *ge,
    const struct unifrog_ge_surface *dst,
    const struct unifrog_ge_rect *dst_rect,
    const struct unifrog_ge_surface *src,
    const struct unifrog_ge_rect *src_rect,
-   unsigned flags)
+   unsigned flags, uintptr_t dst_phys_override)
 {
    hcge_context *ctx = ge_context(ge);
    hcge_state *state;
@@ -309,8 +395,9 @@ int unifrog_ge_stretch(struct unifrog_ge *ge,
    state = &ctx->state;
    setup_common_state(state);
    state->blittingflags = hcge_blit_flags(flags);
-   if (setup_surface(&state->destination, &state->dst, dst) != 0 ||
-       setup_surface(&state->source, &state->src, src) != 0)
+   if (setup_surface(&state->destination, &state->dst, dst,
+       dst_phys_override) != 0 ||
+       setup_surface(&state->source, &state->src, src, 0) != 0)
       return -1;
    setup_clip(state, dst);
    srect.x = src_rect->x;
@@ -325,4 +412,26 @@ int unifrog_ge_stretch(struct unifrog_ge *ge,
    state->accel = HCGE_DFXL_STRETCHBLIT;
    hcge_set_state(ctx, state, state->accel);
    return hcge_stretch_blit(ctx, &srect, &drect) ? 0 : -1;
+}
+
+int unifrog_ge_stretch(struct unifrog_ge *ge,
+   const struct unifrog_ge_surface *dst,
+   const struct unifrog_ge_rect *dst_rect,
+   const struct unifrog_ge_surface *src,
+   const struct unifrog_ge_rect *src_rect,
+   unsigned flags)
+{
+   return unifrog_ge_stretch_internal(ge, dst, dst_rect, src, src_rect,
+      flags, 0);
+}
+
+int unifrog_ge_stretch_at(struct unifrog_ge *ge,
+   const struct unifrog_ge_surface *dst,
+   const struct unifrog_ge_rect *dst_rect,
+   const struct unifrog_ge_surface *src,
+   const struct unifrog_ge_rect *src_rect,
+   unsigned flags, uintptr_t dst_phys_addr)
+{
+   return unifrog_ge_stretch_internal(ge, dst, dst_rect, src, src_rect,
+      flags, dst_phys_addr);
 }

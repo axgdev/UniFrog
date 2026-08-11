@@ -151,8 +151,13 @@ int unifrog_fb_open(struct unifrog_fb *fb, unsigned flags)
    }
    get2_ms = unifrog_perf_time_ms();
 
-   ioctl(fd, HCFBIOSET_MMAP_CACHE,
-      (flags & UNIFROG_FB_OPEN_CACHED) ? HCFB_MMAP_CACHE : HCFB_MMAP_NO_CACHE);
+   fb->mmap_flags = flags;
+   if (ioctl(fd, HCFBIOSET_MMAP_CACHE,
+       (flags & UNIFROG_FB_OPEN_CACHED) ? HCFB_MMAP_CACHE :
+       HCFB_MMAP_NO_CACHE) != 0) {
+      fail_stage = "cache";
+      goto fail;
+   }
    cache_ms = unifrog_perf_time_ms();
 
    fb->pixels = mmap(NULL, fix.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -164,6 +169,7 @@ int unifrog_fb_open(struct unifrog_fb *fb, unsigned flags)
    mmap_ms = unifrog_perf_time_ms();
 
    fb->fd = fd;
+   fb->phys_start = (uintptr_t)fix.smem_start;
    fb->width = var.xres;
    fb->height = var.yres;
    fb->bpp = var.bits_per_pixel;
@@ -194,7 +200,8 @@ int unifrog_fb_open(struct unifrog_fb *fb, unsigned flags)
    unifrog_log("unifrog fb open flags=0x%x preserve=%u put_var=%d "
       "total_ms=%lu open_ms=%lu get1_ms=%lu put_ms=%lu get2_ms=%lu "
       "cache_ms=%lu mmap_ms=%lu clear_ms=%lu pan_ms=%lu blank_ms=%lu "
-      "%ux%u bpp=%u stride=%u current=%u buffers=%u max=%u smem=%lu\n",
+      "%ux%u bpp=%u stride=%u current=%u buffers=%u max=%u smem=%lu "
+      "phys=0x%08lx pixels=%p\n",
       flags, (flags & UNIFROG_FB_OPEN_PRESERVE) ? 1u : 0u, put_var,
       (unsigned long)(unifrog_perf_time_ms() - start_ms),
       (unsigned long)(open_ms - start_ms),
@@ -208,7 +215,8 @@ int unifrog_fb_open(struct unifrog_fb *fb, unsigned flags)
       blank_ms ? (unsigned long)(blank_ms - pan_ms) : 0ul,
       fb->width, fb->height, fb->bpp, fb->stride_pixels,
       fb->current_buffer, fb->buffer_count, fb->max_buffers,
-      (unsigned long)fb->smem_len);
+      (unsigned long)fb->smem_len, (unsigned long)fb->phys_start,
+      fb->pixels);
    return 0;
 
 fail:
@@ -305,20 +313,31 @@ int unifrog_fb_wait_vsync(const struct unifrog_fb *fb)
 
 int unifrog_fb_set_buffer_count(struct unifrog_fb *fb, unsigned buffers)
 {
+   struct fb_fix_screeninfo fix;
    struct fb_var_screeninfo var;
+   void *old_pixels;
+   size_t old_smem_len;
    unsigned old_buffers;
    uint32_t start_ms;
    uint32_t get_ms;
    uint32_t put_ms;
+   uint32_t refresh_ms;
 
    if (!fb || fb->fd < 0 || buffers == 0 || buffers > fb->max_buffers)
       return -1;
    old_buffers = fb->buffer_count;
-   if (old_buffers == buffers) {
+   if (old_buffers == buffers && fb->pixels) {
       unifrog_log("unifrog fb buffers old=%u requested=%u ret=0 cached=1 current=%u\n",
          old_buffers, buffers, fb->current_buffer);
       return 0;
    }
+
+   /* FBIOPUT_VSCREENINFO may replace the driver's backing allocation when
+    * yres_virtual changes.  This framebuffer mmap is a direct KSEG alias, not
+    * a stable VM mapping, so retaining fb->pixels would let GE receive the
+    * physical address of the freed pre-reconfiguration buffer. */
+   old_pixels = fb->pixels;
+   old_smem_len = fb->smem_len;
    start_ms = unifrog_perf_time_ms();
    if (get_var(fb->fd, &var) != 0)
       return -1;
@@ -327,15 +346,63 @@ int unifrog_fb_set_buffer_count(struct unifrog_fb *fb, unsigned buffers)
    if (ioctl(fb->fd, FBIOPUT_VSCREENINFO, &var) != 0)
       return -1;
    put_ms = unifrog_perf_time_ms();
-   fb->buffer_count = buffers;
-   if (fb->current_buffer >= buffers)
+
+   if (old_pixels)
+      (void)munmap(old_pixels, old_smem_len);
+   fb->pixels = NULL;
+   memset(&fix, 0, sizeof(fix));
+   if (ioctl(fb->fd, FBIOGET_FSCREENINFO, &fix) != 0 ||
+       get_var(fb->fd, &var) != 0 || fix.smem_len == 0) {
+      unifrog_fb_close(fb);
+      unifrog_log("unifrog fb buffers old=%u requested=%u ret=-1 stage=refresh_info\n",
+         old_buffers, buffers);
+      return -1;
+   }
+   if (ioctl(fb->fd, HCFBIOSET_MMAP_CACHE,
+       (fb->mmap_flags & UNIFROG_FB_OPEN_CACHED) ?
+       HCFB_MMAP_CACHE : HCFB_MMAP_NO_CACHE) != 0) {
+      unifrog_fb_close(fb);
+      unifrog_log("unifrog fb buffers old=%u requested=%u ret=-1 stage=refresh_cache\n",
+         old_buffers, buffers);
+      return -1;
+   }
+   fb->pixels = mmap(NULL, fix.smem_len, PROT_READ | PROT_WRITE,
+      MAP_SHARED, fb->fd, 0);
+   if (fb->pixels == MAP_FAILED) {
+      unifrog_fb_close(fb);
+      unifrog_log("unifrog fb buffers old=%u requested=%u ret=-1 stage=refresh_mmap\n",
+         old_buffers, buffers);
+      return -1;
+   }
+   refresh_ms = unifrog_perf_time_ms();
+
+   fb->phys_start = (uintptr_t)fix.smem_start;
+   fb->width = var.xres;
+   fb->height = var.yres;
+   fb->bpp = var.bits_per_pixel;
+   fb->pitch_bytes = fix.line_length ?
+      fix.line_length : (var.xres * var.bits_per_pixel / 8);
+   fb->stride_pixels = fb->pitch_bytes / sizeof(uint16_t);
+   fb->smem_len = fix.smem_len;
+   fb->visible_bytes = (size_t)fb->pitch_bytes * fb->height;
+   fb->max_buffers = fb->visible_bytes ?
+      (unsigned)(fb->smem_len / fb->visible_bytes) : 1u;
+   if (fb->max_buffers == 0)
+      fb->max_buffers = 1;
+   fb->buffer_count = var.yres ? var.yres_virtual / var.yres : 1;
+   if (fb->buffer_count == 0 || fb->buffer_count > fb->max_buffers)
+      fb->buffer_count = 1;
+   if (fb->current_buffer >= fb->buffer_count)
       fb->current_buffer = 0;
    unifrog_log("unifrog fb buffers old=%u requested=%u ret=0 "
-      "total_ms=%lu get_ms=%lu put_ms=%lu current=%u yvirt=%u\n",
-      old_buffers, buffers, (unsigned long)(put_ms - start_ms),
+      "total_ms=%lu get_ms=%lu put_ms=%lu refresh_ms=%lu current=%u "
+      "yvirt=%u smem=%lu phys=0x%08lx pixels=%p\n",
+      old_buffers, buffers, (unsigned long)(refresh_ms - start_ms),
       (unsigned long)(get_ms - start_ms),
-      (unsigned long)(put_ms - get_ms), fb->current_buffer,
-      var.yres_virtual);
+      (unsigned long)(put_ms - get_ms),
+      (unsigned long)(refresh_ms - put_ms), fb->current_buffer,
+      var.yres_virtual, (unsigned long)fb->smem_len,
+      (unsigned long)fix.smem_start, fb->pixels);
    return 0;
 }
 

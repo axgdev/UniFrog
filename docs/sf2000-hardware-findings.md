@@ -80,8 +80,9 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
   - GE fill is much faster than CPU framebuffer fill.
   - GE stretch/blit works and is useful for scaling emulator frames to LCD output.
   - `HCGE_SET_CLOCK` controls the GE accelerator clock, not the CPU clock.
-  - `loghcrtos38.txt` showed the 198/148 selectors were faster than the
-    225/238 selectors for fill and stretch tests, despite their labels.
+  - The retained handoff and Linux/vendor reset establish raw selector 3 as
+    the stable GE source. Vendor MHz labels are not trusted for this silicon;
+    runtime clock values are treated as raw selectors.
   - UniFrog exposes the tested GE operations through `unifrog/ge.h` without
     leaking HCGE SDK structs into application code.
   - UniFrog also exposes `unifrog/presenter.h`, a reusable RGB565 presentation
@@ -452,7 +453,8 @@ Do not blindly repurpose these pins on the SF2000. Several are already used for 
 - ISA/toolchain: `mipsfrog` only if the target workload benefits; pure MIPS32r1 remains safest.
 - Backlight: PWM2 at 20 kHz polarity 1 through `/dev/backlight`.
 - SD: 1-bit mode when reliability matters, especially with extenders.
-- Video: hardware decoder for media playback; GE 198 selector for scaling/fill.
+- Video: hardware decoder for media playback; GE raw selector 3 (the stable
+  inherited setting) for scaling/fill.
 - Audio: S16 interleaved PCM with 512-byte periods as the current low-latency
   default.
 - Logging: memory buffer with manual flush.

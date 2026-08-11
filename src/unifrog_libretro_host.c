@@ -955,10 +955,10 @@ static int valid_scpu_mhz(unsigned mhz)
 static enum unifrog_ge_clock sanitize_ge_clock(int clock)
 {
    switch (clock) {
-   case UNIFROG_GE_CLOCK_198MHZ:
-   case UNIFROG_GE_CLOCK_148MHZ:
-   case UNIFROG_GE_CLOCK_225MHZ:
-   case UNIFROG_GE_CLOCK_238MHZ:
+   case UNIFROG_GE_CLOCK_SELECTOR_0:
+   case UNIFROG_GE_CLOCK_SELECTOR_1:
+   case UNIFROG_GE_CLOCK_SELECTOR_2:
+   case UNIFROG_GE_CLOCK_SELECTOR_3:
       return (enum unifrog_ge_clock)clock;
    default:
       return UNIFROG_GE_CLOCK_FAST;
@@ -2009,10 +2009,13 @@ static void loading_draw_frame(const char *title, const char *detail,
 
    if (!host.loading_open) {
       if (unifrog_fb_open(&host.loading_fb, UNIFROG_FB_OPEN_DEFAULT) != 0)
-         return;
-      if (unifrog_fb_set_buffer_count(&host.loading_fb, 2) != 0)
-         (void)unifrog_fb_set_buffer_count(&host.loading_fb, 1);
-      host.loading_open = 1;
+         return;       if (unifrog_fb_set_buffer_count(&host.loading_fb, 2) != 0 &&
+           unifrog_fb_set_buffer_count(&host.loading_fb, 1) != 0) {
+          unifrog_fb_close(&host.loading_fb);
+          return;
+       }
+       host.loading_open = 1;
+
    }
 
    if (percent > 100)
@@ -3426,24 +3429,26 @@ static int quick_menu_cycle_scpu(int delta)
 static const char *quick_menu_ge_label(enum unifrog_ge_clock clock)
 {
    switch (clock) {
-   case UNIFROG_GE_CLOCK_148MHZ:
-      return "148";
-   case UNIFROG_GE_CLOCK_225MHZ:
-      return "225";
-   case UNIFROG_GE_CLOCK_238MHZ:
-      return "238";
+   case UNIFROG_GE_CLOCK_SELECTOR_0:
+      return "selector 0";
+   case UNIFROG_GE_CLOCK_SELECTOR_1:
+      return "selector 1";
+   case UNIFROG_GE_CLOCK_SELECTOR_2:
+      return "selector 2";
+   case UNIFROG_GE_CLOCK_SELECTOR_3:
+      return "selector 3 (stable)";
    default:
-      return "198";
+      return "selector ?";
    }
 }
 
 static int quick_menu_cycle_ge_clock(int delta)
 {
    static const enum unifrog_ge_clock clocks[] = {
-      UNIFROG_GE_CLOCK_148MHZ,
-      UNIFROG_GE_CLOCK_198MHZ,
-      UNIFROG_GE_CLOCK_225MHZ,
-      UNIFROG_GE_CLOCK_238MHZ,
+      UNIFROG_GE_CLOCK_SELECTOR_0,
+      UNIFROG_GE_CLOCK_SELECTOR_1,
+      UNIFROG_GE_CLOCK_SELECTOR_2,
+      UNIFROG_GE_CLOCK_SELECTOR_3,
    };
    unsigned index = 1;
 
@@ -3463,10 +3468,28 @@ static int quick_menu_cycle_ge_clock(int delta)
       if (index >= ARRAY_SIZE(clocks))
          index = 0;
    }
-   host.ge_clock = clocks[index];
-   host.options.ge_clock = (int)host.ge_clock;
-   if (host.presenter_open)
-      (void)unifrog_ge_set_clock(&host.presenter.ge, host.ge_clock);
+   {
+      enum unifrog_ge_clock next_clock = clocks[index];
+      int ret = 0;
+
+      if (!host.presenter_open) {
+         snprintf(host.quick_status, sizeof(host.quick_status),
+            "GE clock unavailable before video");
+         printf("unifrog quick_menu ge_clock skipped requested=%d reason=no_presenter\n",
+            (int)next_clock);
+         return host.options.ge_clock;
+      }
+      ret = unifrog_ge_set_clock(&host.presenter.ge, next_clock);
+      if (ret != 0) {
+         snprintf(host.quick_status, sizeof(host.quick_status),
+            "GE clock change failed (%d)", ret);
+         printf("unifrog quick_menu ge_clock failed requested=%d ret=%d\n",
+            (int)next_clock, ret);
+         return host.options.ge_clock;
+      }
+      host.ge_clock = next_clock;
+      host.options.ge_clock = (int)host.ge_clock;
+   }
    printf("unifrog quick_menu ge_clock=%s enum=%d\n",
       quick_menu_ge_label(host.ge_clock), host.options.ge_clock);
    return host.options.ge_clock;
@@ -6938,11 +6961,11 @@ out_content_prepare:
 
    loading_draw("LOADING GAME", "READY", 100);
    loading_close();
-   printf("unifrog libretro step=presenter_open\n");
+   printf("unifrog libretro step=presenter_open ge_clock_inherit=%d\n",
+      (int)host.ge_clock);
    (void)unifrog_log_flush();
-   if (unifrog_presenter_open_with_clock(&host.presenter, 2,
-       present_flags_for_display_mode(host.display_mode),
-       host.ge_clock) == 0) {
+   if (unifrog_presenter_open(&host.presenter, 2,
+       present_flags_for_display_mode(host.display_mode)) == 0) {
       host.presenter_open = 1;
       unifrog_presenter_clear(&host.presenter, 0xff000000u);
       unifrog_diag_memory_snapshot("libretro.after_presenter_open");

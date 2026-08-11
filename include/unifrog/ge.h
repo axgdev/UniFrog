@@ -14,13 +14,31 @@ enum unifrog_ge_format {
 };
 
 enum unifrog_ge_clock {
-   UNIFROG_GE_CLOCK_198MHZ = 0,
-   UNIFROG_GE_CLOCK_148MHZ = 1,
-   UNIFROG_GE_CLOCK_225MHZ = 2,
-   UNIFROG_GE_CLOCK_238MHZ = 3,
+   UNIFROG_GE_CLOCK_SELECTOR_0 = 0,
+   UNIFROG_GE_CLOCK_SELECTOR_1 = 1,
+   UNIFROG_GE_CLOCK_SELECTOR_2 = 2,
+   UNIFROG_GE_CLOCK_SELECTOR_3 = 3,
+
+   /* Legacy SDK spellings.  These are aliases for raw selectors, not
+    * guaranteed silicon frequencies. */
+   UNIFROG_GE_CLOCK_198MHZ = UNIFROG_GE_CLOCK_SELECTOR_0,
+   UNIFROG_GE_CLOCK_148MHZ = UNIFROG_GE_CLOCK_SELECTOR_1,
+   UNIFROG_GE_CLOCK_225MHZ = UNIFROG_GE_CLOCK_SELECTOR_2,
+   UNIFROG_GE_CLOCK_238MHZ = UNIFROG_GE_CLOCK_SELECTOR_3,
 };
 
-#define UNIFROG_GE_CLOCK_FAST UNIFROG_GE_CLOCK_198MHZ
+/* Clock values are the raw HCGE_SET_CLOCK selectors.  The SDK names are
+ * retained for source compatibility, but they are not a reliable description
+ * of the HC15xx silicon clock source: the bootloader, Linux, and hcge_hw_reset
+ * leave the stable GE source at selector 3.  Normal startup must inherit that
+ * setting rather than perform a live clock transition.  Callers requesting a
+ * runtime change must do so only while the GE is idle. */
+#define UNIFROG_GE_CLOCK_FAST_SELECTOR \
+   ((unsigned)UNIFROG_GE_CLOCK_SELECTOR_3)
+/* Compatibility alias for callers that explicitly request the tested fast
+ * selector; this is a raw selector, not a frequency value. */
+#define UNIFROG_GE_CLOCK_FAST \
+   ((enum unifrog_ge_clock)UNIFROG_GE_CLOCK_FAST_SELECTOR)
 
 enum unifrog_ge_flags {
    UNIFROG_GE_FLUSH_SOURCE = 1u << 0,

@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include <unifrog/ge_internal.h>
 #include <unifrog/perf.h>
 
 static void clear_presenter(struct unifrog_presenter *presenter)
@@ -49,8 +50,9 @@ static struct unifrog_ge_rect scaled_rect(unsigned src_w, unsigned src_h,
    return rect;
 }
 
-int unifrog_presenter_open_with_clock(struct unifrog_presenter *presenter,
-   unsigned buffers, unsigned flags, enum unifrog_ge_clock clock)
+static int unifrog_presenter_open_internal(
+   struct unifrog_presenter *presenter, unsigned buffers, unsigned flags,
+   int apply_clock, enum unifrog_ge_clock clock)
 {
    if (!presenter)
       return -1;
@@ -65,12 +67,19 @@ int unifrog_presenter_open_with_clock(struct unifrog_presenter *presenter,
       buffers = presenter->fb.max_buffers;
    if (buffers == 0)
       buffers = 1;
-   if (unifrog_fb_set_buffer_count(&presenter->fb, buffers) != 0)
+   if (unifrog_fb_set_buffer_count(&presenter->fb, buffers) != 0) {
+      if (buffers != 1 || unifrog_fb_set_buffer_count(&presenter->fb, 1) != 0)
+         goto fail;
       buffers = 1;
+   }
 
    if (unifrog_ge_open(&presenter->ge) != 0)
       goto fail;
-   (void)unifrog_ge_set_clock(&presenter->ge, clock);
+   /* A clock value is an explicit live hardware transition.  The default
+    * presenter path does not apply one and inherits the bootloader/kernel
+    * setting. */
+   if (apply_clock && unifrog_ge_set_clock(&presenter->ge, clock) != 0)
+      goto fail;
 
    presenter->flags = flags;
    presenter->buffer_count = buffers;
@@ -85,11 +94,20 @@ fail:
    return -1;
 }
 
+int unifrog_presenter_open_with_clock(struct unifrog_presenter *presenter,
+   unsigned buffers, unsigned flags, enum unifrog_ge_clock clock)
+{
+   return unifrog_presenter_open_internal(presenter, buffers, flags, 1,
+      clock);
+}
+
 int unifrog_presenter_open(struct unifrog_presenter *presenter,
    unsigned buffers, unsigned flags)
 {
-   return unifrog_presenter_open_with_clock(presenter, buffers, flags,
-      UNIFROG_GE_CLOCK_FAST);
+   /* Keep the clock inherited from the bootloader/kernel.  The setter is a
+    * live GE MMIO transition and belongs only to an explicit runtime change. */
+   return unifrog_presenter_open_internal(presenter, buffers, flags, 0,
+      UNIFROG_GE_CLOCK_SELECTOR_3);
 }
 
 void unifrog_presenter_close(struct unifrog_presenter *presenter)
@@ -112,7 +130,10 @@ int unifrog_presenter_clear(struct unifrog_presenter *presenter, uint32_t argb)
 
    dst = unifrog_fb_ge_surface_for_buffer(&presenter->fb, presenter->active_buffer);
    rect = full_rect(presenter->fb.width, presenter->fb.height);
-   ret = unifrog_ge_fill(&presenter->ge, &dst, &rect, argb);
+   ret = unifrog_ge_fill_at(&presenter->ge, &dst, &rect, argb,
+      presenter->fb.phys_start +
+         (uintptr_t)presenter->active_buffer * presenter->fb.pitch_bytes *
+         presenter->fb.height);
    if (ret == 0)
       ret = unifrog_ge_sync(&presenter->ge);
    return ret;
@@ -145,6 +166,7 @@ static int unifrog_presenter_present_ge(struct unifrog_presenter *presenter,
    if (presenter->buffer_count > 1)
       next_buffer = (presenter->active_buffer + 1) % presenter->buffer_count;
 
+   memset(&src, 0, sizeof(src));
    src.pixels = (void *)pixels;
    src.width = width;
    src.height = height;
@@ -170,7 +192,10 @@ static int unifrog_presenter_present_ge(struct unifrog_presenter *presenter,
        dst_rect.h != (int)presenter->fb.height) &&
        !(presenter->cleared_buffer_mask & (1u << next_buffer))) {
       struct unifrog_ge_rect clear = full_rect(presenter->fb.width, presenter->fb.height);
-      ret = unifrog_ge_fill(&presenter->ge, &dst, &clear, 0xff000000u);
+      ret = unifrog_ge_fill_at(&presenter->ge, &dst, &clear, 0xff000000u,
+         presenter->fb.phys_start +
+            (uintptr_t)next_buffer * presenter->fb.pitch_bytes *
+            presenter->fb.height);
       if (ret != 0)
          return ret;
       presenter->cleared_buffer_mask |= 1u << next_buffer;
@@ -178,13 +203,19 @@ static int unifrog_presenter_present_ge(struct unifrog_presenter *presenter,
 
    ge_start = unifrog_perf_count();
    if (src_rect.w == dst_rect.w && src_rect.h == dst_rect.h) {
-      ret = unifrog_ge_blit(&presenter->ge, &dst, dst_rect.x, dst_rect.y,
-         &src, &src_rect, UNIFROG_GE_FLUSH_SOURCE);
+      ret = unifrog_ge_blit_at(&presenter->ge, &dst, dst_rect.x, dst_rect.y,
+         &src, &src_rect, UNIFROG_GE_FLUSH_SOURCE,
+         presenter->fb.phys_start +
+            (uintptr_t)next_buffer * presenter->fb.pitch_bytes *
+            presenter->fb.height);
       if (ret == 0)
          presenter->blit_count++;
    } else {
-      ret = unifrog_ge_stretch(&presenter->ge, &dst, &dst_rect,
-         &src, &src_rect, UNIFROG_GE_FLUSH_SOURCE);
+      ret = unifrog_ge_stretch_at(&presenter->ge, &dst, &dst_rect,
+         &src, &src_rect, UNIFROG_GE_FLUSH_SOURCE,
+         presenter->fb.phys_start +
+            (uintptr_t)next_buffer * presenter->fb.pitch_bytes *
+            presenter->fb.height);
       if (ret == 0)
          presenter->stretch_count++;
    }

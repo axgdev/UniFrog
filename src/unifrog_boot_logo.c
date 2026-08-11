@@ -57,10 +57,11 @@ static void blit_logo_rle(struct unifrog_surface *surface,
    }
 }
 
-static void boot_logo_set_buffer_count(struct unifrog_fb *fb)
+static int boot_logo_set_buffer_count(struct unifrog_fb *fb)
 {
-   if (unifrog_fb_set_buffer_count(fb, 2) != 0)
-      (void)unifrog_fb_set_buffer_count(fb, 1);
+   if (unifrog_fb_set_buffer_count(fb, 2) == 0)
+      return 0;
+   return unifrog_fb_set_buffer_count(fb, 1);
 }
 
 static int draw_logo(struct unifrog_fb *fb, const char *tag)
@@ -151,7 +152,11 @@ int unifrog_boot_logo_present_early(void)
       return -1;
    }
    open_ms = unifrog_perf_time_ms();
-   boot_logo_set_buffer_count(&early_logo_fb);
+   if (boot_logo_set_buffer_count(&early_logo_fb) != 0) {
+      printf("unifrog boot_logo buffer setup failed\n");
+      unifrog_fb_close(&early_logo_fb);
+      return -1;
+   }
    buffers_ms = unifrog_perf_time_ms();
    early_logo_fb_open = 1;
    ret = draw_logo(&early_logo_fb, "early");

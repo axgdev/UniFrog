@@ -46,6 +46,7 @@ enum unifrog_exception_activity_phase {
    UNIFROG_ACTIVITY_PHASE_LOG_RESET = 141,
    UNIFROG_ACTIVITY_PHASE_LOG_RECOVERY = 142,
    UNIFROG_ACTIVITY_PHASE_REPORT_WRITE = 150,
+   UNIFROG_ACTIVITY_PHASE_GE_SUBMIT = 160,
 };
 
 void unifrog_exception_record_store(uint32_t cause, uint32_t epc,

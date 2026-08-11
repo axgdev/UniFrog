@@ -27,9 +27,11 @@ and by device testing.
   - Leaves synchronization explicit with `unifrog_ge_sync()` so callers can
     batch operations.
   - Supports explicit source/destination cache flush flags for DMA-style use.
-  - Provides `unifrog_ge_set_fast_clock()`, currently mapped to the 198 MHz
-    selector because the latest device run showed it is faster than the
-    225/238 selectors for fill and stretch workloads.
+  - Provides `unifrog_ge_set_fast_clock()` as an explicit raw-selector
+    diagnostic/runtime operation. Normal GE startup inherits the stable clock
+    configured by the bootloader/kernel; runtime changes synchronize the GE
+    before writing the clock register.
+
 - `unifrog/presenter.h`
   - Combines framebuffer and GE setup into the preferred RGB565 presentation
     path for emulator frames.
@@ -165,9 +167,10 @@ intentionally outside individual core source changes:
 - SCPU can be kept at the boot profile or switched to guarded known profiles
   at 198, 297, 396, 594, 702, 756, 810, 864, or 918 MHz. Runtime changes are
   captured before launch and restored after the core exits.
-- GE clock can be selected between the driver-supported 198, 148, 225, and
-  238 MHz selectors. This tunes presentation only; it will not reduce core CPU
-  time unless presentation is the bottleneck.
+- GE clock can be selected between raw driver selectors 0 through 3. Their
+  vendor MHz labels are not trusted on this silicon; selector 3 is the stable
+  bootloader/kernel setting. This tunes presentation only; it will not reduce
+  core CPU time unless presentation is the bottleneck.
 - Backlight can be set for the game session and restored on return to the
   frontend. This is a power/comfort knob, not a speed knob.
 
@@ -180,8 +183,9 @@ intentionally outside individual core source changes:
 - Framebuffer: `/dev/fb0` RGB565, mmap, pan, and vsync are available.
 - GE: `/dev/ge` supports accelerated fill, blit, and stretch-blit. GE clock
   control is available through the driver and affects the accelerator, not SCPU.
-  In `loghcrtos38.txt`, selector 198/148 was faster than selector 225/238 for
-  the measured workloads, so `UNIFROG_GE_CLOCK_FAST` intentionally selects 198.
+  The retained handoff and Linux/vendor reset both establish selector 3 as
+  the stable source. The runtime API therefore treats clock values as raw
+  selectors and does not infer a frequency from the vendor labels.
 - Display controller: `/dev/dis` supports layer ordering and zoom used by the
   hardware video plane.
 - Video: HCRTOS `/dev/viddec` can decode media through hardware when the board

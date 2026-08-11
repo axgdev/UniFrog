@@ -164,6 +164,8 @@ static const char *boot_trace_name(uint32_t event)
       return "unifrog.ge_submit.begin";
    case FASTBOOT_TRACE_UNIFROG_GE_SUBMIT_DONE:
       return "unifrog.ge_submit.done";
+   case FASTBOOT_TRACE_UNIFROG_GE_CLOCK:
+      return "unifrog.ge_clock";
    case FASTBOOT_TRACE_SDK_PWM_PROBE_BEGIN:
       return "sdk.pwm.probe_begin";
    case FASTBOOT_TRACE_SDK_PWM_PINMUX_ACTIVE:

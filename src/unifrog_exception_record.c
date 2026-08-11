@@ -185,6 +185,8 @@ static const char *phase_label(uint32_t phase)
       return "log_recovery";
    case UNIFROG_ACTIVITY_PHASE_REPORT_WRITE:
       return "report_write";
+   case UNIFROG_ACTIVITY_PHASE_GE_SUBMIT:
+      return "ge_submit";
    default:
       return "none";
    }

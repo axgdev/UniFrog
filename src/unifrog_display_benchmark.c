@@ -113,6 +113,8 @@ static int run_color_case(FILE *report, const char *name, unsigned fb_flags,
 
    memset(&fb, 0, sizeof(fb));
    memset(&ge, 0, sizeof(ge));
+   memset(&src, 0, sizeof(src));
+   memset(&dst, 0, sizeof(dst));
    if (unifrog_fb_open(&fb, fb_flags) != 0)
       goto out;
    if (unifrog_ge_open(&ge) != 0)
@@ -127,6 +129,7 @@ static int run_color_case(FILE *report, const char *name, unsigned fb_flags,
       fill_xrgb8888(source, fb.width, fb.height);
    unifrog_perf_cache_flush(source, source_bytes);
 
+   memset(&src, 0, sizeof(src));
    src.pixels = source;
    src.width = fb.width;
    src.height = fb.height;
@@ -179,15 +182,16 @@ static int run_case(FILE *report, const struct display_bench_case *bench,
 
    memset(&fb, 0, sizeof(fb));
    memset(&ge, 0, sizeof(ge));
+   memset(&src, 0, sizeof(src));
    if (!bench)
       return -1;
    if (unifrog_fb_open(&fb, bench->fb_flags) != 0)
       goto out;
    buffers = fb.max_buffers >= 2 ? 2 : 1;
-   (void)unifrog_fb_set_buffer_count(&fb, buffers);
+   if (unifrog_fb_set_buffer_count(&fb, buffers) != 0)
+      goto out;
    if (unifrog_ge_open(&ge) != 0)
       goto out;
-   (void)unifrog_ge_set_fast_clock(&ge);
 
    source_bytes = (size_t)fb.width * fb.height * bench->src_bpp;
    source = malloc(source_bytes);
@@ -199,6 +203,7 @@ static int run_case(FILE *report, const struct display_bench_case *bench,
       fill_xrgb8888(source, fb.width, fb.height);
    unifrog_perf_cache_flush(source, source_bytes);
 
+   memset(&src, 0, sizeof(src));
    src.pixels = source;
    src.width = fb.width;
    src.height = fb.height;

@@ -7,8 +7,10 @@
 
 #include <unifrog/boot_logo.h>
 #include <unifrog/boot_trace.h>
+#include <unifrog/ge_internal.h>
 #include <unifrog/gfx.h>
 #include <unifrog/input.h>
+#include <unifrog/log.h>
 #include <unifrog/perf.h>
 #include <unifrog/text.h>
 
@@ -22,12 +24,13 @@ static const struct unifrog_ui_theme default_theme = {
    UNIFROG_RGB565(214, 72, 77),
 };
 
-static void ui_set_handoff_buffers(struct unifrog_fb *fb, int preserve_logo)
+static int ui_set_handoff_buffers(struct unifrog_fb *fb, int preserve_logo)
 {
    if (preserve_logo && fb->buffer_count >= 2)
-      return;
-   if (unifrog_fb_set_buffer_count(fb, 2) != 0)
-      (void)unifrog_fb_set_buffer_count(fb, 1);
+      return 0;
+   if (unifrog_fb_set_buffer_count(fb, 2) == 0)
+      return 0;
+   return unifrog_fb_set_buffer_count(fb, 1);
 }
 
 static uint32_t ui_button_mask(uint32_t buttons)
@@ -76,11 +79,13 @@ int unifrog_ui_open(struct unifrog_ui *ui, int preserve_logo)
    flags = preserve_logo ? UNIFROG_FB_OPEN_PRESERVE : UNIFROG_FB_OPEN_DEFAULT;
    if (unifrog_fb_open(&ui->fb, flags) != 0)
       return -1;
-   if (unifrog_ge_open(&ui->ge) == 0) {
+   if (unifrog_ge_open(&ui->ge) == 0)
       ui->ge_ready = 1;
-      (void)unifrog_ge_set_fast_clock(&ui->ge);
+   if (ui_set_handoff_buffers(&ui->fb, preserve_logo) != 0) {
+      unifrog_fb_close(&ui->fb);
+      unifrog_ge_close(&ui->ge);
+      return -1;
    }
-   ui_set_handoff_buffers(&ui->fb, preserve_logo);
    ui->draw_buffer = ui->fb.current_buffer;
    if (preserve_logo) {
       unifrog_boot_logo_release_early();
@@ -121,6 +126,13 @@ void unifrog_ui_begin(struct unifrog_ui *ui, uint16_t color)
    if (ui->ge_ready) {
       struct unifrog_ge_surface dst =
          unifrog_fb_ge_surface_for_buffer(&ui->fb, ui->draw_buffer);
+      unifrog_log("unifrog ui ge dst buffer=%u pixels=%p phys=0x%08lx "
+         "fb_phys=0x%08lx pitch=%u size=%ux%u\n",
+         ui->draw_buffer, dst.pixels,
+         (unsigned long)(ui->fb.phys_start +
+            (uintptr_t)ui->draw_buffer * ui->fb.pitch_bytes * ui->fb.height),
+         (unsigned long)ui->fb.phys_start, dst.pitch_bytes,
+         dst.width, dst.height);
       struct unifrog_ge_rect rect = {
          0, 0, (int)surface.width, (int)surface.height
       };
@@ -128,8 +140,10 @@ void unifrog_ui_begin(struct unifrog_ui *ui, uint16_t color)
       uint32_t g = ((uint32_t)((color >> 5) & 0x3fu) * 255u + 31u) / 63u;
       uint32_t b = ((uint32_t)(color & 0x1fu) * 255u + 15u) / 31u;
 
-      fill_ret = unifrog_ge_fill(&ui->ge, &dst, &rect,
-         0xff000000u | (r << 16) | (g << 8) | b);
+      fill_ret = unifrog_ge_fill_at(&ui->ge, &dst, &rect,
+         0xff000000u | (r << 16) | (g << 8) | b,
+         ui->fb.phys_start +
+            (uintptr_t)ui->draw_buffer * ui->fb.pitch_bytes * ui->fb.height);
       unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_FILL_DONE,
          (uint32_t)fill_ret, ui->draw_buffer, 0);
       if (fill_ret == 0) {
