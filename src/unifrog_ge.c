@@ -182,6 +182,12 @@ int unifrog_ge_open(struct unifrog_ge *ge)
 
    ge->context = ctx;
    ge->fd = ctx->ge_fd;
+   /* The bootloader, Linux, NuttX, and the vendor hcge reset all establish
+    * raw selector 3 before UniFrog owns the device.  Record that contract;
+    * the normal UI/presenter paths intentionally inherit it. */
+   ge->clock_selector =
+      (enum unifrog_ge_clock)UNIFROG_GE_CLOCK_FAST_SELECTOR;
+   ge->clock_selector_valid = 1;
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_OPEN_DONE,
       ctx->cmdq_buf_phyaddr, ctx->cmdq_buf_size, ctx->cmdq_buf_map_phyaddr);
    return 0;
@@ -196,6 +202,8 @@ void unifrog_ge_close(struct unifrog_ge *ge)
    if (ge) {
       ge->context = NULL;
       ge->fd = -1;
+      ge->clock_selector = UNIFROG_GE_CLOCK_SELECTOR_3;
+      ge->clock_selector_valid = 0;
    }
 }
 
@@ -206,6 +214,15 @@ int unifrog_ge_set_clock(struct unifrog_ge *ge, enum unifrog_ge_clock clock)
 
    if (!ctx || ctx->ge_fd < 0)
       return -1;
+   if ((unsigned)clock > (unsigned)UNIFROG_GE_CLOCK_SELECTOR_3)
+      return -1;
+   if (ge->clock_selector_valid && ge->clock_selector == clock) {
+      /* In particular, do not turn the bootloader's selector-3 handoff into
+       * an ioctl merely because a legacy caller asks for the same value. */
+      unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_CLOCK,
+         (uint32_t)(unsigned)clock, 0u, 0u);
+      return 0;
+   }
    /* A clock change is a live GE MMIO transition.  Do not change the source
     * while command-queue work is still in flight. */
    ret = hcge_engine_sync(ctx);
@@ -216,6 +233,10 @@ int unifrog_ge_set_clock(struct unifrog_ge *ge, enum unifrog_ge_clock clock)
       return ret;
    }
    ret = ioctl(ctx->ge_fd, HCGE_SET_CLOCK, clock);
+   if (ret == 0) {
+      ge->clock_selector = clock;
+      ge->clock_selector_valid = 1;
+   }
    unifrog_boot_trace_mark(FASTBOOT_TRACE_UNIFROG_GE_CLOCK,
       (uint32_t)(unsigned)clock, (uint32_t)ret,
       ret < 0 ? (uint32_t)errno : 0u);

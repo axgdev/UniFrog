@@ -29,7 +29,8 @@ and by device testing.
   - Supports explicit source/destination cache flush flags for DMA-style use.
   - Provides `unifrog_ge_set_fast_clock()` as an explicit raw-selector
     diagnostic/runtime operation. Normal GE startup inherits the stable clock
-    configured by the bootloader/kernel; runtime changes synchronize the GE
+    configured by the bootloader/kernel; an idempotent request for that
+    selector is suppressed, while a real runtime change synchronizes the GE
     before writing the clock register.
 
 - `unifrog/presenter.h`

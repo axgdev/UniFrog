@@ -51,6 +51,11 @@ enum unifrog_ge_flags {
 struct unifrog_ge {
    void *context;
    int fd;
+   /* hcge_open()/hcge_hw_reset() establish selector 3 before the first
+    * command.  Keep a small software mirror so an idempotent request for
+    * that inherited selector does not issue a live clock ioctl. */
+   enum unifrog_ge_clock clock_selector;
+   int clock_selector_valid;
 };
 
 struct unifrog_ge_surface {

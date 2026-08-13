@@ -79,6 +79,10 @@ int unifrog_ui_open(struct unifrog_ui *ui, int preserve_logo)
    flags = preserve_logo ? UNIFROG_FB_OPEN_PRESERVE : UNIFROG_FB_OPEN_DEFAULT;
    if (unifrog_fb_open(&ui->fb, flags) != 0)
       return -1;
+   /* The bootloader hands ownership over with HCGE selector 3 already
+    * selected.  Opening the vendor context is sufficient; issuing the old
+    * set_fast_clock ioctl here would be a live 3->0 mux transition on
+    * vanilla v0.5.2 and can wedge the first GE doorbell. */
    if (unifrog_ge_open(&ui->ge) == 0)
       ui->ge_ready = 1;
    if (ui_set_handoff_buffers(&ui->fb, preserve_logo) != 0) {
