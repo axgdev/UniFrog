@@ -9,7 +9,7 @@ The root Makefile is the authoritative entry point. It builds `bisrv.asd`,
 ## Requirements
 
 - Alpine or another Unix-like host with `make`, a C compiler, Git, and `dtc`
-- MIPS toolchain at `/opt/mipsel-mti-elf` by default
+- Frog newlib MIPS toolchain v1.3.2, downloaded below `.deps/` by default
 - HCRTOS SDK submodule at `unifrog-hcrtos-sdk`
 - External source checkouts fetched under `.deps`
 
@@ -19,7 +19,8 @@ Install Alpine host packages with:
 make deps-alpine
 ```
 
-Fetch the SDK submodule, MQuickJS, libretro cores, and support libraries:
+Fetch the SDK submodule, standalone JS2300 runtime, libretro cores, and support
+libraries:
 
 ```sh
 make deps
@@ -28,7 +29,7 @@ make deps
 Local paths can be overridden in untracked `config.mk`:
 
 ```make
-TOOLCHAIN := /opt/mipsel-mti-elf
+TOOLCHAIN := .deps/frog-toolchain-v1.3.2-<host-arch>/mipsel-mti-elf
 SDK := unifrog-hcrtos-sdk
 DEPS := .deps
 ```
@@ -146,7 +147,8 @@ board/                 Local SF2000 device tree input
 cores/                 Libretro source manifest, patches, and core build
 docs/                  Hardware, ABI, loader, and diagnostics notes
 include/unifrog/       Public UniFrog C interfaces
-js2300/                MQuickJS embedding layer
+.deps/frog2k-javascript/
+                       Standalone JS2300 runtime checkout
 linker/                HCRTOS/SF2000 linker scripts
 output/sdcard/unifrog/modules/
                        Runtime-loaded native modules
@@ -159,7 +161,7 @@ unifrog-hcrtos-sdk/    SDK submodule
 
 Fetched third-party source checkouts live in untracked `.deps/` after
 `make deps`. Generated files live in `build/`, `output/`, `cores/output/`,
-`js2300/output/`, and packaging directories. They are not
+the standalone JS2300 output, and packaging directories. They are not
 source.
 
 ## Component Docs
@@ -167,11 +169,12 @@ source.
 - `docs/README.md` maps the retained hardware and architecture notes.
 - `cores/README.md` explains core source fetching, patching, and ABI rules.
 - `docs/js2300-scripting.md` covers optional JS2300 scripts.
-- `js2300/README.md` covers the embedded JavaScript runtime layer.
+- The [frog2k-javascript repository](https://github.com/axgdev/frog2k-javascript-private)
+  covers the embedded JavaScript runtime layer.
 
 Each component Makefile has its own quick reference:
 
 ```sh
 make -C cores help
-make -C js2300 help
+make -C .deps/frog2k-javascript help
 ```

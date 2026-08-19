@@ -46,8 +46,8 @@ frontend files are required on the SD card.
 
 ## JavaScript Boundary
 
-`js2300/` embeds MQuickJS and registers native bindings. It is no longer a
-frontend implementation. The native frontend exposes Apps -> JavaScript Scripts
+The pinned `.deps/frog2k-javascript/` checkout embeds MQuickJS and registers the
+portable JS2300 runtime. It is no longer a frontend implementation. The native frontend exposes Apps -> JavaScript Scripts
 for optional standalone scripts in `/unifrog_data/scripts`; the native frontend,
 quick menu, themes, and diagnostics stay in C/LVGL-side code.
 

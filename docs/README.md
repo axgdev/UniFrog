@@ -8,7 +8,7 @@ binary package notice requirements.
 Current component docs:
 
 - `../cores/README.md`: libretro source workflow, patches, and core ABI rules
-- `../js2300/README.md`: MQuickJS embedding layer
+- [frog2k-javascript](https://github.com/axgdev/frog2k-javascript-private): standalone JS2300 runtime and MQuickJS embedding layer
 - `js2300-scripting.md`: optional JS2300 script contract
 - `muos-integration.md`: upstream MuOS/LVGL checkout and shim policy
 - `../THIRD_PARTY.md`: third-party license and source inventory

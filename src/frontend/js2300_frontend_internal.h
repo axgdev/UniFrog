@@ -103,6 +103,9 @@ int host_fs_write_text(void *opaque, const char *path,
 int host_fs_index(void *opaque, const char *root,
    const char *game_index_path, const char *media_index_path,
    struct js2300_fs_index_result *result);
+int host_file_size(void *opaque, const char *path, size_t *out_size);
+int host_file_read(void *opaque, const char *path, void *out,
+   size_t capacity, size_t *out_size);
 int host_action(void *opaque, const char *id);
 void host_exit(void *opaque, const char *reason);
 

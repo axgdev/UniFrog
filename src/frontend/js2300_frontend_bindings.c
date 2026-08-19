@@ -201,6 +201,40 @@ int host_fs_write_text(void *opaque, const char *path,
    return wrote == size ? 0 : -1;
 }
 
+int host_file_size(void *opaque, const char *path, size_t *out_size)
+{
+   struct stat st;
+
+   (void)opaque;
+   if (!path || !out_size || stat(path, &st) != 0 || st.st_size < 0)
+      return -1;
+   if ((uintmax_t)st.st_size > (uintmax_t)SIZE_MAX)
+      return -1;
+   *out_size = (size_t)st.st_size;
+   return 0;
+}
+
+int host_file_read(void *opaque, const char *path, void *out,
+   size_t capacity, size_t *out_size)
+{
+   FILE *file;
+   size_t size;
+   size_t got;
+
+   (void)opaque;
+   if (!path || !out_size || host_file_size(NULL, path, &size) != 0 ||
+       size > capacity || (size != 0 && !out))
+      return -1;
+   file = fopen(path, "rb");
+   if (!file)
+      return -1;
+   got = fread(out, 1, size, file);
+   if (got != size || ferror(file) || fclose(file) != 0)
+      return -1;
+   *out_size = got;
+   return 0;
+}
+
 static int fs_index_scan(const char *dir, unsigned depth,
    struct js2300_fs_index_result *result)
 {

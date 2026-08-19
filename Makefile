@@ -1,10 +1,11 @@
 # User-facing path defaults. Override these in untracked config.mk.
-TOOLCHAIN ?= /opt/mipsel-mti-elf
+DEPS ?= .deps
+TOOLCHAIN_VERSION ?= 1.3.2
 TOOLCHAIN_UNAME_M := $(shell uname -m)
 TOOLCHAIN_HOST_ARCH := $(if $(filter aarch64 arm64,$(TOOLCHAIN_UNAME_M)),arm64,$(if $(filter x86_64 amd64,$(TOOLCHAIN_UNAME_M)),x86_64,$(TOOLCHAIN_UNAME_M)))
-TOOLCHAIN_URL ?= https://github.com/axgdev/frog-toolchain/releases/download/v1.1.1/toolchain-stable-static-$(TOOLCHAIN_HOST_ARCH)-gcc15.2.0-binutils2.45-newlib4.5.0.20241231.tar.xz
+TOOLCHAIN_ROOT ?= $(abspath $(DEPS)/frog-toolchain-v$(TOOLCHAIN_VERSION)-$(TOOLCHAIN_HOST_ARCH))
+TOOLCHAIN ?= $(TOOLCHAIN_ROOT)/mipsel-mti-elf
 CROSS_COMPILE ?= $(TOOLCHAIN)/bin/mipsel-mti-elf-
-DEPS ?= .deps
 SDK ?= unifrog-hcrtos-sdk
 HCRTOS_FFMPEG_URL ?= https://git.ffmpeg.org/ffmpeg.git
 HCRTOS_FFMPEG_REF ?= n4.4.7
@@ -30,11 +31,10 @@ HCRTOS_FFMPEG_WARN_CFLAGS := \
 CORES ?= cores
 CORE_SOURCE_ROOT ?= $(DEPS)/cores
 CORE_SUPPORT_ROOT ?= $(DEPS)/support
-JS2300 ?= js2300
-MQUICKJS_DIR ?= $(DEPS)/mquickjs
-MQUICKJS_URL ?= https://github.com/bellard/mquickjs.git
-MQUICKJS_POLICY ?= head
-MQUICKJS_REF ?= ee50431eac9b14b99f722b537ec4cac0c8dd75ab
+JS2300 ?= $(DEPS)/frog2k-javascript
+JS2300_URL ?= git@github.com:axgdev/frog2k-javascript-private.git
+JS2300_REF ?= c08d4124f4e2c8437ddf3daaacc0c595886b7198
+JS2300_FETCH_STAMP := $(JS2300).frog2k-$(JS2300_REF).stamp
 LVGL_DIR ?= $(DEPS)/support/lvgl
 LVGL_URL ?= https://github.com/lvgl/lvgl.git
 LVGL_REF ?= 0019fc541f759b3323add63034502b0248afc58f
@@ -180,6 +180,7 @@ ARCH_CFLAGS ?= -march=$(MIPS_ARCH) -mtune=$(MIPS_TUNE)
 OPT_SIZE ?= -Os
 OPT_FAST ?= -O2
 OPT_AUDIO ?= -Os
+LD_OPT_SIZE ?= -O1
 OPT_FLAGS := -O0 -O1 -O2 -O3 -Os -Og -Ofast
 SD_MODES := safe wide1 wide2 wide4 wide8 wide10 wide12 wide14 wide16 wide18 wide20 wide22 wide24 wide25 wide37 hs1 wide50 wide uhs12 uhs25 uhs
 SD_READ_MODES := boot off none safe wide1 wide2 wide4 wide8 wide10 wide12 wide14 wide16 wide18 wide20 wide22 wide24 wide25 wide37 hs1 wide50 wide uhs12 uhs25 uhs
@@ -346,7 +347,7 @@ UNIFROG_BOOT_VERSION := $(shell tag=$$(git describe --tags --exact-match 2>/dev/
 UNIFROG_GIT_DIRTY := $(shell git diff-index --quiet --ignore-submodules=dirty HEAD -- 2>/dev/null && echo 0 || echo 1)
 UNIFROG_SDK_GIT_COMMIT := $(shell git -C $(SDK) rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 UNIFROG_CORES_GIT_COMMIT := $(shell git -C $(CORE_SOURCE_ROOT)/libretro-common rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
-UNIFROG_JS2300_GIT_COMMIT := $(shell git -C $(JS2300) rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+UNIFROG_JS2300_GIT_COMMIT := $(shell git -C $(JS2300) rev-parse --short=12 HEAD 2>/dev/null || echo $(JS2300_REF))
 UNIFROG_FRONTEND_GIT_COMMIT := $(shell git -C $(FRONTEND) rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 UNIFROG_NATIVE_FRONTEND_GIT_COMMIT := native
 
@@ -517,7 +518,7 @@ WRAPS := \
 	--wrap __errno \
 	--wrap rename
 
-LDFLAGS := -EL $(OPT_SIZE) --static $(LIBDIRS) $(LDSCRIPTS) --gc-sections -n $(WRAPS) --allow-multiple-definition
+LDFLAGS := -EL $(LD_OPT_SIZE) --static $(LIBDIRS) $(LDSCRIPTS) --gc-sections -n $(WRAPS) --allow-multiple-definition
 
 HCRTOS_DISPLAY_LDLIBS := \
 	-lviddrv
@@ -790,7 +791,7 @@ NATIVE_MODULE_OUTS := $(if $(filter module,$(HCRTOS_MEDIA)),$(HCRTOS_MEDIA_MODUL
 UNIFROG_CORE_MODULE_BASE ?= 0x83000000
 CORE_MODULE_CFLAGS := $(CFLAGS) -mno-abicalls -fno-pic
 CORE_MODULE_CFLAGS_NO_IDENTITY := $(filter-out $(IDENTITY_DEFINES),$(CORE_MODULE_CFLAGS))
-CORE_MODULE_LDFLAGS := -EL $(OPT_SIZE) --static $(LIBDIRS) \
+CORE_MODULE_LDFLAGS := -EL $(LD_OPT_SIZE) --static $(LIBDIRS) \
 	-T linker/hc15xx/peripherals.ld \
 	-T linker/core-module.ld \
 	--defsym __UNIFROG_MODULE_BASE=$(UNIFROG_CORE_MODULE_BASE) \
@@ -811,14 +812,11 @@ CORE_MODULE_SUPPORT_OBJECT := $(BUILD)/core_modules/support.o
 
 DTS_INPUTS := $(DTS) $(shell test ! -d dts/include || find dts/include -type f | sort)
 SDK_PATCHES := $(shell test ! -d "$(SDK)/patches/open-source" || find "$(SDK)/patches/open-source" -type f -name '*.patch' | sort)
-JS2300_INPUTS := $(addprefix $(JS2300)/,$(shell test ! -d "$(JS2300)/.git" || git -C "$(JS2300)" ls-files))
-MQUICKJS_INPUTS := $(addprefix $(MQUICKJS_DIR)/,$(shell test ! -d "$(MQUICKJS_DIR)/.git" || git -C "$(MQUICKJS_DIR)" ls-files '*.c' '*.h' Makefile))
-
 BUILD_CONFIG_TOKEN := $(shell printf '%s\n' \
 	'CC=$(CC)' 'CXX=$(CXX)' 'LD=$(LD)' 'AR=$(AR)' 'OBJCOPY=$(OBJCOPY)' \
 	'HOSTCC=$(HOSTCC)' 'HOSTCFLAGS=$(HOSTCFLAGS)' \
 	'ARCH_CFLAGS=$(ARCH_CFLAGS)' 'OPT_SIZE=$(OPT_SIZE)' \
-	'OPT_FAST=$(OPT_FAST)' 'OPT_AUDIO=$(OPT_AUDIO)' \
+	'LD_OPT_SIZE=$(LD_OPT_SIZE)' 'OPT_FAST=$(OPT_FAST)' 'OPT_AUDIO=$(OPT_AUDIO)' \
 	'CONFIG_DEFINES=$(CONFIG_DEFINES)' 'PROJECT_INCLUDES=$(PROJECT_INCLUDES)' \
 	'SDK_INCLUDES=$(SDK_INCLUDES)' 'CFLAGS=$(CFLAGS_NO_IDENTITY)' \
 	'CFLAGS_FAST=$(CFLAGS_FAST_NO_IDENTITY)' \
@@ -866,9 +864,8 @@ SDK_CONFIG_TOKEN := $(shell { \
 CORE_ARCHIVE_STAMP := $(BUILD)/core-archives.$(CORE_CONFIG_TOKEN).stamp
 JS2300_CONFIG_TOKEN := $(shell { \
 	printf '%s\n' 'TOOLCHAIN=$(TOOLCHAIN)' 'CROSS_COMPILE=$(CROSS_COMPILE)' \
-		'MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR))' 'HOSTCC=$(HOSTCC)'; \
-	for f in $(JS2300_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
-	for f in $(MQUICKJS_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
+		'JS2300_URL=$(JS2300_URL)' 'JS2300_REF=$(JS2300_REF)' \
+		'HOSTCC=$(HOSTCC)'; \
 } | cksum | awk '{print $$1}')
 FRONTEND_CONFIG_TOKEN := $(shell { \
 	printf '%s\n' 'OUT=$(abspath $(OUT))/frontend' \
@@ -942,14 +939,14 @@ $(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 
 .DELETE_ON_ERROR:
 COMMON_TARGETS := all help setup doctor smoke-doctor deps deps-status upgrade-pins upgrade-deps repo-check quick-check check verify clean distclean rebuild list-cores core core-archive core-out ffmpeg
-SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-mquickjs deps-support deps-cores deps-core-smoke deps-lvgl deps-ffmpeg
+SETUP_TARGETS := deps-alpine deps-ubuntu deps-sdk deps-js2300 deps-support deps-cores deps-core-smoke deps-lvgl deps-ffmpeg
 PACKAGE_TARGETS := frontend-package core-package module-package sdcard-package sd-zip install refresh-sd refresh-sd-clean
 VERIFY_TARGETS := asdcheck fastboot-check fastboot-only-check layout-check boot-logo-check js2300-check frontend-check native-frontend-check core-smoke-check
 ADVANCED_TARGETS := sdk dtb lib fastboot fastboot-only size ci-deps ci-smoke-deps ci-toolchain ci-commit-smoke ci-commit-check ci-sd-zip print-config
 .PHONY: $(COMMON_TARGETS) $(SETUP_TARGETS) $(PACKAGE_TARGETS) $(VERIFY_TARGETS) $(ADVANCED_TARGETS)
 
 all: $(ASD) sdcard-package
-setup: deps
+setup: deps ci-toolchain
 
 verify:
 	$(Q)$(MAKE) --no-print-directory quick-check
@@ -958,12 +955,12 @@ verify:
 
 help:
 	@echo "$(APP) common workflow:"
-	@echo "  make setup         Fetch SDK submodule and external source inputs"
+	@echo "  make setup         Fetch sources, vendor inputs, and Frog toolchain"
 	@echo "  make doctor        Check toolchain, SDK, and fetched inputs"
 	@echo "  make quick-check   Fast hygiene, core smoke, JS2300, and frontend checks"
 	@echo "  make               Build $(ASD), $(OUT)/unifrog.bin, and SD files"
 	@echo "  make verify        Build and verify firmware, fastboot, JS, and layout"
-	@echo "  make deps          Same as make setup"
+	@echo "  make deps          Fetch SDK, JS2300, cores, and support sources"
 	@echo "  make deps-status   Show pins vs policy, or override MODE=head|tag"
 	@echo "  make ffmpeg        Build patched HCRTOS FFmpeg for local media"
 	@echo "  make upgrade-deps  Bump pins by policy, or override MODE=head|tag"
@@ -978,6 +975,7 @@ help:
 	@echo "  make deps-alpine   Install Alpine host packages"
 	@echo "  make deps-ubuntu   Print Ubuntu host package command"
 	@echo "  make deps-sdk      Initialize only the HCRTOS SDK submodule"
+	@echo "  make deps-js2300   Fetch the pinned standalone JS2300 repository"
 	@echo "  make deps-cores    Fetch only libretro core sources"
 	@echo "  make deps-lvgl     Fetch only the LVGL checkout"
 	@echo ""
@@ -993,7 +991,7 @@ help:
 	@echo "  make fastboot-only-check"
 	@echo "  make layout-check asdcheck fastboot-check"
 	@echo "  make -C cores help"
-	@echo "  make -C js2300 help"
+	@echo "  make -C .deps/frog2k-javascript help"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean         Remove generated files"
@@ -1050,7 +1048,8 @@ print-config:
 	@echo "CORE_SUPPORT_ROOT=$(CORE_SUPPORT_ROOT)"
 	@echo "JS2300=$(JS2300)"
 	@echo "FRONTEND=$(FRONTEND)"
-	@echo "MQUICKJS_DIR=$(MQUICKJS_DIR)"
+	@echo "JS2300_URL=$(JS2300_URL)"
+	@echo "JS2300_REF=$(JS2300_REF)"
 	@echo "LVGL_DIR=$(LVGL_DIR)"
 	@echo "HCRTOS_FFMPEG_URL=$(HCRTOS_FFMPEG_URL)"
 	@echo "HCRTOS_FFMPEG_REF=$(HCRTOS_FFMPEG_REF)"
@@ -1106,6 +1105,7 @@ print-config:
 	@echo "CCACHE=$(if $(CCACHE),$(CCACHE),disabled)"
 	@echo "ARCH_CFLAGS=$(ARCH_CFLAGS)"
 	@echo "OPT_SIZE=$(OPT_SIZE)"
+	@echo "LD_OPT_SIZE=$(LD_OPT_SIZE)"
 	@echo "OPT_FAST=$(OPT_FAST)"
 	@echo "OPT_AUDIO=$(OPT_AUDIO)"
 
@@ -1125,7 +1125,7 @@ core-archive: $(SELECTED_CORE_LIB)
 core-out: $(SELECTED_CORE_OUT)
 endif
 
-deps: deps-sdk deps-mquickjs deps-lvgl deps-cores deps-ffmpeg ffmpeg
+deps: deps-sdk deps-js2300 deps-lvgl deps-cores deps-ffmpeg ffmpeg
 
 deps-alpine:
 	apk add git make dtc tcc tcc-libs-static musl-dev zlib-dev ccache curl tar xz zip patch
@@ -1139,27 +1139,24 @@ deps-sdk:
 	git submodule update --init --depth 1 --filter=blob:none --jobs "$(JOBS)" \
 		unifrog-hcrtos-sdk
 
-deps-mquickjs:
-	@mkdir -p $(DEPS)
-	@fresh=0; \
-	if test -d "$(MQUICKJS_DIR)/.git"; then \
-		echo "  FETCH   $(MQUICKJS_DIR)"; \
-		git -C "$(MQUICKJS_DIR)" remote set-url origin "$(MQUICKJS_URL)"; \
-	else \
-		echo "  CLONE   $(MQUICKJS_URL)"; \
-		rm -rf "$(MQUICKJS_DIR)"; \
-		git init -q "$(MQUICKJS_DIR)"; \
-		git -C "$(MQUICKJS_DIR)" remote add origin "$(MQUICKJS_URL)"; \
-		fresh=1; \
-	fi; \
-	if ! git -C "$(MQUICKJS_DIR)" cat-file -e "$(MQUICKJS_REF)^{commit}" 2>/dev/null; then \
-		git -C "$(MQUICKJS_DIR)" fetch --depth 1 origin "$(MQUICKJS_REF)"; \
-	fi; \
-	git -C "$(MQUICKJS_DIR)" checkout -q "$(MQUICKJS_REF)"; \
-	git -C "$(MQUICKJS_DIR)" reset --hard -q "$(MQUICKJS_REF)"; \
-	if test "$$fresh" -eq 0; then \
-		git -C "$(MQUICKJS_DIR)" clean -fdx -q; \
+deps-js2300: $(JS2300_FETCH_STAMP)
+
+$(JS2300_FETCH_STAMP):
+	@mkdir -p "$(dir $(JS2300))"
+	@if test -e "$(JS2300)" && test ! -d "$(JS2300)/.git"; then \
+		echo "JS2300 path exists but is not a git checkout: $(JS2300)" >&2; exit 1; \
 	fi
+	@if test -d "$(JS2300)/.git"; then \
+		git -C "$(JS2300)" remote set-url origin "$(JS2300_URL)"; \
+	else \
+		echo "  CLONE   $(JS2300_URL)"; \
+		git clone --no-checkout --depth 1 "$(JS2300_URL)" "$(JS2300)"; \
+	fi
+	@if ! git -C "$(JS2300)" cat-file -e "$(JS2300_REF)^{commit}" 2>/dev/null; then \
+		git -C "$(JS2300)" fetch --depth 1 origin "$(JS2300_REF)"; \
+	fi
+	git -C "$(JS2300)" checkout --detach "$(JS2300_REF)"
+	touch "$@"
 
 deps-lvgl:
 	@mkdir -p "$(dir $(LVGL_DIR))"
@@ -1290,64 +1287,16 @@ $(HCRTOS_FFMPEG_STAMP): deps-ffmpeg Makefile $(HCRTOS_FFMPEG_PATCHES) | $(BUILD)
 	$(Q)touch $@
 
 deps-status:
-	@set -e; \
-	mode="$(PIN_MODE)"; \
-	case "$$mode" in policy|head|tag) ;; *) echo "MODE must be policy, head, or tag"; exit 1;; esac; \
-	if test "$$mode" = policy; then mode="$(MQUICKJS_POLICY)"; fi; \
-	resolve_ref() { \
-		url="$$1"; mode="$$2"; \
-		if test "$$mode" = tag; then \
-			tag=$$(git ls-remote --tags --sort='version:refname' "$$url" 'refs/tags/v[0-9]*' 'refs/tags/[0-9]*' 2>/dev/null | \
-				awk '$$2 !~ /\^\{\}$$/ && $$2 ~ /^refs\/tags\/v?[0-9]+([.][0-9]+)*$$/ { sub("refs/tags/", "", $$2); tag=$$2 } END { print tag }'); \
-			if test -n "$$tag"; then \
-				ref=$$(git ls-remote --tags "$$url" "refs/tags/$$tag" "refs/tags/$$tag^{}" | \
-					awk '$$2 ~ /\^\{\}$$/ { peeled=$$1 } $$2 !~ /\^\{\}$$/ { direct=$$1 } END { print peeled ? peeled : direct }'); \
-				printf '%s tag %s\n' "$$ref" "$$tag"; \
-				return; \
-			fi; \
-		fi; \
-		branch=$$(git ls-remote --symref "$$url" HEAD | awk '/^ref:/ { sub("refs/heads/", "", $$2); print $$2; exit }'); \
-		ref=$$(git ls-remote "$$url" HEAD | awk '/^[0-9a-f]/ { print $$1; exit }'); \
-		printf '%s head %s\n' "$$ref" "$${branch:-HEAD}"; \
-	}; \
-	set -- $$(resolve_ref "$(MQUICKJS_URL)" "$$mode"); \
-	printf '%-16s policy=%s mode=%s pinned=%s latest=%s source=%s:%s\n' mquickjs "$(MQUICKJS_POLICY)" "$$mode" "$(MQUICKJS_REF)" "$$1" "$$2" "$$3"
+	@printf '%-16s pinned=%s url=%s\n' js2300 "$(JS2300_REF)" "$(JS2300_URL)"
 	@printf '%-16s pinned=%s url=%s\n' lvgl "$(LVGL_REF)" "$(LVGL_URL)"
 	$(Q)$(MAKE) --no-print-directory -C $(CORES) pin-status PIN_MODE=$(PIN_MODE) \
 		CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT)) \
 		CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT))
 
 upgrade-pins:
-	@set -e; \
-	mode="$(PIN_MODE)"; \
-	case "$$mode" in policy|head|tag) ;; *) echo "MODE must be policy, head, or tag"; exit 1;; esac; \
-	if test "$$mode" = policy; then mode="$(MQUICKJS_POLICY)"; fi; \
-	resolve_ref() { \
-		url="$$1"; mode="$$2"; \
-		if test "$$mode" = tag; then \
-			tag=$$(git ls-remote --tags --sort='version:refname' "$$url" 'refs/tags/v[0-9]*' 'refs/tags/[0-9]*' 2>/dev/null | \
-				awk '$$2 !~ /\^\{\}$$/ && $$2 ~ /^refs\/tags\/v?[0-9]+([.][0-9]+)*$$/ { sub("refs/tags/", "", $$2); tag=$$2 } END { print tag }'); \
-			if test -n "$$tag"; then \
-				ref=$$(git ls-remote --tags "$$url" "refs/tags/$$tag" "refs/tags/$$tag^{}" | \
-					awk '$$2 ~ /\^\{\}$$/ { peeled=$$1 } $$2 !~ /\^\{\}$$/ { direct=$$1 } END { print peeled ? peeled : direct }'); \
-				printf '%s tag %s\n' "$$ref" "$$tag"; \
-				return; \
-			fi; \
-		fi; \
-		branch=$$(git ls-remote --symref "$$url" HEAD | awk '/^ref:/ { sub("refs/heads/", "", $$2); print $$2; exit }'); \
-		ref=$$(git ls-remote "$$url" HEAD | awk '/^[0-9a-f]/ { print $$1; exit }'); \
-		printf '%s head %s\n' "$$ref" "$${branch:-HEAD}"; \
-	}; \
-	set -- $$(resolve_ref "$(MQUICKJS_URL)" "$$mode"); \
-	new=$$1; kind=$$2; label=$$3; old="$(MQUICKJS_REF)"; \
-	if test -z "$$new"; then echo "mquickjs: unable to resolve latest $$mode"; exit 1; fi; \
-	if test "$$new" != "$$old"; then \
-		sed -i.bak "s|^MQUICKJS_REF ?= .*|MQUICKJS_REF ?= $$new|" Makefile; \
-		rm -f Makefile.bak; \
-		echo "  PIN     mquickjs $$old -> $$new ($$kind $$label, policy $(MQUICKJS_POLICY), mode $$mode)"; \
-	else \
-		echo "  PIN     mquickjs already $$old ($$kind $$label, policy $(MQUICKJS_POLICY), mode $$mode)"; \
-	fi
+	@printf '%s\n' "JS2300 is versioned independently at $(JS2300_URL)" \
+		"  pinned commit: $(JS2300_REF)" \
+		"  update JS2300_REF deliberately after validating the standalone repository"
 	$(Q)$(MAKE) --no-print-directory -C $(CORES) upgrade-pins PIN_MODE=$(PIN_MODE) \
 		CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT)) \
 		CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT))
@@ -1389,7 +1338,7 @@ doctor:
 	@test -f "$(CORE_SUPPORT_ROOT)/libchdr/src/libchdr_chd.c" || { echo "missing core support checkout; run: make deps"; exit 1; }
 	@if test "$(FRONTEND_IMPL)" = native; then \
 		test -f "$(JS2300)/Makefile" || { echo "missing JS2300 source: $(JS2300)"; exit 1; }; \
-		test -f "$(MQUICKJS_DIR)/mquickjs.c" || { echo "missing MQuickJS checkout: $(MQUICKJS_DIR)"; exit 1; }; \
+		test -f "$(JS2300)/vendor/mquickjs/mquickjs.c" || { echo "missing vendored MQuickJS source in $(JS2300)"; exit 1; }; \
 	fi
 	@echo "OK"
 	@echo "Run 'make print-config' to show resolved paths and tools."
@@ -1408,7 +1357,7 @@ smoke-doctor:
 	@test -f "$(CORE_SUPPORT_ROOT)/zlib/inflate.c" || { echo "missing core smoke support checkout; run: make deps-core-smoke"; exit 1; }
 	@if test "$(FRONTEND_IMPL)" = native; then \
 		test -f "$(JS2300)/Makefile" || { echo "missing JS2300 source: $(JS2300)"; exit 1; }; \
-		test -f "$(MQUICKJS_DIR)/mquickjs.c" || { echo "missing MQuickJS checkout: $(MQUICKJS_DIR)"; exit 1; }; \
+		test -f "$(JS2300)/vendor/mquickjs/mquickjs.c" || { echo "missing vendored MQuickJS source in $(JS2300)"; exit 1; }; \
 	fi
 	@echo "OK"
 
@@ -1452,9 +1401,8 @@ $(SDK_KERNEL_LIB): $(DTS_INPUTS) $(SDK_PATCHES) | $(BUILD)
 	$(Q)test -s $@
 
 js2300-check:
-	$(Q)$(MAKE) -C $(JS2300) check TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR)) \
-		HOSTCC=$(HOSTCC)
+	$(Q)$(MAKE) -C $(JS2300) check TOOLCHAIN=$(abspath $(TOOLCHAIN)) \
+		CROSS_COMPILE=$(abspath $(CROSS_COMPILE)) HOSTCC=$(HOSTCC)
 
 frontend-check:
 	@echo "  OK      JavaScript frontend removed"
@@ -1778,10 +1726,10 @@ $(OUT)/$(TARGET).out: $(APP_OBJECTS) $(LIBUNIFROG) $(LIBJS2300_IF) \
 	@echo "  LD      $@"
 	$(Q)$(LD) $(LDFLAGS) -o $@ -Map $@.map --start-group $(filter %.o %.a,$^) $(LDLIBS) --whole-archive $(WHOLE_LIBS) --no-whole-archive --end-group
 
-$(LIBJS2300): $(JS2300_INPUTS) $(MQUICKJS_INPUTS) $(JS2300_CONFIG_STAMP)
+$(LIBJS2300): $(JS2300_FETCH_STAMP) $(JS2300_CONFIG_STAMP)
 	@echo "  JS2300  runtime"
-	$(Q)$(MAKE) -C $(JS2300) TOOLCHAIN=$(TOOLCHAIN) \
-		CROSS_COMPILE=$(CROSS_COMPILE) MQUICKJS_DIR=$(abspath $(MQUICKJS_DIR))
+	$(Q)$(MAKE) -C $(JS2300) TOOLCHAIN=$(abspath $(TOOLCHAIN)) \
+		CROSS_COMPILE=$(abspath $(CROSS_COMPILE)) HOSTCC=$(HOSTCC)
 	$(Q)test -s $@ && touch $@
 
 define CORE_ARCHIVE_RULE
@@ -1985,23 +1933,15 @@ sd-zip: sdcard-package
 
 ci-deps: deps
 
-ci-smoke-deps: deps-sdk deps-mquickjs deps-core-smoke
+ci-smoke-deps: deps-sdk deps-js2300 deps-core-smoke
 
-ci-toolchain:
-	@if test ! -x "$(TOOLCHAIN)/bin/mipsel-mti-elf-gcc"; then \
-		command -v curl >/dev/null || { echo "missing: curl"; exit 1; }; \
-		echo "  FETCH   $(TOOLCHAIN_URL)"; \
-		rm -rf toolchain /tmp/frog-toolchain; \
-		mkdir -p /tmp/frog-toolchain; \
-		curl -L "$(TOOLCHAIN_URL)" -o /tmp/frog-toolchain.tar.xz; \
-		tar -C /tmp/frog-toolchain -xf /tmp/frog-toolchain.tar.xz; \
-		found=$$(find /tmp/frog-toolchain -path '*/bin/mipsel-mti-elf-gcc' -type f -print -quit); \
-		test -n "$$found"; \
-		root=$$(dirname "$$(dirname "$$found")"); \
-		mkdir -p "$(TOOLCHAIN)"; \
-		cp -a "$$root"/. "$(TOOLCHAIN)"/; \
-		rm -f /tmp/frog-toolchain.tar.xz; \
-	fi
+
+ci-toolchain: deps-js2300
+	$(Q)$(MAKE) --no-print-directory -C $(JS2300) toolchain \
+		TOOLCHAIN=$(abspath $(TOOLCHAIN)) \
+		TOOLCHAIN_ROOT=$(abspath $(dir $(TOOLCHAIN))) \
+		TOOLCHAIN_ARCHIVE_DIR=$(abspath $(DEPS)/toolchains) \
+		TOOLCHAIN_VERSION=$(TOOLCHAIN_VERSION)
 	@test -x "$(TOOLCHAIN)/bin/mipsel-mti-elf-gcc" || { echo "missing: $(TOOLCHAIN)/bin/mipsel-mti-elf-gcc"; exit 1; }
 
 ci-commit-smoke: ci-smoke-deps ci-toolchain

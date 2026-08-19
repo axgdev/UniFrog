@@ -47,6 +47,8 @@ void frontend_configure_host(struct js2300_frontend *frontend,
    host->fs_read_text = host_fs_read_text;
    host->fs_write_text = host_fs_write_text;
    host->fs_index = host_fs_index;
+   host->file_size = host_file_size;
+   host->file_read = host_file_read;
 }
 
 int run_js_script_file(struct js2300_frontend *frontend, const char *path)

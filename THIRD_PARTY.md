@@ -19,8 +19,8 @@ This is a license inventory and attribution aid, not legal advice.
 - `unifrog-hcrtos-sdk/` is a submodule. It is a mixed-license SDK staging tree,
   not MIT-only code. See `unifrog-hcrtos-sdk/LICENSE` and
   `unifrog-hcrtos-sdk/THIRD_PARTY_NOTICES.md`.
-- `build/`, `output/`, `cores/output/`, `frontend/output/`, and
-  `js2300/output/` are generated artifacts and are not source of truth for
+- `build/`, `output/`, `cores/output/`, `frontend/output/`, and the standalone
+  JS2300 output are generated artifacts and are not source of truth for
   license review.
 
 ## Vendored Source
@@ -38,7 +38,7 @@ These inputs are fetched by `make deps` and pinned by the root `Makefile` or
 
 | Component | Fetched Location | Used For | License / Notice |
 | --- | --- | --- | --- |
-| MQuickJS | `.deps/mquickjs` | JavaScript runtime and bytecode tooling | MIT. See `.deps/mquickjs/LICENSE`. |
+| frog2k-javascript | `.deps/frog2k-javascript` | Standalone JS2300 runtime, bindings, and vendored MQuickJS | MIT for JS2300; see the checkout README and `vendor/mquickjs/LICENSE`. |
 | libretro-common | `.deps/cores/libretro-common` | Libretro support objects | File-level notices, mostly MIT-style/libretro permissive code plus public-domain `libco`. Only the paths listed in `cores/Makefile` are compiled. |
 | libchdr | `.deps/support/libchdr` | CHD support for core modules | BSD 3-Clause style notice. See `.deps/support/libchdr/LICENSE.txt`. |
 | zlib | `.deps/support/zlib` | Boot-logo PNG decode helper, CHD support, and core support | zlib license. See `.deps/support/zlib/LICENSE`. |

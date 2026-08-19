@@ -1,4 +1,8 @@
-TOOLCHAIN ?= /opt/mipsel-mti-elf
+TOOLCHAIN_VERSION ?= 1.3.2
+TOOLCHAIN_UNAME_M := $(shell uname -m)
+TOOLCHAIN_HOST_ARCH := $(if $(filter aarch64 arm64,$(TOOLCHAIN_UNAME_M)),arm64,$(if $(filter x86_64 amd64,$(TOOLCHAIN_UNAME_M)),x86_64,$(TOOLCHAIN_UNAME_M)))
+TOOLCHAIN_ROOT ?= $(abspath ../.deps/frog-toolchain-v$(TOOLCHAIN_VERSION)-$(TOOLCHAIN_HOST_ARCH))
+TOOLCHAIN ?= $(TOOLCHAIN_ROOT)/mipsel-mti-elf
 CROSS_COMPILE ?= $(TOOLCHAIN)/bin/mipsel-mti-elf-
 SDK ?= ../unifrog-hcrtos-sdk
 JOBS ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
