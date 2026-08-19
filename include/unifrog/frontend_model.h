@@ -16,7 +16,6 @@ enum unifrog_frontend_model_screen {
    UNIFROG_FRONTEND_MODEL_VISUAL,
    UNIFROG_FRONTEND_MODEL_STORAGE,
    UNIFROG_FRONTEND_MODEL_STORAGE_MODE,
-   UNIFROG_FRONTEND_MODEL_SERVICE,
 };
 
 enum unifrog_frontend_action {

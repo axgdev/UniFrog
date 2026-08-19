@@ -360,6 +360,7 @@ static uint32_t hash_source_file_sample(uint32_t hash, const char *path)
    return hash;
 }
 
+#ifndef UNIFROG_LIBRETRO_NO_COMPRESSED
 static int path_is_lz4(const char *path)
 {
    return unifrog_text_ends_with_ci(path, ".lz4");
@@ -370,6 +371,7 @@ static int path_is_zstd(const char *path)
    return unifrog_text_ends_with_ci(path, ".zst") ||
       unifrog_text_ends_with_ci(path, ".zstd");
 }
+#endif
 
 int path_is_zip(const char *path)
 {
@@ -1128,6 +1130,7 @@ static int read_file_aligned_timeout(FILE *file, const char *path,
    return 0;
 }
 
+#ifndef UNIFROG_LIBRETRO_NO_COMPRESSED
 static int read_path_heap_sequential(const char *path, uint8_t **out_data,
    size_t *out_size, size_t max_size, const char *label)
 {
@@ -1202,6 +1205,7 @@ static int read_path_heap_sequential(const char *path, uint8_t **out_data,
    }
    return -1;
 }
+#endif
 
 #ifndef UNIFROG_LIBRETRO_NO_COMPRESSED
 static int decompress_zstd_memory(const char *path, const uint8_t *compressed,

@@ -430,59 +430,6 @@ static void theme_try_launch_wallpaper(struct unifrog_frontend_lvgl_style *style
          sizeof(style->launch_wallpaper[index]), path);
 }
 
-static void theme_try_launch_wallpaper_all(struct unifrog_frontend_lvgl_style *style,
-   const char *dir, const char *name)
-{
-   char path[FRONTEND_MAX_PATH];
-
-   if (!style || !dir || !name)
-      return;
-   if (frontend_path_join(path, sizeof(path), dir, name) != 0 || !frontend_file_exists(path))
-      return;
-   for (unsigned i = 0; i < ARRAY_SIZE(style->launch_wallpaper); i++) {
-      if (!style->launch_wallpaper[i][0])
-         unifrog_text_copy(style->launch_wallpaper[i],
-            sizeof(style->launch_wallpaper[i]), path);
-   }
-   theme_try_launch_wallpaper_all(style, dir,
-      "320x240/image/wall/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "640x480/image/wall/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "720x480/image/wall/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "720x576/image/wall/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "1024x768/image/wall/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "1280x720/image/wall/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "320x240/image/static/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "640x480/image/static/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "720x480/image/static/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "720x576/image/static/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "1024x768/image/static/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "1280x720/image/static/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "320x240/image/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "640x480/image/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "720x480/image/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "720x576/image/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "1024x768/image/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir,
-      "1280x720/image/muxlaunch.png");
-   theme_try_launch_wallpaper_all(style, dir, "image/muxlaunch.png");
-}
-
 static void theme_try_launch_icon(struct unifrog_frontend_lvgl_style *style,
    unsigned index, const char *dir, const char *name)
 {

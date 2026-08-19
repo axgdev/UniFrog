@@ -1173,7 +1173,6 @@ out_unload:
          UNIFROG_ACTIVITY_PHASE_UNLOAD_GAME, 1u, core->unload_game);
       CORE_CALL0_VOID(core, core->unload_game);
    }
-out_deinit:
    unifrog_diag_memory_snapshot("libretro.out_deinit");
    libretro_watchdog_stop();
    (void)host_audio_flush_sample_buffer_force();

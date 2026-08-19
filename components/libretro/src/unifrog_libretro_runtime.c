@@ -145,12 +145,6 @@ const char *framebuffer_format_label(int framebuffer_format)
       UNIFROG_LIBRETRO_FB_XRGB8888 ? "XRGB8888" : "RGB565";
 }
 
-static const char *framebuffer_format_opt_value(int framebuffer_format)
-{
-   return sanitize_framebuffer_format(framebuffer_format) ==
-      UNIFROG_LIBRETRO_FB_XRGB8888 ? "xrgb8888" : "rgb565";
-}
-
 static bool host_pixel_format_allowed(enum retro_pixel_format format)
 {
    if (format == RETRO_PIXEL_FORMAT_RGB565)
@@ -467,7 +461,7 @@ static int quick_memory_data(const struct libretro_core_api *core,
 static int quick_save_memory_file(const struct libretro_core_api *core,
    const char *rom_path, unsigned id, const char *extension, int manual)
 {
-   char path[160];
+   char path[UNIFROG_LIBRETRO_CONTENT_PATH_MAX];
    void *data;
    size_t size;
    int ok;
@@ -494,7 +488,7 @@ static int quick_save_memory_file(const struct libretro_core_api *core,
 static int quick_load_memory_file(const struct libretro_core_api *core,
    const char *rom_path, unsigned id, const char *extension, int manual)
 {
-   char path[160];
+   char path[UNIFROG_LIBRETRO_CONTENT_PATH_MAX];
    FILE *file;
    void *data;
    size_t size;
@@ -589,7 +583,7 @@ int quick_save_state_file(void)
    const struct libretro_core_api *core = host.quick_core;
    const char *rom_path = host.quick_rom_path;
    unsigned slot = host.quick_state_slot;
-   char path[160];
+   char path[UNIFROG_LIBRETRO_CONTENT_PATH_MAX];
    void *data = NULL;
    size_t size;
    int ok;
@@ -652,7 +646,7 @@ int quick_load_state_file(void)
    const struct libretro_core_api *core = host.quick_core;
    const char *rom_path = host.quick_rom_path;
    unsigned slot = host.quick_state_slot;
-   char path[160];
+   char path[UNIFROG_LIBRETRO_CONTENT_PATH_MAX];
    FILE *file = NULL;
    void *data = NULL;
    uint8_t *file_data = NULL;
