@@ -1,45 +1,15 @@
 name: QEMU smoke
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'Makefile'
-      - 'config/**'
-      - 'apps/**'
-      - 'components/**'
-      - 'cores/**'
-      - 'assets/**'
-      - 'foundation/**'
-      - 'include/**'
-      - 'js2300/**'
-      - 'linker/**'
-      - 'mk/**'
-      - 'patches/**'
-      - 'tools/**'
-      - 'unifrog-hcrtos-sdk'
-      - '.github/workflows/qemu-smoke.yml'
-  pull_request:
-    paths:
-      - 'Makefile'
-      - 'config/**'
-      - 'apps/**'
-      - 'components/**'
-      - 'cores/**'
-      - 'assets/**'
-      - 'foundation/**'
-      - 'include/**'
-      - 'js2300/**'
-      - 'linker/**'
-      - 'mk/**'
-      - 'patches/**'
-      - 'tools/**'
-      - 'unifrog-hcrtos-sdk'
-      - '.github/workflows/qemu-smoke.yml'
   workflow_dispatch:
+
+concurrency:
+  group: qemu-smoke-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   qemu-smoke:
+    timeout-minutes: 30
     runs-on: [self-hosted, sf2000-qemu]
     env:
       QEMU_DIR: ${{ vars.UNIFROG_QEMU_DIR }}
@@ -79,7 +49,7 @@ jobs:
           if command -v ccache >/dev/null 2>&1; then
             ccache_cmd="$(command -v ccache)"
           fi
-          make qemu-smoke \
+          timeout 25m make qemu-smoke \
             JOBS="$jobs" \
             QEMU_DIR="$QEMU_DIR" \
             QEMU_WORK="$QEMU_WORK" \

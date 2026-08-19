@@ -25,8 +25,11 @@ repository. A local run therefore needs the firmware at:
 ## Self-hosted GitHub Actions runner
 
 `.github/workflows/qemu-smoke.yml` uses a self-hosted runner because the BIOS
-and the MIPS build inputs are private or too large for a hosted job. Configure
-these repository or organization variables on the runner:
+and the MIPS build inputs are private or too large for a hosted job. It is
+manual by design rather than a pull-request gate: a missing labeled runner can
+leave a GitHub job queued, and building QEMU is considerably more expensive
+than the deterministic host checks used for every commit. Configure these
+repository or organization variables on the runner:
 
 ```text
 UNIFROG_QEMU_DIR       checked-out frog2k-qemu source tree
@@ -40,7 +43,9 @@ UNIFROG_TOOLCHAIN      frog-toolchain mipsel-mti-elf prefix directory
 The runner must have `make`, `git`, `dtc`, `curl`, `tar`, `xz`, a host C
 compiler, `ccache` (recommended), and the QEMU build dependencies. The
 workflow checks all private paths explicitly before compiling; it does not
-silently substitute a different firmware, toolchain, or SDK.
+silently substitute a different firmware, toolchain, or SDK. It cancels older
+manual runs for the same ref and bounds the build-and-boot command to 25
+minutes; the job itself is limited to 30 minutes.
 
 For a cold runner, populate the paths using the normal repository workflow:
 
