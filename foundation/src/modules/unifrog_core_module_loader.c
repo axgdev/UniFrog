@@ -25,6 +25,9 @@ static unsigned elapsed_ms(uint32_t start_ms, uint32_t end_ms)
 static int range_valid(uintptr_t start, uintptr_t end, uintptr_t base,
    size_t bytes)
 {
+   if (base > UINTPTR_MAX - bytes)
+      return 0;
+
    uintptr_t slot_end = base + bytes;
 
    if (end < start)
@@ -34,6 +37,32 @@ static int range_valid(uintptr_t start, uintptr_t end, uintptr_t base,
    if (end > slot_end)
       return 0;
    return 1;
+}
+
+const char *unifrog_core_module_load_error_name(
+   enum unifrog_core_module_load_error error)
+{
+   switch (error) {
+   case UNIFROG_CORE_MODULE_LOAD_OK:
+      return "ok";
+   case UNIFROG_CORE_MODULE_LOAD_ARGUMENT:
+      return "argument";
+   case UNIFROG_CORE_MODULE_LOAD_NO_APP_MEMORY:
+      return "no_app_memory";
+   case UNIFROG_CORE_MODULE_LOAD_IO:
+      return "io";
+   case UNIFROG_CORE_MODULE_LOAD_FORMAT:
+      return "format";
+   case UNIFROG_CORE_MODULE_LOAD_ABI:
+      return "abi";
+   case UNIFROG_CORE_MODULE_LOAD_ID:
+      return "id";
+   case UNIFROG_CORE_MODULE_LOAD_RANGE:
+      return "range";
+   case UNIFROG_CORE_MODULE_LOAD_EXPORTS:
+      return "exports";
+   }
+   return "unknown";
 }
 
 static int read_available_fd(int fd, void *dst, size_t bytes,
@@ -106,16 +135,21 @@ int unifrog_core_module_load_file(const char *path, const char *expected_id,
    size_t header_read = 0;
    int ret = -1;
 
-   if (!path || !path[0] || !loaded)
+   if (!loaded)
       return -1;
 
    total_start_ms = unifrog_perf_time_ms();
    memset(loaded, 0, sizeof(*loaded));
+   if (!path || !path[0]) {
+      loaded->error = UNIFROG_CORE_MODULE_LOAD_ARGUMENT;
+      return -1;
+   }
    unifrog_log_sync("core_module load begin path=%s expected=%s",
       path, expected_id ? expected_id : "");
    if (unifrog_abi_application_memory_slot(&slot) != 0) {
       printf("unifrog core_module no_appmem path=%s\n", path);
       unifrog_log_sync("core_module load fail stage=no_appmem path=%s", path);
+      loaded->error = UNIFROG_CORE_MODULE_LOAD_NO_APP_MEMORY;
       return -1;
    }
 
@@ -125,6 +159,7 @@ int unifrog_core_module_load_file(const char *path, const char *expected_id,
          path, errno);
       unifrog_log_sync("core_module load fail stage=open path=%s errno=%d",
          path, errno);
+      loaded->error = UNIFROG_CORE_MODULE_LOAD_IO;
       return -1;
    }
    open_done_ms = unifrog_perf_time_ms();
@@ -133,14 +168,20 @@ int unifrog_core_module_load_file(const char *path, const char *expected_id,
        header_read != sizeof(header)) {
       printf("unifrog core_module read_header_failed path=%s read=%u expected=%u errno=%d\n",
          path, (unsigned)header_read, (unsigned)sizeof(header), errno);
+      loaded->error = UNIFROG_CORE_MODULE_LOAD_IO;
       goto out_close;
    }
    header_done_ms = unifrog_perf_time_ms();
 
    if (!unifrog_core_module_header_layout_valid(&header)) {
-      printf("unifrog core_module bad_header path=%s magic=0x%08x header=%u fmt=%u endian=0x%08x\n",
+      printf("unifrog core_module bad_header path=%s magic=0x%08x header=%u fmt=%u endian=0x%08x flags=0x%08x load=0x%08lx file_end=0x%08lx memory_end=0x%08lx bss=0x%08lx..0x%08lx entry=0x%08lx gp=0x%08lx\n",
          path, header.magic, header.header_size, header.format_version,
-         header.endian_mark);
+         header.endian_mark, header.flags, (unsigned long)header.load_addr,
+         (unsigned long)header.file_end_addr,
+         (unsigned long)header.memory_end_addr,
+         (unsigned long)header.bss_addr, (unsigned long)header.bss_end_addr,
+         (unsigned long)header.entry_addr, (unsigned long)header.gp_addr);
+      loaded->error = UNIFROG_CORE_MODULE_LOAD_FORMAT;
       goto out_close;
    }
    if (!unifrog_abi_table_compatible(unifrog_abi_get(),
@@ -153,6 +194,7 @@ int unifrog_core_module_load_file(const char *path, const char *expected_id,
          (unsigned)UNIFROG_ABI_CORE_MIN_SIZE,
          unifrog_abi_get()->version, (unsigned)unifrog_abi_get()->size,
          header.built_abi_version, header.built_abi_size);
+      loaded->error = UNIFROG_CORE_MODULE_LOAD_ABI;
       goto out_close;
    }
    header.core_id[sizeof(header.core_id) - 1] = '\0';
@@ -160,6 +202,7 @@ int unifrog_core_module_load_file(const char *path, const char *expected_id,
        strcmp(header.core_id, expected_id) != 0) {
       printf("unifrog core_module id_mismatch path=%s expected=%s actual=%s\n",
          path, expected_id, header.core_id);
+      loaded->error = UNIFROG_CORE_MODULE_LOAD_ID;
       goto out_close;
    }
 
@@ -168,6 +211,7 @@ int unifrog_core_module_load_file(const char *path, const char *expected_id,
       printf("unifrog core_module address_mismatch path=%s module=0x%08lx slot=0x%08lx flags=0x%08x\n",
          path, (unsigned long)load_addr, (unsigned long)slot.base,
          header.flags);
+      loaded->error = UNIFROG_CORE_MODULE_LOAD_RANGE;
       goto out_close;
    }
    if (!range_valid(header.load_addr, header.file_end_addr,
@@ -189,6 +233,7 @@ int unifrog_core_module_load_file(const char *path, const char *expected_id,
          (unsigned long)header.bss_end_addr,
          (unsigned long)header.entry_addr,
          (unsigned long)header.gp_addr);
+      loaded->error = UNIFROG_CORE_MODULE_LOAD_RANGE;
       goto out_close;
    }
 
@@ -200,6 +245,7 @@ int unifrog_core_module_load_file(const char *path, const char *expected_id,
       printf("unifrog core_module size_bad path=%s header=%u image=%u memory=%u bss=%u\n",
          path, (unsigned)sizeof(header), (unsigned)image_size,
          (unsigned)memory_size, (unsigned)bss_size);
+      loaded->error = UNIFROG_CORE_MODULE_LOAD_RANGE;
       goto out_close;
    }
 
@@ -216,6 +262,7 @@ int unifrog_core_module_load_file(const char *path, const char *expected_id,
    if (load_image_payload_fd(fd, header.load_addr, image_size) != 0) {
       printf("unifrog core_module read_image_failed path=%s image=%u errno=%d\n",
          path, (unsigned)image_size, errno);
+      loaded->error = UNIFROG_CORE_MODULE_LOAD_IO;
       goto out_close;
    }
    read_done_ms = unifrog_perf_time_ms();
@@ -243,11 +290,13 @@ int unifrog_core_module_load_file(const char *path, const char *expected_id,
          exports ? exports->size : 0,
          (unsigned)UNIFROG_CORE_MODULE_EXPORTS_LIBRETRO_SIZE,
          exports ? exports->required_abi_version : 0);
+      loaded->error = UNIFROG_CORE_MODULE_LOAD_EXPORTS;
       goto out_close;
    }
    if (strcmp(exports->core_id, header.core_id) != 0) {
       printf("unifrog core_module export_id_mismatch header=%s export=%s\n",
          header.core_id, exports->core_id);
+      loaded->error = UNIFROG_CORE_MODULE_LOAD_EXPORTS;
       goto out_close;
    }
 
@@ -276,9 +325,13 @@ int unifrog_core_module_load_file(const char *path, const char *expected_id,
    ret = 0;
 
 out_close:
-   if (ret != 0)
-      unifrog_log_sync("core_module load fail path=%s expected=%s errno=%d",
-         path, expected_id ? expected_id : "", errno);
+   if (ret != 0) {
+      if (loaded->error == UNIFROG_CORE_MODULE_LOAD_OK)
+         loaded->error = UNIFROG_CORE_MODULE_LOAD_IO;
+      unifrog_log_sync("core_module load fail path=%s expected=%s error=%s errno=%d",
+         path, expected_id ? expected_id : "",
+         unifrog_core_module_load_error_name(loaded->error), errno);
+   }
    close(fd);
    return ret;
 }

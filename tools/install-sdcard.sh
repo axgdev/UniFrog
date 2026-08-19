@@ -26,6 +26,15 @@ progress INSTALL "$SDCARD_BIOS_DIR/bisrv.asd"
 mkdir -p "$SDCARD_BIOS_DIR"
 cp "$FASTBOOT_ASD" "$SDCARD_BIOS_DIR/bisrv.asd"
 
+if [ -n "${BLUEMSX_SYSTEM_PACKAGE:-}" ]; then
+	progress INSTALL "$SDCARD_BIOS_DIR/Machines and Databases"
+	test -d "$BLUEMSX_SYSTEM_PACKAGE/Machines"
+	test -d "$BLUEMSX_SYSTEM_PACKAGE/Databases"
+	rm -rf "$SDCARD_BIOS_DIR/Machines" "$SDCARD_BIOS_DIR/Databases"
+	cp -R "$BLUEMSX_SYSTEM_PACKAGE/Machines" "$SDCARD_BIOS_DIR/"
+	cp -R "$BLUEMSX_SYSTEM_PACKAGE/Databases" "$SDCARD_BIOS_DIR/"
+fi
+
 progress INSTALL "$SDCARD_FIRMWARE_DIR/unifrog.bin"
 mkdir -p "$SDCARD_FIRMWARE_DIR"
 cp "$OUT/unifrog.bin" "$SDCARD_FIRMWARE_DIR/unifrog.bin"

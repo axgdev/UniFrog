@@ -93,6 +93,11 @@ int main(void)
    memset(header.core_id, 'x', sizeof(header.core_id));
    if (unifrog_core_registry_header_valid(&header))
       goto out;
+   snprintf(header.core_id, sizeof(header.core_id), "%s", "gpsp");
+   header.gp_addr = header.memory_end_addr + 0x100u;
+   if (!unifrog_core_registry_header_valid(&header))
+      goto out;
+   header.gp_addr = 0x82001800u;
    if (unifrog_core_registry_scan(&registry, root) != 0 ||
        registry.count != 3u)
       goto out;

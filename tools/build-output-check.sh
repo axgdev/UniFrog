@@ -22,6 +22,10 @@ require_common_package() {
 	require_file "$FRONTEND_PACKAGE/THIRD_PARTY.md"
 	require_bins "${LIBRETRO_CORE_BINS:-}"
 	require_bins "${HCRTOS_MEDIA_MODULE_BINS:-}"
+	if [ -n "${BLUEMSX_SYSTEM_PACKAGE:-}" ]; then
+		require_file "$BLUEMSX_SYSTEM_PACKAGE/Machines/MSX - C-BIOS/config.ini"
+		require_file "$BLUEMSX_SYSTEM_PACKAGE/Databases/msxromdb.xml"
+	fi
 }
 
 case "$mode" in

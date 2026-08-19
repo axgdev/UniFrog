@@ -30,6 +30,19 @@ extern "C" {
 #define UNIFROG_CORE_MODULE_EXPORTS_LIBRETRO_SIZE \
    UNIFROG_ABI_MEMBER_END(struct unifrog_core_module_exports, retro_cheat_set)
 
+/* Keep permanent module validation failures separate from retryable SD I/O. */
+enum unifrog_core_module_load_error {
+   UNIFROG_CORE_MODULE_LOAD_OK = 0,
+   UNIFROG_CORE_MODULE_LOAD_ARGUMENT,
+   UNIFROG_CORE_MODULE_LOAD_NO_APP_MEMORY,
+   UNIFROG_CORE_MODULE_LOAD_IO,
+   UNIFROG_CORE_MODULE_LOAD_FORMAT,
+   UNIFROG_CORE_MODULE_LOAD_ABI,
+   UNIFROG_CORE_MODULE_LOAD_ID,
+   UNIFROG_CORE_MODULE_LOAD_RANGE,
+   UNIFROG_CORE_MODULE_LOAD_EXPORTS,
+};
+
 struct unifrog_media_video_options;
 
 struct unifrog_core_module_header {
@@ -85,8 +98,12 @@ static inline int unifrog_core_module_header_layout_valid(
       header->entry_addr < header->file_end_addr &&
       (header->entry_addr & (sizeof(uint32_t) - 1u)) == 0 &&
       header->file_end_addr - header->entry_addr >= sizeof(uint32_t) &&
-      header->gp_addr >= header->load_addr &&
-      header->gp_addr < header->memory_end_addr;
+      /*
+       * $gp is the linker small-data anchor, not a segment end marker. GCC
+       * may place it just beyond the final BSS byte. The device loader bounds
+       * it by the complete application-memory slot once that slot is known.
+       */
+      header->gp_addr >= header->load_addr;
 }
 
 struct unifrog_core_module_exports {

@@ -9,6 +9,15 @@ void frontend_launch_game(struct frontend_state *fe, struct frontend_item *item)
 
    if (!item || !item->path[0])
       return;
+   if (item->core[0]) {
+      const char *safe_core = safe_core_for_path(fe, item->path, item->core);
+
+      if (strcmp(safe_core, item->core) != 0) {
+         unifrog_log("frontend launch core sanitized path=%s requested=%s safe=%s\n",
+            item->path, item->core, safe_core);
+         unifrog_text_copy(item->core, sizeof(item->core), safe_core);
+      }
+   }
    if (fe->view != FRONTEND_VIEW_OPEN_WITH &&
        fe->view != FRONTEND_VIEW_OPEN_WITH_OTHER && !item->core[0]) {
       frontend_parent_view_push(fe);
@@ -28,12 +37,6 @@ void frontend_launch_game(struct frontend_state *fe, struct frontend_item *item)
          item->path, (unsigned long)st.st_mode, (long)st.st_size);
       return;
    }
-   if (item->core[0]) {
-      const char *safe_core = safe_core_for_path(fe, item->path, item->core);
-
-      if (safe_core != item->core)
-         unifrog_text_copy(item->core, sizeof(item->core), safe_core);
-   }
    unifrog_log("frontend launch game path=%s core=%s\n", item->path,
       item->core);
    options = fe->run_options;
@@ -47,7 +50,7 @@ void frontend_launch_game(struct frontend_state *fe, struct frontend_item *item)
       const char *safe_core = safe_core_for_path(fe, item->path,
          options.core_id);
 
-      if (safe_core != options.core_id)
+      if (strcmp(safe_core, options.core_id) != 0)
          unifrog_text_copy(options.core_id, sizeof(options.core_id),
             safe_core);
    }

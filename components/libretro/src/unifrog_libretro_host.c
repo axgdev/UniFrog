@@ -1350,6 +1350,7 @@ static int libretro_load_external_core(const char *id, const char *core_path,
    uint64_t load_start_us;
    uint64_t load_done_us;
    size_t old_log_auto_flush;
+   int load_ret;
    int ret = -1;
 
    if (!id || !id[0] || !loaded || !api)
@@ -1370,7 +1371,13 @@ static int libretro_load_external_core(const char *id, const char *core_path,
    printf("unifrog libretro external_core boot_read core=%s path=%s\n",
       id, path);
    unifrog_log_sync("external_core boot_read core=%s path=%s", id, path);
-   if (unifrog_core_module_load_file(path, id, loaded) != 0) {
+   load_ret = unifrog_core_module_load_file(path, id, loaded);
+   if (load_ret != 0) {
+      if (loaded->error != UNIFROG_CORE_MODULE_LOAD_IO) {
+         unifrog_log_sync("external_core permanent_fail core=%s path=%s error=%s",
+            id, path, unifrog_core_module_load_error_name(loaded->error));
+         goto out_restore_log;
+      }
       (void)libretro_recover_storage("external_core_boot_read");
       if (unifrog_core_module_load_file(path, id, loaded) != 0)
          goto out_restore_log;

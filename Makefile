@@ -453,6 +453,10 @@ FROGUI_FONT_FILES = $(if $(filter frogui,$(EFFECTIVE_CORE_IDS)),\
 	$(FROGUI_SOURCE_DIR)/fonts/GamePocket-Regular-ZeroKern.ttf \
 	$(FROGUI_SOURCE_DIR)/fonts/monogram.ttf \
 	$(FROGUI_SOURCE_DIR)/fonts/LICENSE.md)
+BLUEMSX_SYSTEM_SOURCE := $(CORE_SOURCE_ROOT)/libretro-blueMSX-prosty/system/bluemsx
+BLUEMSX_SYSTEM_SOURCE_GIT := $(CORE_SOURCE_ROOT)/libretro-blueMSX-prosty/.git
+BLUEMSX_SYSTEM_PACKAGE := $(OUT)/sdcard/bios
+BLUEMSX_SYSTEM_STAMP := $(BLUEMSX_SYSTEM_PACKAGE)/.bluemsx-system.stamp
 INTERNAL_CORE_PACKAGE_SPECS := \
 	js2300:JS2300:js2300:js2300:js2300:js\|mjs\|ch8\|chip8:-:-
 ALL_CORE_PACKAGE_SPECS := $(CORE_PACKAGE_SPECS) $(INTERNAL_CORE_PACKAGE_SPECS)
@@ -521,6 +525,9 @@ SELECTED_CORE_BIN := $($(SELECTED_CORE_VAR)_CORE_BIN)
 else
 SELECTED_CORE_BIN :=
 endif
+BLUEMSX_SYSTEM_SELECTED := $(if $(CORE),$(filter bluemsx-prosty,$(CORE)),\
+	$(filter bluemsx-prosty,$(EFFECTIVE_CORE_IDS)))
+BLUEMSX_SYSTEM_TARGET := $(if $(BLUEMSX_SYSTEM_SELECTED),$(BLUEMSX_SYSTEM_STAMP))
 HCRTOS_MEDIA_MODULE_BIN := $(MODULE_PACKAGE)/hcrtos-media.bin
 HCRTOS_MEDIA_MODULE_OUT := $(BUILD)/runtime_modules/hcrtos_media.out
 HCRTOS_MEDIA_MODULE_ARCHIVE := $(BUILD)/runtime_modules/hcrtos_media.a
@@ -784,6 +791,7 @@ $(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 	core-registry-check frontend-model-check frontend-structure-check core-manifest-check \
 	deps-alpine deps-ubuntu deps-sdk deps-js2300 deps-support deps-cores deps-core-smoke deps-lvgl deps-ffmpeg \
 	frontend-package core-package module-package sdcard-package sd-zip install refresh-sd refresh-sd-clean \
+	bluemsx-system \
 	asdcheck fastboot-check fastboot-only-check layout-check firmware-link-check boot-logo-check js2300-check frontend-check \
 	quick-core-check core-smoke-check sdk dtb lib fastboot fastboot-only size component-sizes \
 	ci-deps ci-smoke-deps \
@@ -1143,7 +1151,8 @@ ifeq ($(HCRTOS_MEDIA_MODULE_BINS),)
 	$(Q)rm -rf $(MODULE_PACKAGE)
 endif
 
-sdcard-package: $(SDCARD_BIOS_PACKAGE) $(SDCARD_FIRMWARE_PACKAGE) core-package module-package
+sdcard-package: $(SDCARD_BIOS_PACKAGE) $(SDCARD_FIRMWARE_PACKAGE) \
+	$(BLUEMSX_SYSTEM_TARGET) core-package module-package
 
 $(CORE_PACKAGE):
 	$(Q)mkdir -p $@
@@ -1157,6 +1166,17 @@ $(dir $(SDCARD_BIOS_PACKAGE)) $(dir $(SDCARD_FIRMWARE_PACKAGE)):
 $(SDCARD_BIOS_PACKAGE): $(FASTBOOT_ASD) | $(dir $(SDCARD_BIOS_PACKAGE))
 	$(LOG_ECHO) "  SDCARD  $@"
 	$(Q)if test -f $@ && cmp -s $< $@; then touch $@; else cp $< $@; fi
+
+bluemsx-system: $(BLUEMSX_SYSTEM_TARGET)
+
+$(BLUEMSX_SYSTEM_STAMP): $(CORE_REV_STAMP) $(BLUEMSX_SYSTEM_SOURCE_GIT) | $(dir $(SDCARD_BIOS_PACKAGE))
+	$(Q)test -d "$(BLUEMSX_SYSTEM_SOURCE)/Machines"
+	$(Q)test -d "$(BLUEMSX_SYSTEM_SOURCE)/Databases"
+	$(Q)rm -rf "$(BLUEMSX_SYSTEM_PACKAGE)/Machines" \
+		"$(BLUEMSX_SYSTEM_PACKAGE)/Databases"
+	$(Q)cp -R "$(BLUEMSX_SYSTEM_SOURCE)/Machines" "$(BLUEMSX_SYSTEM_PACKAGE)/"
+	$(Q)cp -R "$(BLUEMSX_SYSTEM_SOURCE)/Databases" "$(BLUEMSX_SYSTEM_PACKAGE)/"
+	$(Q)touch "$@"
 $(SDCARD_FIRMWARE_PACKAGE): $(OUT)/unifrog.bin | $(dir $(SDCARD_FIRMWARE_PACKAGE))
 	$(LOG_ECHO) "  SDCARD  $@"
 	$(Q)rm -f $(OUT)/sdcard/firmware/unifrog.bin
@@ -1563,6 +1583,7 @@ fastboot-check: sdcard-package tools/build-output-check.sh
 		OUT_UNIFROG_BIN="$(OUT)/unifrog.bin" \
 		SDCARD_BIOS_PACKAGE="$(SDCARD_BIOS_PACKAGE)" \
 		SDCARD_FIRMWARE_PACKAGE="$(SDCARD_FIRMWARE_PACKAGE)" \
+		BLUEMSX_SYSTEM_PACKAGE="$(if $(BLUEMSX_SYSTEM_TARGET),$(BLUEMSX_SYSTEM_PACKAGE),)" \
 		FRONTEND_MANIFEST="$(FRONTEND_MANIFEST)" \
 		FRONTEND_PACKAGE="$(FRONTEND_PACKAGE)" \
 		LIBRETRO_CORE_BINS="$(LIBRETRO_CORE_BINS)" \
@@ -1582,6 +1603,7 @@ check: sdk $(ASD) sdcard-package layout-check tools/build-output-check.sh
 		OUT_UNIFROG_BIN="$(OUT)/unifrog.bin" \
 		SDCARD_BIOS_PACKAGE="$(SDCARD_BIOS_PACKAGE)" \
 		SDCARD_FIRMWARE_PACKAGE="$(SDCARD_FIRMWARE_PACKAGE)" \
+		BLUEMSX_SYSTEM_PACKAGE="$(if $(BLUEMSX_SYSTEM_TARGET),$(BLUEMSX_SYSTEM_PACKAGE),)" \
 		FRONTEND_MANIFEST="$(FRONTEND_MANIFEST)" \
 		FRONTEND_PACKAGE="$(FRONTEND_PACKAGE)" \
 		LIBRETRO_CORE_BINS="$(LIBRETRO_CORE_BINS)" \
@@ -1599,6 +1621,7 @@ install: fastboot-check layout-check
 	$(Q)ASD="$(ASD)" FASTBOOT_ASD="$(FASTBOOT_ASD)" OUT="$(OUT)" \
 		SDCARD="$(SDCARD)" SDCARD_BIOS_DIR="$(SDCARD)/bios" \
 		SDCARD_FIRMWARE_DIR="$(SDCARD)/unifrog/firmware" \
+		BLUEMSX_SYSTEM_PACKAGE="$(if $(BLUEMSX_SYSTEM_TARGET),$(BLUEMSX_SYSTEM_PACKAGE),)" \
 		SDCARD_USER_DIR="$(SDCARD)/unifrog_data" FRONTEND_PACKAGE="$(FRONTEND_PACKAGE)" \
 		THIRD_PARTY_NOTICE="$(THIRD_PARTY_NOTICE)" \
 		LANGUAGE_FILES="$(LANGUAGE_FILES)" FONT_FILES="$(FONT_FILES)" \
