@@ -39,6 +39,9 @@ jobs:
           }
           export GIT_CONFIG_GLOBAL="$RUNNER_TEMP/unifrog-gitconfig"
           git config --global \
+            url."https://github.com/axgdev/frog2k-qpsx.git".insteadOf \
+            "git@github.com:axgdev/frog2k-qpsx.git"
+          git config --global \
             url."https://x-access-token:${FROG2K_JAVASCRIPT_TOKEN}@github.com/axgdev/frog2k-javascript-private.git".insteadOf \
             "git@github.com:axgdev/frog2k-javascript-private.git"
           echo "GIT_CONFIG_GLOBAL=$GIT_CONFIG_GLOBAL" >> "$GITHUB_ENV"
