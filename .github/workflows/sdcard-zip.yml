@@ -26,10 +26,23 @@ jobs:
           submodules: false
 
       - name: Configure Git
+        env:
+          FROG2K_JAVASCRIPT_TOKEN: ${{ secrets.FROG2K_JAVASCRIPT_TOKEN }}
         run: |
+          set -eu
           git config --global --add safe.directory "$PWD"
           git config --global user.name "UniFrog CI"
           git config --global user.email "ci@unifrog.local"
+          test -n "$FROG2K_JAVASCRIPT_TOKEN" || {
+            echo "missing repository secret: FROG2K_JAVASCRIPT_TOKEN" >&2
+            exit 1
+          }
+          export GIT_CONFIG_GLOBAL="$RUNNER_TEMP/unifrog-gitconfig"
+          git config --global \
+            url."https://x-access-token:${FROG2K_JAVASCRIPT_TOKEN}@github.com/axgdev/frog2k-javascript-private.git".insteadOf \
+            "git@github.com:axgdev/frog2k-javascript-private.git"
+          echo "GIT_CONFIG_GLOBAL=$GIT_CONFIG_GLOBAL" >> "$GITHUB_ENV"
+          echo "GIT_TERMINAL_PROMPT=0" >> "$GITHUB_ENV"
 
       - name: Verify build ref
         run: |
