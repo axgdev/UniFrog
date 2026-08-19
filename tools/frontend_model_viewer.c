@@ -179,15 +179,6 @@ static void default_settings(struct unifrog_frontend_model_settings *settings)
    settings->menu_counter_file = 1;
 }
 
-static int simulate_action(void *userdata,
-   enum unifrog_frontend_action action, const char *payload)
-{
-   (void)userdata;
-   printf("frontend model action=%s payload=%s\n",
-      unifrog_frontend_action_id(action), payload ? payload : "");
-   return 0;
-}
-
 static int headless(const char *directory)
 {
    static const struct {
@@ -221,6 +212,15 @@ static int headless(const char *directory)
 }
 
 #ifdef UNIFROG_HOST_XCB
+static int simulate_action(void *userdata,
+   enum unifrog_frontend_action action, const char *payload)
+{
+   (void)userdata;
+   printf("frontend model action=%s payload=%s\n",
+      unifrog_frontend_action_id(action), payload ? payload : "");
+   return 0;
+}
+
 static void present(xcb_connection_t *connection, xcb_window_t window,
    xcb_gcontext_t gc)
 {
