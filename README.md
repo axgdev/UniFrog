@@ -73,10 +73,9 @@ toolchains.
 - Core source is expected to be replaced or refreshed from upstream; UniFrog
   owns the pins, build rules, and patches.
 
-GitHub-hosted CI also fetches the private JS2300 repository. Configure a
-repository secret named `FROG2K_JAVASCRIPT_TOKEN` with read-only access to
-`axgdev/frog2k-javascript-private`; the workflows fail early with a clear
-message when it is missing.
+GitHub-hosted CI fetches the public JS2300 `main_unifrog` branch and verifies
+the exact commit recorded in `config/options.mk`; no private repository token
+is required for the build.
 
 Use `make -C cores help` and `docs/dependency-workflow.md` for dependency
 maintenance.

@@ -1,8 +1,8 @@
 # UniFrog JS2300 integration
 
 The JS2300 engine is maintained in the standalone
-[`frog2k-javascript`](https://github.com/axgdev/frog2k-javascript-private)
-repository and is fetched by the root Makefile. This directory contains only
+[`frog2k-javascript`](https://github.com/axgdev/frog2k-javascript/tree/main_unifrog)
+repository and is fetched by the root Makefile from its `main_unifrog` branch. This directory contains only
 UniFrog's consumer-owned host adapter, the JS-backed libretro core, and the
 scripts shipped on the SD card. Keeping the OS bindings here preserves the
 separation between a portable engine and HCRTOS policy.

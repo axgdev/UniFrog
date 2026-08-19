@@ -627,7 +627,8 @@ CORE_BATCH_SUPPORT_DEPS := $(if $(filter 1,$(CORE_BATCH_BUILD)), \
 	$(if $(filter $(CHD_SUPPORT_CORE_LIB),$(PACKAGE_LIBRETRO_SUPPORT_LIBS)),$(CHD_SUPPORT_CORE_LIB),),)
 JS2300_CONFIG_TOKEN := $(shell { \
 	printf '%s\n' 'TOOLCHAIN=$(TOOLCHAIN)' 'CROSS_COMPILE=$(CROSS_COMPILE)' \
-		'JS2300=$(abspath $(JS2300))' 'JS2300_REF=$(JS2300_REF)' \
+		'JS2300=$(abspath $(JS2300))' 'JS2300_BRANCH=$(JS2300_BRANCH)' \
+		'JS2300_REF=$(JS2300_REF)' \
 		'JS2300_REV=$(JS2300_REV)' 'HOSTCC=$(HOSTCC)'; \
 	for f in $(JS2300_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
 } | cksum | awk '{print $$1}')
@@ -663,7 +664,7 @@ HCRTOS_FFMPEG_SOURCE_STAMP := $(HCRTOS_FFMPEG_SOURCE)/.git/unifrog-source.stamp
 HCRTOS_FFMPEG_CONFIGURE_LOG := $(BUILD)/logs/hcrtos-ffmpeg-configure.log
 HCRTOS_FFMPEG_BUILD_LOG := $(BUILD)/logs/hcrtos-ffmpeg-build.log
 HCRTOS_FFMPEG_INSTALL_LOG := $(BUILD)/logs/hcrtos-ffmpeg-install.log
-JS2300_FETCH_STAMP := $(JS2300)/.unifrog-js2300-$(JS2300_REF)
+JS2300_FETCH_STAMP := $(JS2300)/.unifrog-js2300-$(JS2300_BRANCH)-$(JS2300_REF)
 HCRTOS_FFMPEG_SOURCE_TOKEN := $(shell { \
 	printf '%s\n' 'DEP_DEPTH=$(DEP_DEPTH)' \
 		'HCRTOS_FFMPEG_URL=$(HCRTOS_FFMPEG_URL)' \
@@ -902,10 +903,12 @@ $(JS2300_FETCH_STAMP):
 		mkdir -p "$(dir $(JS2300))"; \
 		git clone --filter=blob:none --no-checkout "$(JS2300_URL)" "$(JS2300)"; \
 	fi; \
-	git -C "$(JS2300)" fetch --depth=1 origin "$(JS2300_REF)"; \
+	git -C "$(JS2300)" remote set-url origin "$(JS2300_URL)"; \
+	git -C "$(JS2300)" fetch --depth=1 origin "refs/heads/$(JS2300_BRANCH)"; \
 	git -C "$(JS2300)" checkout --detach "$(JS2300_REF)"; \
 	test "$$(git -C "$(JS2300)" rev-parse HEAD)" = "$(JS2300_REF)"; \
-	printf '%s\n' "$(JS2300_REF)" > "$@"
+	test "$$(git -C "$(JS2300)" rev-parse FETCH_HEAD)" = "$(JS2300_REF)"; \
+	printf '%s\n' "$(JS2300_BRANCH) $(JS2300_REF)" > "$@"
 
 deps-lvgl:
 	$(Q)$(call root-deps-cmd,lvgl,,setup)

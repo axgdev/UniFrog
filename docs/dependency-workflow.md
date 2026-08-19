@@ -71,7 +71,10 @@ make dep-finalize DEP=lvgl REF=<new-ref>
 The underlying patch format can differ by dependency. Libretro core patches
 are mailbox patches for `git am -3`; FFmpeg uses its checked-in compatibility
 patch. JS2300 and its vendored JavaScript engine are maintained in the
-standalone `frog2k-javascript` repository and are pinned by `JS2300_REF`.
+standalone `frog2k-javascript` repository and are pinned by the
+`JS2300_BRANCH` plus `JS2300_REF` pair. The branch fetch proves that the
+immutable commit is the published `main_unifrog` tip before the checkout uses
+the exact commit.
 
 ## Fetch Modes
 
