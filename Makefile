@@ -456,7 +456,7 @@ FROGUI_FONT_FILES = $(if $(filter frogui,$(EFFECTIVE_CORE_IDS)),\
 INTERNAL_CORE_PACKAGE_SPECS := \
 	js2300:JS2300:js2300:js2300:js2300:js\|mjs\|ch8\|chip8:-:-
 ALL_CORE_PACKAGE_SPECS := $(CORE_PACKAGE_SPECS) $(INTERNAL_CORE_PACKAGE_SPECS)
-CORE_BUILD_DEPS = $(CORES)/Makefile $(CORES)/manifest.mk $(CORE_REV_STAMP)
+CORE_BUILD_DEPS = $(CORES)/Makefile $(CORES)/manifest.mk $(CORE_REV_STAMP) $(TOOLCHAIN_STAMP)
 CORE_MAKE_ARGS := \
 	TOOLCHAIN=$(TOOLCHAIN) \
 	CROSS_COMPILE=$(CROSS_COMPILE) \
@@ -640,6 +640,15 @@ DTS_MODE_STAMP := $(BUILD)/sd-mode.stamp
 CORE_REV_STAMP := $(BUILD)/core-config.stamp
 SDK_BUILD_STAMP := $(BUILD)/sdk-build.stamp
 SDK_KERNEL_LIB := $(SDK)/lib/core/libkernel.a
+TOOLCHAIN_CONFIG_TOKEN := $(shell { \
+	printf '%s\n' \
+		'TOOLCHAIN=$(abspath $(TOOLCHAIN))' \
+		'TOOLCHAIN_URL=$(TOOLCHAIN_URL)' \
+		'TOOLCHAIN_SHA256=$(TOOLCHAIN_SHA256)' \
+		'TOOLCHAIN_ARCHIVE=$(abspath $(TOOLCHAIN_ARCHIVE))'; \
+	test -f tools/ci-toolchain.sh && cksum tools/ci-toolchain.sh; \
+} | cksum | awk '{print $$1}')
+TOOLCHAIN_STAMP := $(BUILD)/toolchain.$(TOOLCHAIN_CONFIG_TOKEN).stamp
 HCRTOS_FFMPEG_STAMP := $(HCRTOS_FFMPEG_INSTALL)/.unifrog-ffmpeg.stamp
 HCRTOS_FFMPEG_SOURCE_CONFIG := $(BUILD)/hcrtos-ffmpeg-source.stamp
 HCRTOS_FFMPEG_CONFIG_STAMP := $(BUILD)/hcrtos-ffmpeg-config.stamp
@@ -752,8 +761,15 @@ $(JS2300_CONFIG_STAMP): FORCE | $(BUILD)
 $(HCRTOS_FFMPEG_SOURCE_CONFIG): FORCE | $(BUILD)
 	$(Q)$(call update-token-stamp,HCRTOS_FFMPEG_SOURCE_TOKEN=$(HCRTOS_FFMPEG_SOURCE_TOKEN))
 
+$(TOOLCHAIN_STAMP): | $(BUILD)
+	$(Q)TOOLCHAIN="$(TOOLCHAIN)" TOOLCHAIN_URL="$(TOOLCHAIN_URL)" \
+		TOOLCHAIN_SHA256="$(TOOLCHAIN_SHA256)" TOOLCHAIN_ARCHIVE="$(TOOLCHAIN_ARCHIVE)" \
+		sh tools/ci-toolchain.sh
+	$(Q)printf '%s\n' 'TOOLCHAIN_CONFIG_TOKEN=$(TOOLCHAIN_CONFIG_TOKEN)' > $@
+
 $(DEVICE_OBJECTS): $(BUILD_CONFIG_STAMP)
 $(FASTBOOT_OBJECTS): $(FASTBOOT_CONFIG_STAMP)
+$(DEVICE_OBJECTS) $(FASTBOOT_OBJECTS): | $(TOOLCHAIN_STAMP)
 
 # These objects print build identity in device logs. Rebuild them only when the
 # embedded identity changes, and let dependent core modules relink from the
@@ -1068,7 +1084,7 @@ sdk: $(SDK_BUILD_STAMP)
 $(SDK_BUILD_STAMP): $(SDK_KERNEL_LIB) | $(BUILD)
 	$(Q)touch $@
 
-$(SDK_KERNEL_LIB): $(DTS_INPUTS) | $(BUILD)
+$(SDK_KERNEL_LIB): $(DTS_INPUTS) $(TOOLCHAIN_STAMP) | $(BUILD)
 	$(Q)$(MAKE) -C $(SDK) check TOOLCHAIN=$(TOOLCHAIN) \
 		CROSS_COMPILE=$(CROSS_COMPILE) CCACHE=$(CCACHE) JOBS=$(JOBS) \
 		SD_MODE=$(SD_MODE) BOARD_DTS=$(abspath $(DTS)) \
@@ -1616,10 +1632,7 @@ ci-deps: deps
 
 ci-smoke-deps: deps-sdk deps-js2300 deps-core-smoke
 
-ci-toolchain:
-	$(Q)TOOLCHAIN="$(TOOLCHAIN)" TOOLCHAIN_URL="$(TOOLCHAIN_URL)" \
-		TOOLCHAIN_SHA256="$(TOOLCHAIN_SHA256)" TOOLCHAIN_ARCHIVE="$(TOOLCHAIN_ARCHIVE)" \
-		sh tools/ci-toolchain.sh
+ci-toolchain: $(TOOLCHAIN_STAMP)
 
 ci-commit-smoke: ci-smoke-deps ci-toolchain
 	$(Q)$(MAKE) --no-print-directory repo-check
