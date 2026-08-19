@@ -22,6 +22,7 @@ sanitize_build_run() {
 	binary=$1
 	shift
 	"$HOSTCC" -std=c99 -O1 -g -Wall -Wextra -Iinclude -Itests/host \
+		-Ijs2300/include \
 		-I"$CORE_INCLUDE" \
 		-fsanitize=address,undefined -fno-omit-frame-pointer \
 		"$@" -o "$binary"

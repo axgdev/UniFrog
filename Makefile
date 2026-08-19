@@ -11,8 +11,10 @@ CORE ?=
 QUICK_CORE ?= quicknes
 DEP_EFFECTIVE := $(strip $(DEP))
 
+ifeq ($(MAKELEVEL),0)
 ifeq ($(filter -j% --jobs%,$(MAKEFLAGS)),)
 MAKEFLAGS += -j$(JOBS)
+endif
 endif
 ifeq ($(filter --output-sync% -O%,$(MAKEFLAGS)),)
 MAKEFLAGS += --output-sync=target
@@ -610,10 +612,12 @@ CORE_CONFIG_TOKEN := $(shell { \
 	for f in $(CORES)/manifest.mk $(DTS_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
 } | cksum | awk '{print $$1}')
 CORE_ARCHIVE_STAMP := $(BUILD)/core-archives.$(CORE_CONFIG_TOKEN).stamp
-# `cores all` also builds CHD support when the default core set contains
-# picodrive or PCE Fast. Make that shared archive an explicit prerequisite so
-# the root batch build cannot launch a second sub-make for it concurrently.
-CORE_BATCH_SUPPORT_DEPS := $(if $(filter 1,$(CORE_BATCH_BUILD)),$(if $(filter $(CHD_SUPPORT_CORE_LIB),$(PACKAGE_LIBRETRO_SUPPORT_LIBS)),$(CHD_SUPPORT_CORE_LIB),),)
+# `cores all` also builds the shared libretro-common and, for the default core
+# set, CHD support. Make those archives explicit prerequisites so the root
+# batch build cannot launch a second sub-make for either one concurrently.
+CORE_BATCH_SUPPORT_DEPS := $(if $(filter 1,$(CORE_BATCH_BUILD)), \
+	$(LIBRETRO_COMMON_LIB) \
+	$(if $(filter $(CHD_SUPPORT_CORE_LIB),$(PACKAGE_LIBRETRO_SUPPORT_LIBS)),$(CHD_SUPPORT_CORE_LIB),),)
 JS2300_CONFIG_TOKEN := $(shell { \
 	printf '%s\n' 'TOOLCHAIN=$(TOOLCHAIN)' 'CROSS_COMPILE=$(CROSS_COMPILE)' \
 		'JS2300=$(abspath $(JS2300))' 'JS2300_REF=$(JS2300_REF)' \
@@ -621,8 +625,10 @@ JS2300_CONFIG_TOKEN := $(shell { \
 	for f in $(JS2300_INPUTS); do test -f "$$f" && cksum "$$f"; done; \
 } | cksum | awk '{print $$1}')
 FRONTEND_CONFIG_TOKEN := $(shell { \
-	printf '%s\n' 'OUT=$(abspath $(OUT))/frontend' \
-		'identity=$(BUILD_IDENTITY_TOKEN)'; \
+	printf '%s\n' 'FRONTEND_PACKAGE=$(abspath $(FRONTEND_PACKAGE))' \
+		'identity=$(BUILD_IDENTITY_TOKEN)' \
+		'core_ids=$(EFFECTIVE_CORE_IDS)' \
+		'core_license_specs=$(SELECTED_CORE_LICENSE_SPECS)'; \
 } | cksum | awk '{print $$1}')
 
 # Stable stamp paths with token contents prevent stale per-token stamps from
@@ -636,6 +642,7 @@ SDK_BUILD_STAMP := $(BUILD)/sdk-build.stamp
 SDK_KERNEL_LIB := $(SDK)/lib/core/libkernel.a
 HCRTOS_FFMPEG_STAMP := $(HCRTOS_FFMPEG_INSTALL)/.unifrog-ffmpeg.stamp
 HCRTOS_FFMPEG_SOURCE_CONFIG := $(BUILD)/hcrtos-ffmpeg-source.stamp
+HCRTOS_FFMPEG_CONFIG_STAMP := $(BUILD)/hcrtos-ffmpeg-config.stamp
 HCRTOS_FFMPEG_SOURCE_STAMP := $(HCRTOS_FFMPEG_SOURCE)/.git/unifrog-source.stamp
 HCRTOS_FFMPEG_CONFIGURE_LOG := $(BUILD)/logs/hcrtos-ffmpeg-configure.log
 HCRTOS_FFMPEG_BUILD_LOG := $(BUILD)/logs/hcrtos-ffmpeg-build.log
@@ -647,6 +654,21 @@ HCRTOS_FFMPEG_SOURCE_TOKEN := $(shell { \
 		'HCRTOS_FFMPEG_REF=$(HCRTOS_FFMPEG_REF)' \
 		'HCRTOS_FFMPEG_COMMIT=$(HCRTOS_FFMPEG_COMMIT)' \
 		'HCRTOS_FFMPEG_PATCH=$(HCRTOS_FFMPEG_PATCH)'; \
+} | cksum | awk '{print $$1}')
+HCRTOS_FFMPEG_CONFIG_TOKEN := $(shell { \
+	printf '%s\n' \
+		'HCRTOS_FFMPEG_SOURCE=$(abspath $(HCRTOS_FFMPEG_SOURCE))' \
+		'HCRTOS_FFMPEG_INSTALL=$(abspath $(HCRTOS_FFMPEG_INSTALL))' \
+		'HCRTOS_FFMPEG_DEMUXERS=$(HCRTOS_FFMPEG_DEMUXERS)' \
+		'HCRTOS_FFMPEG_PARSERS=$(HCRTOS_FFMPEG_PARSERS)' \
+		'HCRTOS_FFMPEG_DECODERS=$(HCRTOS_FFMPEG_DECODERS)' \
+		'HCRTOS_FFMPEG_INSTALL_TARGETS=$(HCRTOS_FFMPEG_INSTALL_TARGETS)' \
+		'HCRTOS_FFMPEG_WARN_CFLAGS=$(HCRTOS_FFMPEG_WARN_CFLAGS)' \
+		'HCRTOS_FFMPEG_ABI_CFLAGS=$(HCRTOS_FFMPEG_ABI_CFLAGS)' \
+		'CROSS_COMPILE=$(CROSS_COMPILE)' 'AR=$(AR)' 'NM=$(NM)' \
+		'ARCH_CFLAGS=$(ARCH_CFLAGS)' 'OPT_SIZE=$(OPT_SIZE)' \
+		'SDK=$(abspath $(SDK))' 'SDK_COMMIT=$(UNIFROG_SDK_GIT_COMMIT)'; \
+	for f in tools/hcrtos-ffmpeg-build.sh; do test -f "$$f" && cksum "$$f"; done; \
 } | cksum | awk '{print $$1}')
 ROOT_DEPS_ENV := \
 	BUILD_PROGRESS="$(BUILD_PROGRESS)" \
@@ -689,7 +711,6 @@ HCRTOS_FFMPEG_BUILD_ENV := \
 	OPT_SIZE="$(OPT_SIZE)" \
 	SDK_ABS="$(abspath $(SDK))"
 JS2300_CONFIG_STAMP := $(BUILD)/js2300-config.stamp
-FRONTEND_CONFIG_STAMP := $(BUILD)/frontend-config.stamp
 FRONTEND_PACKAGE_STAMP := $(FRONTEND_PACKAGE)/.package.$(FRONTEND_CONFIG_TOKEN).stamp
 define update-token-stamp
 tmp="$@.tmp"; \
@@ -727,9 +748,6 @@ $(CORE_REV_STAMP): FORCE | $(BUILD)
 
 $(JS2300_CONFIG_STAMP): FORCE | $(BUILD)
 	$(Q)$(call update-token-stamp,JS2300_CONFIG_TOKEN=$(JS2300_CONFIG_TOKEN))
-
-$(FRONTEND_CONFIG_STAMP): FORCE | $(BUILD)
-	$(Q)$(call update-token-stamp,FRONTEND_CONFIG_TOKEN=$(FRONTEND_CONFIG_TOKEN))
 
 $(HCRTOS_FFMPEG_SOURCE_CONFIG): FORCE | $(BUILD)
 	$(Q)$(call update-token-stamp,HCRTOS_FFMPEG_SOURCE_TOKEN=$(HCRTOS_FFMPEG_SOURCE_TOKEN))
@@ -870,12 +888,18 @@ deps-lvgl:
 
 deps-ffmpeg: $(HCRTOS_FFMPEG_SOURCE_STAMP)
 
-$(HCRTOS_FFMPEG_SOURCE_STAMP): $(HCRTOS_FFMPEG_SOURCE_CONFIG) $(HCRTOS_FFMPEG_PATCH) Makefile
+$(HCRTOS_FFMPEG_SOURCE_STAMP): $(HCRTOS_FFMPEG_SOURCE_CONFIG) \
+	$(HCRTOS_FFMPEG_PATCH) tools/root-deps.sh
 	$(Q)$(call root-deps-cmd,ffmpeg,,setup)
 
 ffmpeg: $(HCRTOS_FFMPEG_STAMP)
 
-$(HCRTOS_FFMPEG_STAMP): $(HCRTOS_FFMPEG_SOURCE_STAMP) Makefile | $(BUILD)
+$(HCRTOS_FFMPEG_CONFIG_STAMP): FORCE | $(BUILD)
+	$(Q)$(call update-token-stamp,HCRTOS_FFMPEG_CONFIG_TOKEN=$(HCRTOS_FFMPEG_CONFIG_TOKEN))
+
+$(HCRTOS_FFMPEG_STAMP): $(HCRTOS_FFMPEG_SOURCE_STAMP) \
+	$(HCRTOS_FFMPEG_CONFIG_STAMP) $(SDK_KERNEL_LIB) \
+	tools/hcrtos-ffmpeg-build.sh | $(BUILD)
 	$(Q)$(HCRTOS_FFMPEG_BUILD_ENV) sh tools/hcrtos-ffmpeg-build.sh
 
 dep-status:
@@ -1071,7 +1095,7 @@ include mk/host-checks.mk
 frontend-package: $(FRONTEND_PACKAGE_STAMP)
 
 $(FRONTEND_PACKAGE_STAMP): \
-	Makefile $(FRONTEND_CONFIG_STAMP) $(BUILD_IDENTITY_STAMP) LICENSE \
+	$(CORES)/manifest.mk LICENSE \
 	$(THIRD_PARTY_NOTICE) $(LANGUAGE_FILES) $(FONT_FILES) $(SCRIPT_FILES) \
 	$(SELECTED_CORE_LICENSE_FILES) \
 	$(FROGUI_FONT_FILES) \
@@ -1458,7 +1482,7 @@ $(if $(filter 1,$(CORE_BATCH_BUILD)),$(1): $(CORE_ARCHIVE_STAMP),$(1): $(2) $(3)
 ifeq ($(CORE_BATCH_BUILD),1)
 	$(Q)test -s $$@ && touch $$@
 else
-	$(Q)$(MAKE) -C $(CORES) $(4) $(CORE_MAKE_ARGS)
+	+$(Q)$(MAKE) -C $(CORES) $(4) $(CORE_MAKE_ARGS)
 	$(Q)test -s $$@ && touch $$@
 endif
 endef
