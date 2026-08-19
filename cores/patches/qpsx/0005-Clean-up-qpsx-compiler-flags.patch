@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Wed, 6 May 2026 08:56:01 +0000
-Subject: [PATCH 5/5] Clean up qpsx compiler flags
+Subject: [PATCH 05/11] Clean up qpsx compiler flags
 
 Keep C-only warning suppressions out of C++ compilations and keep C++-only options out of C compilations. Also define the C-linkage globals without initializing an extern declaration, removing two C++ warnings without changing symbol names.
 ---
@@ -50,5 +50,5 @@ index 6fb0bff07a821b17f302f91e504b5e3211c827dc..311adb367a852bb1f09986c8414768cf
  static void native_cmd_update_any_enabled(void) {
      native_any_cmd_enabled = 0;
 -- 
-2.54.0
+2.43.0
 

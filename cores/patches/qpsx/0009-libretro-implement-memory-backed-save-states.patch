@@ -1,0 +1,149 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Axel Garcia K." <git@axelgk.com>
+Date: Mon, 10 Aug 2026 10:33:39 +0100
+Subject: [PATCH 09/11] libretro: implement memory-backed save states
+
+Bridge the existing state machinery to the libretro serialization API so the frontend can save and restore without filesystem round trips.
+
+Evidence: this is the previously reviewed frontend patch qpsx-libretro-savestate.patch, applied in its established build order on upstream 368310a.
+
+Risk: limited to the paths recorded in that patch. Reverting this commit restores the preceding independently buildable checkpoint.
+---
+ libretro/core/libretro-core.cpp | 121 +++++++++++++++++++++++++++++++-
+ 1 file changed, 118 insertions(+), 3 deletions(-)
+
+diff --git a/libretro/core/libretro-core.cpp b/libretro/core/libretro-core.cpp
+index 33807475eaac544d9e5b8e8172c6d05c2915668b..2a4285d4a8ecace411a83b550661126b050ab396 100644
+--- a/libretro/core/libretro-core.cpp
++++ b/libretro/core/libretro-core.cpp
+@@ -4003,9 +4003,124 @@ void retro_unload_game(void)
+ 
+ unsigned retro_get_region(void) { return RETRO_REGION_NTSC; }
+ bool retro_load_game_special(unsigned type, const struct retro_game_info *info, size_t num) { return false; }
+-size_t retro_serialize_size(void) { return 0; }
+-bool retro_serialize(void *data, size_t size) { return false; }
+-bool retro_unserialize(const void *data, size_t size) { return false; }
++/* --- Memory-backed savestate I/O for the libretro serialization API -------
++ * Upstream ships stub serialize/unserialize entry points (always 0/false),
++ * which makes the SF2000 frontend's pause-menu state save fail with
++ * "save state unavailable" (retro_serialize_size() == 0).  The core itself
++ * has a complete, file-based SaveState()/LoadState() in misc.cpp that writes
++ * through the global PcsxSaveFuncs I/O vtable (the raw FILE* backend under
++ * NO_ZLIB).  We temporarily swap that vtable for an in-memory backend so the
++ * exact same freeze machinery feeds the libretro API with no disk
++ * involvement and no savestate-format divergence. */
++struct MemStateCtx {
++  unsigned char *data;      /* NULL: size-counting pass */
++  unsigned long capacity;   /* bytes available at data */
++  unsigned long position;   /* next read/write offset */
++  unsigned long written;    /* bytes produced so far */
++};
++
++static struct MemStateCtx g_mem_state;
++
++static void *mem_state_open(const char *name, boolean writing)
++{
++  (void)name;
++  (void)writing;
++  g_mem_state.position = 0;
++  g_mem_state.written = 0;
++  return &g_mem_state;
++}
++
++static int mem_state_read(void *file, void *buf, u32 len)
++{
++  struct MemStateCtx *ctx = (struct MemStateCtx *)file;
++  u32 avail = ctx->position < ctx->capacity ?
++    (u32)(ctx->capacity - ctx->position) : 0;
++  if (avail > len) avail = len;
++  if (avail) {
++    memcpy(buf, ctx->data + ctx->position, avail);
++    ctx->position += avail;
++  }
++  return (int)avail;
++}
++
++static int mem_state_write(void *file, const void *buf, u32 len)
++{
++  struct MemStateCtx *ctx = (struct MemStateCtx *)file;
++  if (ctx->data) {
++    if (ctx->position + len > ctx->capacity) return -1;
++    memcpy(ctx->data + ctx->position, buf, len);
++    ctx->position += len;
++  }
++  ctx->written += len;
++  return (int)len;
++}
++
++static long mem_state_seek(void *file, long offs, int whence)
++{
++  struct MemStateCtx *ctx = (struct MemStateCtx *)file;
++  long base = whence == SEEK_SET ? 0 :
++    whence == SEEK_CUR ? (long)ctx->position : (long)ctx->capacity;
++  if (base + offs < 0) return -1;
++  ctx->position = (unsigned long)(base + offs);
++  return (long)ctx->position;
++}
++
++static int mem_state_close(void *file) { (void)file; return 0; }
++
++static struct PcsxSaveFuncs mem_state_funcs(void)
++{
++  struct PcsxSaveFuncs funcs = { mem_state_open, mem_state_read,
++    mem_state_write, mem_state_seek, mem_state_close };
++#if !(defined(_WIN32) && !defined(__CYGWIN__))
++  funcs.fd = funcs.lib_fd = -1;
++#endif
++  return funcs;
++}
++
++static int mem_state_run_save(unsigned char *data, unsigned long capacity)
++{
++  struct PcsxSaveFuncs saved = SaveFuncs;
++  int result;
++  g_mem_state.data = data;
++  g_mem_state.capacity = capacity;
++  g_mem_state.position = 0;
++  g_mem_state.written = 0;
++  SaveFuncs = mem_state_funcs();
++  result = SaveState("");
++  SaveFuncs = saved;
++  return result;
++}
++
++static int mem_state_run_load(const unsigned char *data, unsigned long capacity)
++{
++  struct PcsxSaveFuncs saved = SaveFuncs;
++  int result;
++  g_mem_state.data = (unsigned char *)data;
++  g_mem_state.capacity = capacity;
++  g_mem_state.position = 0;
++  g_mem_state.written = 0;
++  SaveFuncs = mem_state_funcs();
++  result = LoadState("");
++  SaveFuncs = saved;
++  return result;
++}
++
++size_t retro_serialize_size(void)
++{
++  return mem_state_run_save(NULL, 0) == 0 ?
++    (size_t)g_mem_state.written : 0;
++}
++
++bool retro_serialize(void *data, size_t size)
++{
++  return mem_state_run_save((unsigned char *)data, size) == 0 &&
++    g_mem_state.written <= size;
++}
++
++bool retro_unserialize(const void *data, size_t size)
++{
++  return mem_state_run_load((const unsigned char *)data, size) == 0;
++}
+ void *retro_get_memory_data(unsigned id) { return NULL; }
+ size_t retro_get_memory_size(unsigned id) { return 0; }
+ void retro_cheat_reset(void) { }
+-- 
+2.43.0
+

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Tue, 5 May 2026 18:57:45 +0000
-Subject: [PATCH 3/5] Use qpsx C GPU fallbacks without MIPS32r2
+Subject: [PATCH 03/11] Use qpsx C GPU fallbacks without MIPS32r2
 
 Route GPU helper macros to the C fallback implementations unless QPSX_ENABLE_MIPS32R2 is enabled, preventing illegal instructions on base MIPS32 SF2000 devices.
 ---
@@ -39,5 +39,5 @@ index eca1ff76add89992b1677ccad15f84776b2e5ef8..73d62a4f683b2c92a72a94580af4d274
  
  #endif /* GPU_INNER_MIPS32_H */
 -- 
-2.54.0
+2.43.0
 

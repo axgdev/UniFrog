@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Axel Garcia K." <git@axelgk.com>
+Date: Mon, 10 Aug 2026 10:33:39 +0100
+Subject: [PATCH 06/11] loader: move the directory buffer off the stack
+
+Keep the 4 KiB ISO directory scratch space out of the constrained userspace stack.
+
+Evidence: this is the previously reviewed frontend patch qpsx-static-load-buffer.patch, applied in its established build order on upstream 368310a.
+
+Risk: limited to the paths recorded in that patch. Reverting this commit restores the preceding independently buildable checkpoint.
+---
+ src/misc.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/misc.cpp b/src/misc.cpp
+index e48d2c2ac2cf299c6e43de9516a09373e945f26f..ce469289e0aa074a804c4fb8bb2683b9c87dda52 100644
+--- a/src/misc.cpp
++++ b/src/misc.cpp
+@@ -207,7 +207,7 @@ int LoadCdrom() {
+ 	EXE_HEADER tmpHead;
+ 	struct iso_directory_record *dir;
+ 	u8 time[4], *buf;
+-	u8 mdir[4096];
++	static u8 mdir[4096];
+ 	char exename[256];
+ 
+ 	// not the best place to do it, but since BIOS boot logo killer
+-- 
+2.43.0
+

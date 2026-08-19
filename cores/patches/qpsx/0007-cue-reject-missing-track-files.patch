@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Axel Garcia K." <git@axelgk.com>
+Date: Mon, 10 Aug 2026 10:33:39 +0100
+Subject: [PATCH 07/11] cue: reject missing track files
+
+Fail a malformed or incomplete CUE atomically instead of leaving a partially populated track table.
+
+Evidence: this is the previously reviewed frontend patch qpsx-cue-failure.patch, applied in its established build order on upstream 368310a.
+
+Risk: limited to the paths recorded in that patch. Reverting this commit restores the preceding independently buildable checkpoint.
+---
+ src/cdriso.cpp | 24 +++++++++++++++++++++---
+ 1 file changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/src/cdriso.cpp b/src/cdriso.cpp
+index 58ba4c56ebcdc160c7a08afe531e600def98ab5d..2a705912b9a06b8345cdcd819a4985bc652c12bb 100644
+--- a/src/cdriso.cpp
++++ b/src/cdriso.cpp
+@@ -985,8 +985,10 @@ static int parsecue(const char *isofile) {
+ 				}
+ 
+ 				if (!found_alt) {
+-					printf(("\ncould not open: %s (or .binadpcm/.binwav)\n"), filepath);
+-					continue;
++					printf(("\ncould not open cue track: %s (or .binadpcm/.binwav)\n"), filepath);
++					/* Do not leave a partially populated track table behind. */
++					fclose(fi);
++					return -1;
+ 				}
+ 			}
+ 			/* v257: Store filepath for compressed format lookup later */
+@@ -1019,7 +1021,7 @@ static int parsecue(const char *isofile) {
+ 			}
+ 
+ 			if (numtracks == 0 && strlen(isofile) >= 4 &&
+-				strcmp(isofile + strlen(isofile) - 4, ".cue") == 0)
++				strcasecmp(isofile + strlen(isofile) - 4, ".cue") == 0)
+ 			{
+ 				// user selected .cue as image file, use it's data track instead
+ 				fclose(cdHandle);
+@@ -1737,6 +1739,8 @@ long CDR_open(void) {
+ 	boolean isMode1CDR_ = FALSE;
+ 	char alt_bin_filename[MAXPATHLEN];
+ 	const char *bin_filename;
++	const char *extension;
++	int i;
+ 
+ 	if (cdHandle != NULL) {
+ 		return 0; // it's already open
+@@ -1773,6 +1777,20 @@ long CDR_open(void) {
+ 	else if (parsecue(GetIsoFile()) == 0) {
+ 		printf("[+cue]");
+ 	}
++	else if ((extension = strrchr(GetIsoFile(), '.')) != NULL &&
++			strcasecmp(extension, ".cue") == 0) {
++		printf("[cue parse failed]");
++		fclose(cdHandle);
++		cdHandle = NULL;
++		for (i = 1; i < MAXTRACKS; i++) {
++			if (ti[i].handle != NULL) {
++				fclose(ti[i].handle);
++				ti[i].handle = NULL;
++			}
++		}
++		numtracks = 0;
++		return -1;
++	}
+ #ifndef NO_ZLIB
+ 	if (handlepbp(GetIsoFile()) == 0) {
+ 		printf("[pbp]");
+-- 
+2.43.0
+

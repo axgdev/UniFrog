@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Tue, 5 May 2026 18:57:45 +0000
-Subject: [PATCH 2/5] Include time header for qpsx XA code
+Subject: [PATCH 02/11] Include time header for qpsx XA code
 
 Include sys/time.h where the XA audio code uses timeval so HCRTOS newlib sees the matching type declarations.
 ---
@@ -21,5 +21,5 @@ index 2edcfb0704bf6e05165d277e78307502ffffa6c6..6c4637d7ea9faace0922b8664faa50e2
  // will be included from spu.c
  #ifdef _IN_SPU
 -- 
-2.54.0
+2.43.0
 

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Tue, 5 May 2026 18:57:45 +0000
-Subject: [PATCH 4/5] Use UniFrog qpsx memory and load hooks
+Subject: [PATCH 04/11] Use UniFrog qpsx memory and load hooks
 
 Disable the stock startup menu by default under UniFrog, avoid fixed-address memory assumptions from the multicore environment, and emit low-frequency load progress logs through the UniFrog callback.
 ---
@@ -159,5 +159,5 @@ index 6e70c267360975c0524dc6aced6da83ae47659a8..0c4bb00ea70ba48c23ea3a4cde44bffe
  /* Track if we're using fixed address (to prevent free() on fixed addr) */
  static bool psxM_is_fixed_addr = false;
 -- 
-2.54.0
+2.43.0
 
