@@ -33,7 +33,7 @@ CORE_SOURCE_ROOT ?= $(DEPS)/cores
 CORE_SUPPORT_ROOT ?= $(DEPS)/support
 JS2300 ?= $(DEPS)/frog2k-javascript
 JS2300_URL ?= git@github.com:axgdev/frog2k-javascript-private.git
-JS2300_REF ?= c08d4124f4e2c8437ddf3daaacc0c595886b7198
+JS2300_REF ?= 124170281bafaafee64522d40d2175803b09c091
 JS2300_FETCH_STAMP := $(JS2300).frog2k-$(JS2300_REF).stamp
 LVGL_DIR ?= $(DEPS)/support/lvgl
 LVGL_URL ?= https://github.com/lvgl/lvgl.git
@@ -1150,7 +1150,7 @@ $(JS2300_FETCH_STAMP):
 		git -C "$(JS2300)" remote set-url origin "$(JS2300_URL)"; \
 	else \
 		echo "  CLONE   $(JS2300_URL)"; \
-		git clone --no-checkout --depth 1 "$(JS2300_URL)" "$(JS2300)"; \
+		git clone --depth 1 "$(JS2300_URL)" "$(JS2300)"; \
 	fi
 	@if ! git -C "$(JS2300)" cat-file -e "$(JS2300_REF)^{commit}" 2>/dev/null; then \
 		git -C "$(JS2300)" fetch --depth 1 origin "$(JS2300_REF)"; \
