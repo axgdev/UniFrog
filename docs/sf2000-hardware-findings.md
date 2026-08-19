@@ -61,8 +61,8 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
   a `320x240` destination shows only a small top-left rectangle on the LCD, and
   programming lower decoded dimensions as the source crops/zooms the video
   plane before scaling.
-- Hardware video decode works through the HCRTOS `/dev/viddec` path when the
-  board DTS reserves MMZ media memory and `viddec.kshm_size`:
+- Hardware video decode works through the HCRTOS `/dev/viddec` path when UniFrog
+  creates MMZ id 0 before decoder init and provides `viddec.kshm_size`:
   - `/dev/viddec` opens.
   - `/dev/vidsink` opens.
   - `/dev/dis` opens.
@@ -92,32 +92,24 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
 ### Storage
 
 - The SD/MMC path is sensitive to signal integrity. A flat SD extender cable caused frequent CRC errors and automount churn.
-- The default build boots directly in `wide20`: 4-bit SD, 20 MHz,
-  high-speed disabled, and no UHS/1.8 V negotiation. This keeps the 4-bit
-  throughput benefit while avoiding high-speed/UHS negotiation on weak cards
-  and SD extenders. Runtime fast-read mount/remount windows
-  are disabled by the default `SD_READ_MODE=boot`; ROM and native module reads
-  stay on the boot profile. Developer -> Storage test can run a guarded runtime
-  sweep from that boot profile: it
+- The default build boots directly in `wide25`: 4-bit SD, nominal 25 MHz,
+  high-speed disabled, and no UHS/1.8 V negotiation. Runtime storage profiles
+  are selected on-device; the Makefile no longer provides alternate
+  fixed-profile boot builds. Developer -> Storage test can run a guarded
+  runtime sweep from the boot profile: it
   buffers logs, shows progress on screen, prefers `/ROMS/test.md` when present,
   verifies a safe remount first, switches profiles through the SD bus
   suspend/resume hooks, records host caps/timing/mount status, restores the
   boot profile, then writes the report. The screen shows the most reliable
   freeze stage; warm reboot diagnostics are secondary because full power cycles
   can overwrite them before UniFrog starts.
-- `SD_MODE=safe`, `wide1`, `wide2`, `wide4`, `wide8`, `wide10`, `wide12`,
-  `wide14`, `wide16`, `wide18`, `wide20`, `wide22`, `wide24`, `wide25`,
-  `wide37`, `hs1`, `wide50`, `wide`, `uhs12`, `uhs25`, and `uhs` remain
-  fixed-profile diagnostic boot builds.
-  `logunifrog0009.txt` showed wide and UHS were unstable on the tested device.
+- `logunifrog0009.txt` showed wide and UHS were unstable on the tested device.
+  Keep those profiles as runtime diagnostics rather than build variants.
 - SD cards support 1-bit and 4-bit transfer widths here. The HCRTOS MMC driver
   reports invalid `bus-width` values, so 2-bit and 3-bit profiles are not valid
   experiments.
-- Runtime profile switching is used for diagnostics only unless
-  `SD_READ_MODE` is explicitly set to a non-boot profile. Frontend startup keeps
-  file-backed logging suspended until the first screen is ready, then flushes.
-  If a diagnostic fast window fails, ROM content prep restores the boot profile
-  before core init and retries the read on the boot profile. Storage full test reads
+- Frontend startup keeps file-backed logging suspended until the first screen
+  is ready, then flushes. Storage full test reads
   `/ROMS/probes/test*.md`, returns to the boot profile after each experimental read,
   and checkpoints the report before the next probe. Storage mode test switches
   to one selected profile, reads all probes, then restores once; use it to
@@ -257,9 +249,12 @@ The B210 files are not guaranteed to match the retail SF2000 PCB exactly. Treat 
   only controls the downstream amp enable; it does not silence the DAC output.
 - Reverse-engineered stock firmware shows SF2000 opens the amp with GPIO R07
   low, while GB300 opens it with GPIO L15 low. Do not derive this solely from
-  the LCD panel ID: screen-swapped GB300 units can report the SF2000 panel.
-  UniFrog uses the panel ID as the boot default, then lets the GB300 keypad bus
-  probe select the GB300/L15 route when the physical controls prove it.
+  the LCD panel ID: screen-swapped units can report the other panel. Fastboot
+  now records the board marker before UniFrog mutates GPIO state: SF2000 has a
+  saturated GB300 keypad-bus idle scan plus GPIO L27 low and R07 high; GB300
+  has a non-saturated/zero GB300 keypad-bus scan plus GPIO L27 high and R07
+  low. UniFrog consumes that retained board marker first, then combines it with
+  the later LCD panel ID to distinguish normal and screen-swapped devices.
 - RF controller polling can temporarily reconfigure GPIO-L pins. When audio is
   enabled, UniFrog reasserts the selected amp gate after RF polling so GB300
   L15 audio is not lost when the wireless code restores its bus state.

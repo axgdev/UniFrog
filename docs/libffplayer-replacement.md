@@ -1,7 +1,7 @@
 # Media Reverse-Engineering Handoff
 
 UniFrog no longer links the external `libffplayer.a` player. Media playback is
-owned by `src/unifrog_media.c`, using FFmpeg for demux/software decode and the
+owned by `components/media/src/platform/sf2000/unifrog_media.c`, using FFmpeg for demux/software decode and the
 HCRTOS `/dev/auddec`, `/dev/viddec`, `/dev/vidsink`, `/dev/dis`, and SND paths
 directly.
 
@@ -26,9 +26,11 @@ Extract and inspect the old player archive without committing artifacts:
 ```sh
 rm -rf build/re && mkdir -p build/re
 cd build/re
-/opt/mipsel-mti-elf/bin/mipsel-mti-elf-ar x ../../unifrog-hcrtos-sdk/lib/vendor/libffplayer.a
-/opt/mipsel-mti-elf/bin/mipsel-mti-elf-objdump -dr built-in.o > libffplayer.objdump.txt
-/opt/mipsel-mti-elf/bin/mipsel-mti-elf-objdump -t built-in.o > libffplayer.symbols.txt
+# Set this to the pinned frog-toolchain prefix from `make print-config`.
+CROSS_COMPILE=/path/to/frog-toolchain/mipsel-mti-elf-
+"${CROSS_COMPILE}ar" x ../../unifrog-hcrtos-sdk/lib/vendor/libffplayer.a
+"${CROSS_COMPILE}objdump" -dr built-in.o > libffplayer.objdump.txt
+"${CROSS_COMPILE}objdump" -t built-in.o > libffplayer.symbols.txt
 strings -tx built-in.o | rg '/dev|VIDDEC|AUDDEC|avsync|extra|decoder'
 ```
 
@@ -43,7 +45,7 @@ Confirm the active build still uses the source implementation:
 make native-media-link-check
 rg -n "ffplayer|hcplayer|HCPlayer|hcplayer_|libffplayer" Makefile src include docs tools
 rg -n "libffplayer|ffplayer|hcplayer" build output
-/opt/mipsel-mti-elf/bin/mipsel-mti-elf-nm -A output/sf2000.out build/core_modules/*.out | rg -i "ffplayer|hcplayer"
+"${CROSS_COMPILE}nm" -A output/sf2000.out build/core_modules/*.out | rg -i "ffplayer|hcplayer"
 ```
 
 `make native-media-link-check` is part of `make check` and `make verify`. It
@@ -118,44 +120,49 @@ For source-level SDK behavior clues, inspect:
   so UniFrog paces video and hardware-audio ES writes against stream timestamps.
   The larger SD readahead buffer is the intended jitter absorber for local file
   reads.
-- The current local-file tuning knobs are `MEDIA_AUDIO_FEED_LEAD_MS`,
-  `MEDIA_VIDEO_FEED_LEAD_MS`, `MEDIA_FILE_BUFFER_SIZE`, and
-  `MEDIA_FILE_READAHEAD_SIZE`. Video has its own
-  multi-window cache controlled by `MEDIA_VIDEO_READAHEAD_SIZE` and
-  `MEDIA_VIDEO_READAHEAD_SLOTS` because seek-heavy MP4 demuxing alternates
+- The current local-file tuning knobs are `media_audio_feed_lead_ms`,
+  `media_video_feed_lead_ms`, `media_file_buffer_size`, and
+  `media_file_readahead_size`. Video has its own
+  multi-window cache controlled by `media_video_readahead_size` and
+  `media_video_readahead_slots` because seek-heavy MP4 demuxing alternates
   between active audio/video file regions.
-  Startup buffering is controlled by `MEDIA_VIDEO_PREFILL_*`, and optional
+  Startup buffering is controlled by `media_video_prefill_*`, and optional
   full-file preload for small videos is controlled by
-  `MEDIA_VIDEO_PRELOAD_MAX_BYTES`. Native video can also tune
-  `MEDIA_VIDEO_KSHM_SIZE` to trade viddec compressed-ring depth for more normal
-  heap available to decoded surfaces and the SD cache; `MEDIA_VIDEO_LOWRES_KSHM_SIZE`
+  `media_video_preload_max_bytes`. Native video can also tune
+  `media_video_kshm_size` to trade viddec compressed-ring depth for more normal
+  heap available to decoded surfaces and the SD cache; `media_video_lowres_kshm_size`
   can override that for low-resolution streams. The framebuffer progress/seek overlay
   is always present during native media playback and can be hidden or shown with
   `A`; routine overlay refreshes avoid framebuffer panning and per-refresh logs
-  so the graphics layer is quieter during playback. Set these in `config.mk`
-  for device experiments instead of editing `src/unifrog_media.c` directly.
+  so the graphics layer is quieter during playback. Set these in
+  `/unifrog_data/unifrog.ini` for device experiments instead of editing
+  `components/media/src/platform/sf2000/unifrog_media.c` directly.
   Native video creates these caches after the hardware decoder KSHM allocations,
   so cache size changes should not prevent `/dev/viddec` from opening. The
   algorithm and log counters are documented in
   `docs/media-buffering-algorithm.md`.
-- `MEDIA_AUDIO_MAX_HW_AHEAD_MS` and `MEDIA_VIDEO_MAX_HW_AHEAD_MS` cap how far
+- `media_audio_max_hw_ahead_ms` and `media_video_max_hw_ahead_ms` cap how far
   packet feeding can run ahead of the hardware decoder clocks after a stall.
   These are separate from the wall-clock feed-lead settings and should remain
   above the active feed lead to avoid threshold chatter. Native video seeks also
   reset `/dev/avsync0` with `AVSYNC_SET_STC_MS` and can recover a post-seek
-  viddec clock stall with `MEDIA_VIDEO_STUCK_BEHIND_MS`.
+  viddec clock stall with `media_video_stuck_behind_ms`.
 - The SF2000 audio path must stay muted/gated until real PCM exists. Digital
   zeroes alone can still expose board noise.
 - GB300 media/libretro playback must receive stereo frames even when UniFrog has
-  mixed the content to mono. The board marker for this route is the GB300 panel
-  ID or the screen-swap-safe stock-bit input bus, not the LCD panel alone.
+  mixed the content to mono. The board marker for this route is the fastboot
+  board detection result or the later screen-swap-safe stock-bit input bus, not
+  the LCD panel alone.
 
 ## Current UniFrog Map
 
-- Frontend: `src/native_frontend.c` plus `src/frontend_lvgl.c`.
-- Theme parsing/rendering: `src/frontend_lvgl.c`, `src/unifrog_ui.c`,
-  `src/unifrog_image.c`, `src/unifrog_ge.c`.
-- Media: `src/unifrog_media.c`.
+- Frontend: `components/frontend/src/app/frontend_app.c` plus
+  `components/frontend/src/app/frontend_lvgl.c`.
+- Theme parsing/rendering: `components/frontend/src/app/frontend_lvgl.c`,
+  `foundation/src/display/unifrog_ui.c`,
+  `foundation/src/display/unifrog_image.c`,
+  `foundation/src/platform/sf2000/display/unifrog_ge.c`.
+- Media: `components/media/src/platform/sf2000/unifrog_media.c`.
   - Native video: FFmpeg demux, HCRTOS `/dev/viddec`/`/dev/vidsink`, H.264
     avcC post-init ES packet handling, queue-space waits, and bounded EOS wait.
     Extension routing covers MP4/MOV/MKV/AVI/TS/M2TS, MPEG program and
@@ -166,11 +173,14 @@ For source-level SDK behavior clues, inspect:
     containers such as M4A, WMA/ASF, RA/RM, and video-container audio.
   - Native images: FFmpeg first-frame decode plus libswscale into the RGB565
     framebuffer for JPG/PNG/GIF/BMP-style image media.
-- Audio gate/mute: `src/unifrog_audio.c`, documented in `docs/audio-quirks.md`.
-- Storage/log resilience: `src/unifrog_log.c`, `src/unifrog_storage_probe.c`,
+- Audio gate/mute: `foundation/src/platform/sf2000/audio/unifrog_audio.c`,
+  documented in `docs/audio-quirks.md`.
+- Storage/log resilience: `foundation/src/runtime/unifrog_log.c`,
+  `components/diagnostics/src/unifrog_storage_probe.c`,
   `docs/filesystem-mmc-notes.md`.
-- Libretro hosting: `src/unifrog_libretro_host.c` and core module files.
-- Optional JS2300 scripts: `src/frontend/js2300_frontend_*.c`; this is not the
+- Libretro hosting: `components/libretro/src/unifrog_libretro_host.c` and core
+  module files.
+- Optional JS2300 scripts: `js2300/src/unifrog_host/`; this is not the
   removed JavaScript frontend.
 
 ## Remaining Work

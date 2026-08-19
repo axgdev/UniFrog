@@ -1,4 +1,4 @@
-From dae29491bc5b04763d4d0f0d5804b6b0621e8d3b Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Wed, 6 May 2026 08:56:01 +0000
 Subject: [PATCH 5/5] Clean up qpsx compiler flags
@@ -10,7 +10,7 @@ Keep C-only warning suppressions out of C++ compilations and keep C++-only optio
  2 files changed, 8 insertions(+), 3 deletions(-)
 
 diff --git a/Makefile.libretro b/Makefile.libretro
-index a3842f1..68d8649 100644
+index a3842f1b753d2b9acde24df8984f439d84142858..68d86490d0d1cc3deaed9558a33a0ec2d8b313f4 100644
 --- a/Makefile.libretro
 +++ b/Makefile.libretro
 @@ -95,7 +95,8 @@ MORE_CFLAGS += -DQPSX_ENABLE_MIPS32R2=1
@@ -24,7 +24,7 @@ index a3842f1..68d8649 100644
  # Object files - Core PSX emulation
  OBJS = \
 diff --git a/libretro/core/libretro-core.cpp b/libretro/core/libretro-core.cpp
-index 6fb0bff..311adb3 100644
+index 6fb0bff07a821b17f302f91e504b5e3211c827dc..311adb367a852bb1f09986c8414768cf150b5510 100644
 --- a/libretro/core/libretro-core.cpp
 +++ b/libretro/core/libretro-core.cpp
 @@ -371,7 +371,9 @@ static int g_resampler_type = 0;
@@ -49,3 +49,6 @@ index 6fb0bff..311adb3 100644
  
  static void native_cmd_update_any_enabled(void) {
      native_any_cmd_enabled = 0;
+-- 
+2.54.0
+

@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog Maintainers <unifrog@example.invalid>
+Date: Mon, 22 Jun 2026 05:29:21 +0000
+Subject: [PATCH] Add the UniFrog SF2000 Beetle Cygne port
+
+Device-specific changes are maintained as a focused patch over the original upstream pin. Vendored libretro-common and unrelated platform assets remain owned by upstream.
+---
+ Makefile                | 13 +++++++++++++
+ libretro.c              |  4 ++++
+ libretro_core_options.h |  4 ++++
+ mednafen/wswan/sound.c  |  8 ++++++++
+ 4 files changed, 29 insertions(+)
+
+diff --git a/Makefile b/Makefile
+index 851dd5b479209f93114f16bf91ae9f89a038aef9..ba0aa6fc17a09e274d7928c71d7530e75c5d5e58 100644
+--- a/Makefile
++++ b/Makefile
+@@ -319,6 +319,19 @@ else ifeq ($(platform), gcw0)
+    SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
+    FLAGS += -fomit-frame-pointer -ffast-math -march=mips32 -mtune=mips32r2 -mhard-float
+ 
++# SF2000
++else ifeq ($(platform), sf2000)
++    TARGET := $(TARGET_NAME)_libretro_$(platform).a
++    MIPS=/opt/mips32-mti-elf/2019.09-03-2/bin/mips-mti-elf-
++    CC = $(MIPS)gcc
++    CXX = $(MIPS)g++
++    AR = $(MIPS)ar
++    CFLAGS =-EL -march=mips32 -mtune=mips32 -msoft-float -ffast-math -fomit-frame-pointer
++    CFLAGS+=-G0 -mno-abicalls -fno-pic
++    CFLAGS+=-DSF2000 -DFRONTEND_SUPPORTS_RGB565
++    CXXFLAGS=$(CFLAGS) -fno-use-cxa-atexit
++    STATIC_LINKING = 1
++	
+ #MIYOO
+ else ifeq ($(platform), miyoo)
+    TARGET := $(TARGET_NAME)_libretro.so
+diff --git a/libretro.c b/libretro.c
+index 1b460a947ce795d96576fe7efc000400c2e07325..8575bf68d103baf2d22a5ec652868f294fb00918 100644
+--- a/libretro.c
++++ b/libretro.c
+@@ -42,7 +42,11 @@ void MDFN_LoadGameCheats(void *override_ptr);
+ void MDFN_FlushGameCheats(int nosave);
+ 
+ /* core options */
++#if !defined(SF2000)
+ static int RETRO_SAMPLE_RATE = 44100;
++#else
++static int RETRO_SAMPLE_RATE = 11025;
++#endif
+ 
+ static int RETRO_PIX_BYTES = 2;
+ static int RETRO_PIX_DEPTH = 15;
+diff --git a/libretro_core_options.h b/libretro_core_options.h
+index 462ff2cea403bc00b0c080d41ecad9b01f172eaf..94dfea359532a5d5a6c3b1086fc13f149d7ada5f 100644
+--- a/libretro_core_options.h
++++ b/libretro_core_options.h
+@@ -209,7 +209,11 @@ struct retro_core_option_v2_definition option_defs_us[] = {
+          { "48000",  NULL },
+          { NULL, NULL },
+       },
++#if !defined(SF2000)
+       "44100",
++#else
++      "11025",
++#endif
+    },
+    {
+       "wswan_sound_low_pass",
+diff --git a/mednafen/wswan/sound.c b/mednafen/wswan/sound.c
+index 1529fcda217e796b3cbd73b7690649e0cdaa2202..0dc83a9bff6482e5fe71f31c1a9ae9096cb649e5 100644
+--- a/mednafen/wswan/sound.c
++++ b/mednafen/wswan/sound.c
+@@ -370,7 +370,11 @@ void WSwan_SoundInit(void)
+    for(i = 0; i < 2; i++)
+    {
+       Blip_Buffer_init(&sbuf[i]);
++#if !defined(SF2000)
+       Blip_Buffer_set_sample_rate(&sbuf[i], 44100, 60);
++#else
++      Blip_Buffer_set_sample_rate(&sbuf[i], 11025, 60);
++#endif
+       Blip_Buffer_set_clock_rate(&sbuf[i], (long)(3072000));
+       Blip_Buffer_bass_freq(&sbuf[i], 20);
+    }
+@@ -391,7 +395,11 @@ bool WSwan_SetSoundRate(uint32 rate)
+ {
+    unsigned i;
+    for(i = 0; i < 2; i++)
++#if !defined(SF2000)
+       Blip_Buffer_set_sample_rate(&sbuf[i], rate ? rate : 44100, 60);
++#else
++      Blip_Buffer_set_sample_rate(&sbuf[i], rate ? rate : 11025, 60);
++#endif
+ 
+    return(true);
+ }
+-- 
+2.54.0
+

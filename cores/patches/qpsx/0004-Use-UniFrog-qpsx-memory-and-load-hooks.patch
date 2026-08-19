@@ -1,4 +1,4 @@
-From 7f51cbf4f2a2d5f6a630922a966c4d76edaa64ca Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Tue, 5 May 2026 18:57:45 +0000
 Subject: [PATCH 4/5] Use UniFrog qpsx memory and load hooks
@@ -10,7 +10,7 @@ Disable the stock startup menu by default under UniFrog, avoid fixed-address mem
  2 files changed, 36 insertions(+), 2 deletions(-)
 
 diff --git a/libretro/core/libretro-core.cpp b/libretro/core/libretro-core.cpp
-index 2690d49..6fb0bff 100644
+index 2690d49fdb3b31c091d042fb3903c2f28d703cbb..6fb0bff07a821b17f302f91e504b5e3211c827dc 100644
 --- a/libretro/core/libretro-core.cpp
 +++ b/libretro/core/libretro-core.cpp
 @@ -107,9 +107,12 @@ static void update_debug_log_state(int enabled)
@@ -146,7 +146,7 @@ index 2690d49..6fb0bff 100644
  }
  
 diff --git a/src/psxmem.cpp b/src/psxmem.cpp
-index 6e70c26..0c4bb00 100644
+index 6e70c267360975c0524dc6aced6da83ae47659a8..0c4bb00ea70ba48c23ea3a4cde44bffef67d949f 100644
 --- a/src/psxmem.cpp
 +++ b/src/psxmem.cpp
 @@ -111,7 +111,7 @@ bool psxH_allocated;
@@ -158,3 +158,6 @@ index 6e70c26..0c4bb00 100644
  
  /* Track if we're using fixed address (to prevent free() on fixed addr) */
  static bool psxM_is_fixed_addr = false;
+-- 
+2.54.0
+

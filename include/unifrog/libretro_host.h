@@ -43,6 +43,7 @@ struct unifrog_libretro_run_options {
    int input_profile;
    int state_auto_load;
    int state_auto_save;
+   int rtc_offset_minutes;
    unsigned state_slot;
    unsigned max_frames;
    char core_id[24];
@@ -60,7 +61,6 @@ int unifrog_libretro_run_path_ex(const char *path,
 int unifrog_libretro_run_gambatte(const char *path);
 int unifrog_libretro_run_gpsp(const char *path);
 int unifrog_libretro_run_path(const char *path);
-int unifrog_libretro_recover_saved_state(void);
 
 #ifdef __cplusplus
 }

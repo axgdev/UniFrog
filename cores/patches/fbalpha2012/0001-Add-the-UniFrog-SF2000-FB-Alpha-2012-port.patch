@@ -1,0 +1,241 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog Maintainers <unifrog@example.invalid>
+Date: Mon, 22 Jun 2026 05:29:20 +0000
+Subject: [PATCH] Add the UniFrog SF2000 FB Alpha 2012 port
+
+Device-specific changes are maintained as a focused patch over the original upstream pin. Vendored libretro-common and unrelated platform assets remain owned by upstream.
+---
+ .gitignore                                    |  1 +
+ svn-current/trunk/makefile.libretro           | 37 +++++++++++++++++++
+ svn-current/trunk/src/burner/crypt.h          |  8 ++--
+ .../trunk/src/burner/libretro/libretro.cpp    | 15 +++++++-
+ .../src/burner/libretro/retro_common.cpp      | 12 ++++++
+ svn-current/trunk/src/burner/unzip.c          |  2 +-
+ 6 files changed, 68 insertions(+), 7 deletions(-)
+
+diff --git a/.gitignore b/.gitignore
+index 046b124a3b29a8139acad8f685f89278cb184fc2..1012307d406b68660f1d82ea641472b4fb198bc2 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,3 +1,4 @@
+ *.so
+ *.o
+ *.dll
++.unifrog-generated/
+diff --git a/svn-current/trunk/makefile.libretro b/svn-current/trunk/makefile.libretro
+index 268d4c9b33c4de24b7b33e7f13927ac761ded0bc..713eba4bbdd84c06b33a10646bdbd3d5db6ed720 100644
+--- a/svn-current/trunk/makefile.libretro
++++ b/svn-current/trunk/makefile.libretro
+@@ -38,6 +38,7 @@ FBA_CPU_DIR := $(MAIN_FBA_DIR)/cpu
+ FBA_LIB_DIR := $(MAIN_FBA_DIR)/dep/libs
+ FBA_INTERFACE_DIR := $(MAIN_FBA_DIR)/intf
+ FBA_GENERATED_DIR = $(MAIN_FBA_DIR)/dep/generated
++FBA_DRIVERLIST_DIR = $(FBA_GENERATED_DIR)
+ FBA_SCRIPTS_DIR = $(MAIN_FBA_DIR)/dep/scripts
+ GRIFFIN_DIR = griffin-libretro
+ 
+@@ -321,6 +322,21 @@ else ifeq ($(platform), emscripten)
+    EXTERNAL_ZLIB = 1
+    STATIC_LINKING = 1
+ 
++# SF2000
++else ifeq ($(platform), sf2000)
++    TARGET := $(TARGET_NAME)_libretro_$(platform).a
++    MIPS=/opt/mips32-mti-elf/2019.09-03-2/bin/mips-mti-elf-
++    CC = $(MIPS)gcc
++    CXX = $(MIPS)g++
++    AR = $(MIPS)ar
++    CFLAGS =-EL -march=mips32 -mtune=mips32 -msoft-float -ffast-math -fomit-frame-pointer
++    CFLAGS+=-G0 -mno-abicalls -fno-pic
++#	-ffreestanding
++    CFLAGS+=-DSF2000
++    CXXFLAGS=$(CFLAGS)
++    STATIC_LINKING = 1
++    FBA_DRIVERLIST_DIR = .unifrog-generated
++
+ # GCW0
+ else ifeq ($(platform), gcw0)
+    TARGET := $(TARGET_NAME)_libretro.so
+@@ -685,6 +701,7 @@ INCFLAGS := \
+ 	-I$(FBA_BURN_DIR)/drv/sega \
+ 	-I$(FBA_BURN_DIR)/drv/toaplan \
+ 	-I$(FBA_BURN_DIR)/drv/taito \
++	-I$(FBA_DRIVERLIST_DIR) \
+ 	-I$(FBA_GENERATED_DIR) \
+ 	-I$(LIBRETRO_COMM_DIR)/include \
+ 	-I$(FBA_LIB_DIR)
+@@ -749,6 +766,20 @@ include $(THEOS_MAKE_PATH)/library.mk
+ else
+ all: $(TARGET)
+ 
++FBA_DRIVERLIST_STAMP := $(FBA_DRIVERLIST_DIR)/.driverlist.stamp
++
++$(FBA_DRIVERLIST_STAMP):
++	@mkdir -p $(FBA_DRIVERLIST_DIR)
++ifneq ($(platform), sf2000)
++	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_DRIVERLIST_DIR)/driverlist.h -l gamelist.txt $(FBA_BURN_DRIVERS_DIR)/capcom $(FBA_BURN_DRIVERS_DIR)/cave $(FBA_BURN_DRIVERS_DIR)/cps3 $(FBA_BURN_DRIVERS_DIR)/dataeast $(FBA_BURN_DRIVERS_DIR)/galaxian $(FBA_BURN_DRIVERS_DIR)/irem $(FBA_BURN_DRIVERS_DIR)/konami $(FBA_BURN_DRIVERS_DIR)/megadrive $(FBA_BURN_DRIVERS_DIR)/neogeo $(FBA_BURN_DRIVERS_DIR)/pce $(FBA_BURN_DRIVERS_DIR)/pgm $(FBA_BURN_DRIVERS_DIR)/pre90s $(FBA_BURN_DRIVERS_DIR)/psikyo $(FBA_BURN_DRIVERS_DIR)/pst90s $(FBA_BURN_DRIVERS_DIR)/sega $(FBA_BURN_DRIVERS_DIR)/snes $(FBA_BURN_DRIVERS_DIR)/taito $(FBA_BURN_DRIVERS_DIR)/toaplan
++	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_DRIVERLIST_DIR)/driverlist-gx.h -l gamelist-gx.txt $(FBA_BURN_DRIVERS_DIR)/cave $(FBA_BURN_DRIVERS_DIR)/cps3 $(FBA_BURN_DRIVERS_DIR)/dataeast $(FBA_BURN_DRIVERS_DIR)/galaxian $(FBA_BURN_DRIVERS_DIR)/irem $(FBA_BURN_DRIVERS_DIR)/konami $(FBA_BURN_DRIVERS_DIR)/pgm $(FBA_BURN_DRIVERS_DIR)/pre90s $(FBA_BURN_DRIVERS_DIR)/psikyo $(FBA_BURN_DRIVERS_DIR)/pst90s $(FBA_BURN_DRIVERS_DIR)/sega $(FBA_BURN_DRIVERS_DIR)/snes $(FBA_BURN_DRIVERS_DIR)/taito $(FBA_BURN_DRIVERS_DIR)/toaplan
++else
++	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_DRIVERLIST_DIR)/driverlist.h $(FBA_BURN_DRIVERS_DIR)/pre90s
++	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_DRIVERLIST_DIR)/driverlist-gx.h $(FBA_BURN_DRIVERS_DIR)/pre90s
++endif
++	@touch $@
++
++$(FBA_BURN_DIR)/burn.o: | $(FBA_DRIVERLIST_STAMP)
+ 
+ generate-files-clean:
+ 	rm -rf $(FBA_GENERATED_DIR)/
+@@ -762,8 +793,13 @@ generate-files:
+ 	@mkdir -p $(FBA_GENERATED_DIR) 2>/dev/null || /bin/true
+ 	@echo "Generating $(FBA_GENERATED_DIR)/driverlist.h..."
+ 	@echo ""
++ifneq ($(platform), sf2000)
+ 	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_GENERATED_DIR)/driverlist.h -l gamelist.txt $(FBA_BURN_DRIVERS_DIR)/capcom $(FBA_BURN_DRIVERS_DIR)/cave $(FBA_BURN_DRIVERS_DIR)/cps3 $(FBA_BURN_DRIVERS_DIR)/dataeast $(FBA_BURN_DRIVERS_DIR)/galaxian $(FBA_BURN_DRIVERS_DIR)/irem $(FBA_BURN_DRIVERS_DIR)/konami $(FBA_BURN_DRIVERS_DIR)/megadrive $(FBA_BURN_DRIVERS_DIR)/neogeo $(FBA_BURN_DRIVERS_DIR)/pce $(FBA_BURN_DRIVERS_DIR)/pgm $(FBA_BURN_DRIVERS_DIR)/pre90s $(FBA_BURN_DRIVERS_DIR)/psikyo $(FBA_BURN_DRIVERS_DIR)/pst90s $(FBA_BURN_DRIVERS_DIR)/sega $(FBA_BURN_DRIVERS_DIR)/snes $(FBA_BURN_DRIVERS_DIR)/taito $(FBA_BURN_DRIVERS_DIR)/toaplan
+ 	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_GENERATED_DIR)/driverlist-gx.h -l gamelist-gx.txt $(FBA_BURN_DRIVERS_DIR)/cave $(FBA_BURN_DRIVERS_DIR)/cps3 $(FBA_BURN_DRIVERS_DIR)/dataeast $(FBA_BURN_DRIVERS_DIR)/galaxian $(FBA_BURN_DRIVERS_DIR)/irem $(FBA_BURN_DRIVERS_DIR)/konami $(FBA_BURN_DRIVERS_DIR)/pgm $(FBA_BURN_DRIVERS_DIR)/pre90s $(FBA_BURN_DRIVERS_DIR)/psikyo $(FBA_BURN_DRIVERS_DIR)/pst90s $(FBA_BURN_DRIVERS_DIR)/sega $(FBA_BURN_DRIVERS_DIR)/snes $(FBA_BURN_DRIVERS_DIR)/taito $(FBA_BURN_DRIVERS_DIR)/toaplan
++else
++	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_GENERATED_DIR)/driverlist.h -l gamelist.txt $(FBA_BURN_DRIVERS_DIR)/pre90s
++	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_GENERATED_DIR)/driverlist-gx.h -l gamelist-gx.txt $(FBA_BURN_DRIVERS_DIR)/pre90s
++endif
+ 	@echo ""
+ 	@echo "Generating $(FBA_GENERATED_DIR)/neo_sprite_func.h..."
+ 	@echo ""
+@@ -818,6 +854,7 @@ clean-objs:
+ clean:
+ 	rm -f $(TARGET)
+ 	rm -f $(OBJS)
++	rm -rf .unifrog-generated
+ 	rm -f $(M68KMAKE_EXE)
+ 	rm -f $(PGM_SPRITE_CREATE_EXE)
+ 	rm -f $(CTVMAKE_EXE)
+diff --git a/svn-current/trunk/src/burner/crypt.h b/svn-current/trunk/src/burner/crypt.h
+index 26f497e3c50dcc516028a96ea8390da6fb7b526f..c90b987b8c9c95851cb6f6b1d3662051d9da4a77 100644
+--- a/svn-current/trunk/src/burner/crypt.h
++++ b/svn-current/trunk/src/burner/crypt.h
+@@ -35,7 +35,7 @@
+ /***********************************************************************
+  * Return the next byte in the pseudo-random sequence
+  */
+-static int decrypt_byte(unsigned long* pkeys, const unsigned long* pcrc_32_tab)
++static int decrypt_byte(unsigned long* pkeys, const z_crc_t* pcrc_32_tab)
+ {
+     unsigned temp;  /* POTENTIAL BUG:  temp*(temp^1) may overflow in an
+                      * unpredictable manner on 16-bit systems; not a problem
+@@ -48,7 +48,7 @@ static int decrypt_byte(unsigned long* pkeys, const unsigned long* pcrc_32_tab)
+ /***********************************************************************
+  * Update the encryption keys with the next byte of plain text
+  */
+-static int update_keys(unsigned long* pkeys,const unsigned long* pcrc_32_tab,int c)
++static int update_keys(unsigned long* pkeys,const z_crc_t* pcrc_32_tab,int c)
+ {
+     (*(pkeys+0)) = CRC32((*(pkeys+0)), c);
+     (*(pkeys+1)) += (*(pkeys+0)) & 0xff;
+@@ -65,7 +65,7 @@ static int update_keys(unsigned long* pkeys,const unsigned long* pcrc_32_tab,int
+  * Initialize the encryption keys and the random header according to
+  * the given password.
+  */
+-static void init_keys(const char* passwd,unsigned long* pkeys,const unsigned long* pcrc_32_tab)
++static void init_keys(const char* passwd,unsigned long* pkeys,const z_crc_t* pcrc_32_tab)
+ {
+     *(pkeys+0) = 305419896L;
+     *(pkeys+1) = 591751049L;
+@@ -95,7 +95,7 @@ static int crypthead(passwd, buf, bufSize, pkeys, pcrc_32_tab, crcForCrypting)
+     unsigned char *buf;         /* where to write header */
+     int bufSize;
+     unsigned long* pkeys;
+-    const unsigned long* pcrc_32_tab;
++    const z_crc_t* pcrc_32_tab;
+     unsigned long crcForCrypting;
+ {
+     int n;                       /* index in random header */
+diff --git a/svn-current/trunk/src/burner/libretro/libretro.cpp b/svn-current/trunk/src/burner/libretro/libretro.cpp
+index 639aab9d3e4b7c23712cb5ef7be0fe57592e0669..8c7a8a90c08509a7d1f8171f16c1524a48731477 100644
+--- a/svn-current/trunk/src/burner/libretro/libretro.cpp
++++ b/svn-current/trunk/src/burner/libretro/libretro.cpp
+@@ -114,8 +114,15 @@ static ROMFIND g_find_list[1024];
+ static unsigned g_rom_count;
+ static unsigned fba_devices[5] = { RETROPAD_CLASSIC, RETROPAD_CLASSIC, RETROPAD_CLASSIC, RETROPAD_CLASSIC, RETROPAD_CLASSIC };
+ 
+-#define AUDIO_SAMPLERATE 32000
++#if !defined(SF2000)
++#define AUDIO_SAMPLERATE 44100
+ #define AUDIO_SEGMENT_LENGTH 534 // <-- Hardcoded value that corresponds well to 32kHz audio.
++#define VIDEO_REFRESH_RATE 59.629403
++#else
++#define AUDIO_SAMPLERATE 11025
++#define AUDIO_SEGMENT_LENGTH 184 // <-- Hardcoded value that corresponds well to 32kHz audio.
++#define VIDEO_REFRESH_RATE 59.629403
++#endif
+ 
+ static uint32_t *g_fba_frame;
+ static int16_t g_audio_buf[AUDIO_SEGMENT_LENGTH * 2];
+@@ -967,11 +974,15 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
+       log_cb(RETRO_LOG_INFO, "retro_get_system_av_info: base_width: %d, base_height: %d, max_width: %d, max_height: %d, aspect_ratio: %f\n", geom.base_width, geom.base_height, geom.max_width, geom.max_height, geom.aspect_ratio);
+    }
+ 
++#if !defined(SF2000)
+ #ifdef FBACORES_CPS
+-   struct retro_system_timing timing = { 59.629403, 59.629403 * AUDIO_SEGMENT_LENGTH };
++   struct retro_system_timing timing = { VIDEO_REFRESH_RATE, VIDEO_REFRESH_RATE * AUDIO_SEGMENT_LENGTH };
+ #else
+    struct retro_system_timing timing = { (nBurnFPS / 100.0), (nBurnFPS / 100.0) * AUDIO_SEGMENT_LENGTH };
+ #endif
++#else
++   struct retro_system_timing timing = { VIDEO_REFRESH_RATE, AUDIO_SAMPLERATE };
++#endif
+ 
+    info->geometry = geom;
+    info->timing   = timing;
+diff --git a/svn-current/trunk/src/burner/libretro/retro_common.cpp b/svn-current/trunk/src/burner/libretro/retro_common.cpp
+index c3af4cf77cc498c212a9bab1779aa11cee9ce83f..e5cd0b1646d2262e43491acc7c54cb41ba6ee9a1 100644
+--- a/svn-current/trunk/src/burner/libretro/retro_common.cpp
++++ b/svn-current/trunk/src/burner/libretro/retro_common.cpp
+@@ -53,7 +53,11 @@ bool allow_neogeo_mode = true;
+ bool bVerticalMode = false;
+ bool bAllowDepth32 = false;
+ UINT32 nFrameskip = 1;
++#if !defined(SF2000)
+ INT32 g_audio_samplerate = 48000;
++#else
++INT32 g_audio_samplerate = 11025;
++#endif
+ UINT8 *diag_input;
+ neo_geo_modes g_opt_neo_geo_mode = NEO_GEO_MODE_MVS;
+ 
+@@ -467,13 +471,21 @@ void check_variables(void)
+ 			else if (strcmp(var.value, "11025") == 0)
+ 				g_audio_samplerate = 11025;
+ 			else
++#if !defined(SF2000)
+ 				g_audio_samplerate = 48000;
++#else
++				g_audio_samplerate = 11025;
++#endif
+ 		}
+ 	}
+ 	else
+ 	{
+ 		// src/burn/drv/neogeo/neo_run.cpp is mentioning issues with ngcd cdda playback if samplerate isn't 44100
++#if !defined(SF2000)
+ 		g_audio_samplerate = 44100;
++#else
++		g_audio_samplerate = 11025;
++#endif
+ 	}
+ 
+ 	var.key = var_fbneo_sample_interpolation.key;
+diff --git a/svn-current/trunk/src/burner/unzip.c b/svn-current/trunk/src/burner/unzip.c
+index 879235f3dfe5c7173c132adede8bc8c4e12cb21a..2df9b21b35826523ef1eaa98d154c0c13eb550c5 100644
+--- a/svn-current/trunk/src/burner/unzip.c
++++ b/svn-current/trunk/src/burner/unzip.c
+@@ -149,7 +149,7 @@ typedef struct
+     int encrypted;
+ #    ifndef NOUNCRYPT
+     unsigned long keys[3];     /* keys defining the pseudo-random sequence */
+-    const unsigned long* pcrc_32_tab;
++    const z_crc_t* pcrc_32_tab;
+ #    endif
+ } unz_s;
+ 
+-- 
+2.54.0
+

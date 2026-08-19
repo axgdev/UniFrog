@@ -1,4 +1,4 @@
-From 9164ebd21bf5b936eb4ebef2eb89224681d45680 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Wed, 6 May 2026 09:11:38 +0000
 Subject: [PATCH 4/4] Allow external PicoDrive media support
@@ -9,7 +9,7 @@ Add EXTERNAL_CHD_MEDIA and EXTERNAL_ZLIB build knobs so the SF2000 build can kee
  1 file changed, 6 insertions(+)
 
 diff --git a/Makefile b/Makefile
-index 82a74058..9c3e0ed4 100644
+index 82a740582528844ce030cbe0ea008b544a047423..9c3e0ed4f2ea54c32ce0d69dd4e38b0eb68a408e 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -350,6 +350,9 @@ ifneq "$(NO_CD_MEDIA)" "1"
@@ -40,3 +40,6 @@ index 82a74058..9c3e0ed4 100644
  # unzip
  OBJS += unzip/unzip.o
  
+-- 
+2.54.0
+

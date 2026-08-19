@@ -1,0 +1,124 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog CI <unifrog@example.invalid>
+Date: Mon, 22 Jun 2026 05:04:41 +0000
+Subject: [PATCH] Use portable paths and filesystem interfaces
+
+---
+ Src/1541fs.cpp             | 11 +++++------
+ libretro/gui/paths.cpp     |  2 +-
+ libretro/gui/zip.cpp       |  4 ----
+ libretro/gui/zip.h         |  4 ----
+ libretro/include/scandir.h |  4 ----
+ libretro/scandir.c         |  3 ++-
+ 6 files changed, 8 insertions(+), 20 deletions(-)
+
+diff --git a/Src/1541fs.cpp b/Src/1541fs.cpp
+index 75a8f325cd2f319ff7e06352344584d30d236a39..478708412da5f842332d3405400f23d1bc34821f 100644
+--- a/Src/1541fs.cpp
++++ b/Src/1541fs.cpp
+@@ -42,11 +42,7 @@
+ #endif
+ 
+ #include <sys/stat.h>
+-#if !defined(SF2000)
+ #include <dirent.h> /* TODO/FIXME - get rid of dirent */
+-#else
+-#include "../../../dirent.h"
+-#endif
+ #include <file/file_path.h>
+ 
+ #include "sysdeps.h"
+@@ -209,8 +205,11 @@ uint8 FSDrive::open_file(int channel, const uint8 *name, int name_len)
+ 	{
+ 	  char fullname[NAMEBUF_LENGTH];
+ 
+-	  sprintf(fullname,"%s/%s",dir_path, plain_name);
+-	  if ((file[channel] = fopen(fullname, mode)) != NULL)
++	  if (snprintf(fullname, sizeof(fullname), "%s/%s", dir_path, plain_name) >= (int)sizeof(fullname))
++	  {
++	    set_error(ERR_FILENOTFOUND);
++	  }
++	  else if ((file[channel] = fopen(fullname, mode_str)) != NULL)
+ 	  {
+ 	    if (mode == FMODE_READ || mode == FMODE_M)
+ 	    {
+diff --git a/libretro/gui/paths.cpp b/libretro/gui/paths.cpp
+index db5c69109d3f12f11c149fd7242b3c40865bab18..dffced105ecd7901e77df41c57c6890ffb5faeea 100644
+--- a/libretro/gui/paths.cpp
++++ b/libretro/gui/paths.cpp
+@@ -101,7 +101,7 @@ void Paths_Init(const char *argv0)
+ #elif defined(PSP)
+    strcpy(sWorkingDir, "ms0:/");
+ #elif defined(SF2000)
+-   strcpy(sWorkingDir, "/mnt/sda1/");
++   strcpy(sWorkingDir, ".");
+ #else
+    if (getcwd(sWorkingDir, FILENAME_MAX) == NULL)
+    {
+diff --git a/libretro/gui/zip.cpp b/libretro/gui/zip.cpp
+index 462eb2edb2d01bf8f07fea93066a6710d418df7b..10398a8504729940c1f1ec9b6e9846adeeeb7a37 100644
+--- a/libretro/gui/zip.cpp
++++ b/libretro/gui/zip.cpp
+@@ -13,11 +13,7 @@
+ 
+ #include <stdlib.h>
+ #include <unistd.h>
+-#if !defined(SF2000)
+ #include <dirent.h>
+-#else
+-#include "../../../../dirent.h"
+-#endif
+ #include <sys/types.h>
+ #include <string.h>
+ #include <zlib.h>
+diff --git a/libretro/gui/zip.h b/libretro/gui/zip.h
+index 13ee0431e3743720b6066cebd2b6301bbcd2c8bf..d902653bb67274e721d72ed4742e5557c7dd7f9c 100644
+--- a/libretro/gui/zip.h
++++ b/libretro/gui/zip.h
+@@ -13,11 +13,7 @@
+ #define HATARI_ZIP_H
+ 
+ 
+-#if !defined(SF2000)
+ #include <dirent.h>
+-#else
+-#include "../../../../dirent.h"
+-#endif
+ 
+ typedef struct
+ {
+diff --git a/libretro/include/scandir.h b/libretro/include/scandir.h
+index 5846be140003a9b6f609d3dcf06c617b5083c6b5..464a443ada800b97f8f5921ec9315a2752c743a6 100644
+--- a/libretro/include/scandir.h
++++ b/libretro/include/scandir.h
+@@ -7,11 +7,7 @@
+ #ifndef HATARI_SCANDIR_H
+ #define HATARI_SCANDIR_H
+ 
+-#if !defined(SF2000)
+ #include <dirent.h>
+-#else
+-#include "../../../../dirent.h"
+-#endif
+ 
+ #ifdef __cplusplus
+ extern "C" {
+diff --git a/libretro/scandir.c b/libretro/scandir.c
+index 925b89899757ec6a50c068e047661531d1085a8c..902316a49c8e37093d6c550af65bfccb1eb49a4b 100644
+--- a/libretro/scandir.c
++++ b/libretro/scandir.c
+@@ -85,7 +85,8 @@ int scandir(const char *dirp, struct dirent ***namelist,
+ 
+     /* Sort the list if we have a comparison function to sort with.  */
+     if (compar != NULL)
+-        qsort (names, pos, sizeof (struct dirent *), compar);
++        qsort (names, pos, sizeof (struct dirent *),
++               (int (*)(const void *, const void *))compar);
+     *namelist = names;
+     return pos;
+ }
+
+base-commit: e2de1193e420f00c3eb65a1182bb31aa58fdfebb
+-- 
+2.54.0
+

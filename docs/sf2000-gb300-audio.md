@@ -11,8 +11,11 @@ enable is different:
 
 - SF2000 uses GPIO R07 as the active-low speaker/amp gate.
 - GB300 uses GPIO L15 as the active-low speaker/amp gate.
-- Panel ID is only a hint. A GB300 with an SF2000 panel is detected by the
-  stock-bit keypad bus and must still use the GB300/L15 route.
+- Panel ID is only the panel marker. Fastboot detects the board first from the
+  GB300 keypad-bus idle scan and passive GPIO L27/R07 input states, then
+  UniFrog combines that board marker with the LCD panel ID. That distinguishes
+  SF2000, GB300, SF2000 with a GB300 screen, and GB300 with an SF2000 screen
+  before normal audio/input routing starts.
 - RF polling can disturb the GPIO-L group, so GB300 reasserts the enabled L15
   gate after controller polling.
 

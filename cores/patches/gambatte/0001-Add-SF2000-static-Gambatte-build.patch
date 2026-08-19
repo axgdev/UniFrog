@@ -1,4 +1,4 @@
-From 1308011ceea34c36914686ba51841a20e6ea674b Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Tue, 5 May 2026 18:57:42 +0000
 Subject: [PATCH] Add SF2000 static Gambatte build
@@ -9,7 +9,7 @@ Add a Makefile.libretro platform that builds a static MIPS32 soft-float archive 
  1 file changed, 17 insertions(+)
 
 diff --git a/Makefile.libretro b/Makefile.libretro
-index 1842538..0d5da02 100644
+index 184253889bf1bf7fb2afae4b7f60e2c21f32d967..0d5da02316fd38356f3a86c573d5c9cfc57c2685 100644
 --- a/Makefile.libretro
 +++ b/Makefile.libretro
 @@ -398,6 +398,18 @@ else ifeq ($(platform), retrofw)
@@ -43,3 +43,8 @@ index 1842538..0d5da02 100644
  ifeq (,$(findstring msvc,$(platform)))
  CXXFLAGS += -fno-exceptions -fno-rtti
  CXXFLAGS += -std=c++98
+
+base-commit: 2147d9257911b484b07666994ceecc4c5a2cb318
+-- 
+2.54.0
+

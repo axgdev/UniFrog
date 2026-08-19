@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog CI <unifrog@example.invalid>
+Date: Mon, 22 Jun 2026 05:10:39 +0000
+Subject: [PATCH] Use bundled libretro-common for SF2000 builds
+
+---
+ Makefile        | 2 +-
+ Makefile.common | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 4a623dd84ac8c0795b3534a6e84fdcf92494f547..6a62749743c2c26002f1b87ba945c041f0796307 100644
+--- a/Makefile
++++ b/Makefile
+@@ -254,7 +254,7 @@ else ifeq ($(platform), sf2000)
+     CFLAGS =-EL -march=mips32 -mtune=mips32 -msoft-float -ffast-math -fomit-frame-pointer
+     CFLAGS+=-G0 -mno-abicalls -fno-pic
+ #	-ffreestanding
+-    CFLAGS+=-DSF2000 -DSF2000_ARITHMETIC_OPTS
++    CFLAGS+=-DSF2000 -DSF2000_ARITHMETIC_OPTS -I./libretro/libretro-common/include
+ #	-DGFX_MULTI_FORMAT
+     #LOAD_FROM_MEMORY_TEST = 0
+     STATIC_LINKING = 1
+diff --git a/Makefile.common b/Makefile.common
+index a6dff3402c0712e11ab61986c8d15cf4a3fa3e42..fbadd3cd3829ee162cb9186ce60cb6c4f7949bd9 100644
+--- a/Makefile.common
++++ b/Makefile.common
+@@ -1,4 +1,4 @@
+-LIBRETRO_COMM_DIR = ../../libs/libretro-common
++LIBRETRO_COMM_DIR = $(LIBRETRO_DIR)/libretro-common
+ 
+ SOURCES_ASM :=
+ SOURCES := 	$(CORE_DIR)/apu.c \
+
+base-commit: 864c7d26b6bc42f7d648d1ba68dfc37520878629
+-- 
+2.54.0
+

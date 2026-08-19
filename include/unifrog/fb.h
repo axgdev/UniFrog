@@ -16,6 +16,8 @@ enum unifrog_fb_open_flags {
    UNIFROG_FB_OPEN_CACHED = 1u << 0,
    UNIFROG_FB_OPEN_PRESERVE = 1u << 1,
    UNIFROG_FB_OPEN_XRGB8888 = 1u << 2,
+   UNIFROG_FB_OPEN_BUFFERS_2 = 1u << 3,
+   UNIFROG_FB_OPEN_BUFFERS_3 = 1u << 4,
 };
 
 struct unifrog_fb {

@@ -1,4 +1,4 @@
-From c9b4ba519bb103a1395fe530ca20ad376b05e008 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Tue, 5 May 2026 18:57:44 +0000
 Subject: [PATCH 1/4] Avoid host CD-ROM I/O on SF2000
@@ -9,7 +9,7 @@ Use the cached-read path when platform CD-ROM command helpers are unavailable so
  1 file changed, 2 insertions(+)
 
 diff --git a/libretro-common/cdrom/cdrom.c b/libretro-common/cdrom/cdrom.c
-index 58cb5cf..52d782a 100644
+index 58cb5cf188dd78aeb4137c38d643adccb36cc90f..52d782aabe5d0e3e1b994e7d0f5b9325c0f954d7 100644
 --- a/libretro-common/cdrom/cdrom.c
 +++ b/libretro-common/cdrom/cdrom.c
 @@ -486,6 +486,8 @@ retry:
@@ -21,3 +21,8 @@ index 58cb5cf..52d782a 100644
  #endif
  #endif
        {
+
+base-commit: 9ba79648d6ec85e833aef719d7f359117498d89c
+-- 
+2.54.0
+

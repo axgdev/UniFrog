@@ -1,9 +1,9 @@
 # External Module Loading
 
-UniFrog keeps libretro cores and large optional native features outside the
+UniFrog keeps libretro cores and large optional runtime features outside the
 main firmware binary. The base firmware owns boot, storage, input, logging,
-recovery, and the stable `libunifrog` ABI. Core binaries live under
-`/unifrog/cores`; native modules live under `/unifrog/modules`.
+recovery, and the versioned `libunifrog` ABI. Core binaries live under
+`/unifrog/cores`; runtime modules live under `/unifrog/modules`.
 
 ## Fixed Memory Slot
 
@@ -40,9 +40,9 @@ active.
 MIPS cached virtual addresses start around `0x80000000`, but that does not mean
 the application arena overlaps the firmware just because its cached address is
 also in that range. Physical RAM `0x00000000` is visible through cached KSEG0 aliases at
-`0x80000000`. Firmware linked at `0x80001000` is physical `0x00001000`; an
-application arena reported as cached `0x83000000` is physical `0x03000000` on
-the current 128 MiB DTS.
+`0x80000000`. Firmware linked at `0x80001000` is physical `0x00001000`; the
+current 128 MiB DTS reports the application arena as cached `0x82000000`,
+physical `0x02000000`.
 
 ## Module Binary Shape
 
@@ -64,7 +64,7 @@ The module header is the first bytes in the file and contains:
 
 The module entry returns a `struct unifrog_core_module_exports` table. Libretro
 modules fill the libretro function pointers and run through the normal host;
-native modules fill their own optional exports, such as the HCRTOS media
+runtime modules fill their own optional exports, such as the HCRTOS media
 player entry point.
 
 The module linker must account for every allocatable `NOBITS` reservation in
@@ -128,7 +128,7 @@ Useful diagnostics for this class:
 
 `make core-package` builds self-contained modules for the known cores and
 places them in `output/sdcard/unifrog/cores/*.bin`. `make module-package`
-builds native modules such as `output/sdcard/unifrog/modules/hcrtos-media.bin`.
+builds runtime modules such as `output/sdcard/unifrog/modules/hcrtos-media.bin`.
 The default firmware link does not include libretro core archives:
 
 ```make
@@ -158,12 +158,12 @@ loop when iterating on core compiler flags or upstream source changes.
 `make core-out CORE=<id>` links the fixed-address ELF module but does not
 `objcopy` it into the SD package.
 
-To add a packaged core, register it once in the top-level `LIBRETRO_MODULES`
-list:
+To add a packaged core, register it once in `CORE_PACKAGE_SPECS` in
+`cores/manifest.mk`:
 
 ```make
-LIBRETRO_MODULES += \
-	my-core:MY_CORE:my-core:my_core:foo\|bar:my_core:-
+CORE_PACKAGE_SPECS += \
+	my-core:MY_CORE:my-core:my_core:my_core:foo\|bar:my_core:-
 ```
 
 The fields are:
@@ -176,13 +176,16 @@ The fields are:
 - optional libretro symbol prefix, or `-` if the core exports unprefixed symbols
 - optional support archive dependency, or `-`
 
-If the upstream static archive name does not match
-`cores/output/<archive-stem>_libretro_sf2000.a`, override
-`<PREFIX>_CORE_LIB` after the registration, as `QPSX_CORE_LIB` does. If the
-SD-package filename should differ from the module basename, override
-`<PREFIX>_CORE_BIN`, as `PCE_FAST_CORE_BIN` does. The
-core still needs a matching target in `cores/Makefile` and a source pin in
+Use separate module-file and archive-stem fields when the SD-package filename
+or upstream static archive stem differs from the core target. The core still
+needs a matching target in `cores/Makefile` and a source pin in
 `cores/manifest.mk`.
+
+Internal cores that do not come from `cores/manifest.mk` are registered in the
+root `Makefile` with `INTERNAL_CORE_PACKAGE_SPECS`. The JS2300 libretro core is
+the current example: it packages as `js2300.bin`, supports `.js`, `.mjs`,
+`.ch8`, and `.chip8`, and links against the local JS2300 runtime instead of a
+fetched upstream archive.
 
 ## Pixel Formats and GE
 
@@ -208,31 +211,28 @@ extra memory bandwidth.
 
 ## Versioning
 
-UniFrog ABI versions follow semantic versioning, but core modules should stamp
-the oldest ABI they actually require:
+UniFrog ABI versions describe the firmware/module contract, but the project is
+still pre-stability. Core modules should stamp the ABI they actually require:
 
-- major: breaking ABI change. Old cores need a compatibility layer or rebuild.
-- minor: additive ABI change for appended callbacks or an intentional
-  compatibility break while UniFrog remains pre-1.0.
+- major: breaking ABI change; rebuild modules.
+- minor: additive ABI change for appended callbacks.
 - patch: behavior fixes with the same ABI surface.
 
-The stable core floor is `UNIFROG_ABI_CORE_MIN_VERSION`. A normal libretro core
-module uses that floor and `UNIFROG_ABI_CORE_MIN_SIZE`, even when it is built
-with a newer UniFrog tree. That lets one released core run on several UniFrog
-firmware releases.
+The core floor is `UNIFROG_ABI_CORE_MIN_VERSION`. A normal libretro core module
+uses that floor and `UNIFROG_ABI_CORE_MIN_SIZE` unless it needs a newer
+callback.
 
 When adding host services to `struct unifrog_abi`, append them at the end of
 the table and make module-side code treat them as optional with
 `UNIFROG_ABI_HAS_MEMBER()`. Raise `UNIFROG_CORE_MODULE_REQUIRED_ABI_VERSION`
-only for modules that truly require the new callback. Never reorder or remove
-existing fields inside a major ABI.
+only for modules that truly require the new callback. Remove obsolete callbacks
+when keeping them would make the ABI harder to understand.
 
-The loader supports old cores by keeping compatible callback behavior and
-checking both required semantic version and required ABI table size. If no
-compatible table exists, the UI should show a clear unsupported-core message
-instead of attempting to jump into the binary.
+The loader checks both required semantic version and required ABI table size. If
+the running firmware cannot satisfy a module, the UI should show a clear
+unsupported-core message instead of attempting to jump into the binary.
 
-The native frontend includes Apps -> Core Manager for device-side inspection of
+The frontend includes Apps -> Core Manager for device-side inspection of
 installed `unifrog/cores/*.bin` files. It reads each module header directly on
 device and reports the core id, required ABI version, required ABI table size,
 built ABI, memory range, export size, supported extensions, and whether the

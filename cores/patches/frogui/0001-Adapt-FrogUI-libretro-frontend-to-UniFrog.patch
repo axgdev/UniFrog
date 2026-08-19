@@ -1,0 +1,1221 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog CI <ci@unifrog.local>
+Date: Mon, 22 Jun 2026 00:30:29 +0000
+Subject: [PATCH] Adapt FrogUI libretro frontend to UniFrog
+
+Use standard libretro input and the versioned UniFrog content-launch environment request. Read ROM roots, system mappings, theme, and font from the unified configuration; remove SF3000 shared memory, process spawning, temporary logs, and hard-coded multicore paths.
+---
+ font.c            | 187 +++++------
+ frogui_libretro.c | 803 +++++++++++++++++++++-------------------------
+ 2 files changed, 431 insertions(+), 559 deletions(-)
+
+diff --git a/font.c b/font.c
+index 674143216f399e5c53bb71c6f20ca23480b80c64..0988fbffc01116166238e0338717b6022d93a362 100644
+--- a/font.c
++++ b/font.c
+@@ -5,19 +5,68 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <unifrog/paths.h>
+ 
+ static stbtt_fontinfo font_info;
+ static unsigned char *font_buffer = NULL;
+ static float font_scale;
+ static int font_loaded = 0;
++static int font_baseline;
++
++typedef struct {
++    unsigned char *bitmap;
++    int width;
++    int height;
++    int xoff;
++    int yoff;
++    int advance;
++    int valid;
++} CachedGlyph;
++
++static CachedGlyph glyph_cache[128];
+ 
+ #ifndef UI_SCALE
+ #define UI_SCALE 100
+ #endif
+ #define FONT_SIZE (20.0f * UI_SCALE / 100.0f)
+ 
++static void clear_glyph_cache(void) {
++    for (unsigned i = 0; i < sizeof(glyph_cache) / sizeof(glyph_cache[0]); i++) {
++        if (glyph_cache[i].bitmap)
++            stbtt_FreeBitmap(glyph_cache[i].bitmap, NULL);
++    }
++    memset(glyph_cache, 0, sizeof(glyph_cache));
++}
++
++static CachedGlyph *get_glyph(unsigned char code) {
++    CachedGlyph *cached;
++    int glyph_index;
++    int advance_width;
++    int left_side_bearing;
++
++    if (code >= sizeof(glyph_cache)) return NULL;
++    if (code >= 'a' && code <= 'z') code = (unsigned char)(code - 'a' + 'A');
++    cached = &glyph_cache[code];
++    if (cached->valid) return cached;
++    cached->valid = 1;
++    glyph_index = stbtt_FindGlyphIndex(&font_info, code);
++    if (!glyph_index) {
++        cached->advance = FONT_CHAR_SPACING;
++        return cached;
++    }
++    stbtt_GetGlyphHMetrics(&font_info, glyph_index, &advance_width,
++                           &left_side_bearing);
++    cached->advance = (int)(advance_width * font_scale);
++    cached->bitmap = stbtt_GetGlyphBitmap(&font_info, 0, font_scale,
++                                           glyph_index, &cached->width,
++                                           &cached->height, &cached->xoff,
++                                           &cached->yoff);
++    return cached;
++}
++
+ // Internal function to load a font file
+ static int load_font_file(const char *font_filename) {
++    clear_glyph_cache();
+     // Free previous font if loaded
+     if (font_buffer) {
+         free(font_buffer);
+@@ -25,15 +74,13 @@ static int load_font_file(const char *font_filename) {
+         font_loaded = 0;
+     }
+ 
+-    // Build search paths for the font (SF3000 paths first)
+-    char font_paths[4][256];
+-    snprintf(font_paths[0], sizeof(font_paths[0]), "/mnt/sdcard/cubegm/fonts/%s", font_filename);
+-    snprintf(font_paths[1], sizeof(font_paths[1]), "/mnt/sdcard/frogui/fonts/%s", font_filename);
+-    snprintf(font_paths[2], sizeof(font_paths[2]), "/mnt/sda1/frogui/fonts/%s", font_filename);
+-    snprintf(font_paths[3], sizeof(font_paths[3]), "fonts/%s", font_filename);
++    // UniFrog packages defaults here and users may replace either font.
++    char font_paths[2][256];
++    snprintf(font_paths[0], sizeof(font_paths[0]), UNIFROG_DATA_ROOT "/frogui/fonts/%s", font_filename);
++    snprintf(font_paths[1], sizeof(font_paths[1]), UNIFROG_DIST_ROOT "/frogui/fonts/%s", font_filename);
+ 
+     FILE *fp = NULL;
+-    for (int i = 0; i < 4; i++) {
++    for (int i = 0; i < 2; i++) {
+         fp = fopen(font_paths[i], "rb");
+         if (fp) break;
+     }
+@@ -66,13 +113,17 @@ static int load_font_file(const char *font_filename) {
+ 
+     // Calculate scale for desired pixel height
+     font_scale = stbtt_ScaleForPixelHeight(&font_info, FONT_SIZE);
++    {
++        int ascent, descent, line_gap;
++        stbtt_GetFontVMetrics(&font_info, &ascent, &descent, &line_gap);
++        font_baseline = (int)(ascent * font_scale);
++    }
+     font_loaded = 1;
+     return 1;
+ }
+ 
+ void font_load_from_settings(const char *font_name) {
+     const char *font_filename = NULL;
+-    float custom_size = FONT_SIZE;
+ 
+     // Map font names to font files — always render at FONT_SIZE (scaled by UI_SCALE)
+     if (strcmp(font_name, "Monogram") == 0) {
+@@ -80,13 +131,7 @@ void font_load_from_settings(const char *font_name) {
+     } else {
+         font_filename = "GamePocket-Regular-ZeroKern.ttf";
+     }
+-    custom_size = FONT_SIZE;  // use compile-time size, not hardcoded per-font px
+-
+     load_font_file(font_filename);
+-
+-    if (font_loaded) {
+-        font_scale = stbtt_ScaleForPixelHeight(&font_info, custom_size);
+-    }
+ }
+ 
+ void font_init(void) {
+@@ -96,36 +141,18 @@ void font_init(void) {
+ 
+ void font_draw_char(uint16_t *framebuffer, int screen_width, int screen_height,
+                    int x, int y, char c, uint16_t color) {
++    CachedGlyph *glyph;
+     if (!font_loaded || !framebuffer) return;
+-
+-    // Convert to uppercase
+-    if (c >= 'a' && c <= 'z') {
+-        c = c - 'a' + 'A';
+-    }
+-
+-    // Get glyph index
+-    int glyph_index = stbtt_FindGlyphIndex(&font_info, c);
+-    if (glyph_index == 0) return; // Glyph not found
+-
+-    // Get glyph bitmap
+-    int width, height, xoff, yoff;
+-    unsigned char *bitmap = stbtt_GetGlyphBitmap(&font_info, 0, font_scale,
+-                                                  glyph_index, &width, &height, &xoff, &yoff);
+-
+-    if (!bitmap) return;
+-
+-    // Get vertical metrics for proper baseline alignment
+-    int ascent, descent, line_gap;
+-    stbtt_GetFontVMetrics(&font_info, &ascent, &descent, &line_gap);
+-    int baseline = (int)(ascent * font_scale);
++    glyph = get_glyph((unsigned char)c);
++    if (!glyph || !glyph->bitmap) return;
+ 
+     // Draw the glyph
+-    for (int row = 0; row < height; row++) {
+-        for (int col = 0; col < width; col++) {
+-            unsigned char alpha = bitmap[row * width + col];
++    for (int row = 0; row < glyph->height; row++) {
++        for (int col = 0; col < glyph->width; col++) {
++            unsigned char alpha = glyph->bitmap[row * glyph->width + col];
+             if (alpha > 0) {
+-                int px = x + xoff + col;
+-                int py = y + baseline + yoff + row;
++                int px = x + glyph->xoff + col;
++                int py = y + font_baseline + glyph->yoff + row;
+ 
+                 if (px >= 0 && px < screen_width && py >= 0 && py < screen_height) {
+                     // Simple alpha blending
+@@ -137,7 +164,6 @@ void font_draw_char(uint16_t *framebuffer, int screen_width, int screen_height,
+         }
+     }
+ 
+-    stbtt_FreeBitmap(bitmap, NULL);
+ }
+ 
+ void font_draw_text(uint16_t *framebuffer, int screen_width, int screen_height,
+@@ -145,50 +171,17 @@ void font_draw_text(uint16_t *framebuffer, int screen_width, int screen_height,
+     if (!font_loaded || !framebuffer || !text) return;
+ 
+     int start_x = x;
+-    int prev_codepoint = 0;
+-
+     while (*text) {
+         if (*text == '\n') {
+-            y += FONT_SIZE + 4;  // Line spacing
++            y += FONT_CHAR_HEIGHT + 4;
+             x = start_x;
+             text++;
+-            prev_codepoint = 0;
+             continue;
+         }
+-
+-        char c = *text;
+-
+-        // Convert to uppercase
+-        if (c >= 'a' && c <= 'z') {
+-            c = c - 'a' + 'A';
+-        }
+-
+-        // Get glyph index
+-        int glyph_index = stbtt_FindGlyphIndex(&font_info, c);
+-
+-        if (glyph_index != 0) {
+-            // Get advance width and left side bearing
+-            int advance_width, left_side_bearing;
+-            stbtt_GetGlyphHMetrics(&font_info, glyph_index, &advance_width, &left_side_bearing);
+-
+-            // Apply kerning if we have a previous character
+-            if (prev_codepoint != 0) {
+-                int kern = stbtt_GetGlyphKernAdvance(&font_info, prev_codepoint, glyph_index);
+-                x += (int)(kern * font_scale);
+-            }
+-
+-            // Draw the character
+-            font_draw_char(framebuffer, screen_width, screen_height, x, y, c, color);
+-
+-            // Advance cursor
+-            x += (int)(advance_width * font_scale);
+-            prev_codepoint = glyph_index;
+-        } else {
+-            // Space or unknown character
+-            x += FONT_CHAR_SPACING;
+-            prev_codepoint = 0;
+-        }
+-
++        CachedGlyph *glyph = get_glyph((unsigned char)*text);
++        font_draw_char(framebuffer, screen_width, screen_height, x, y,
++                       *text, color);
++        x += glyph ? glyph->advance : FONT_CHAR_SPACING;
+         text++;
+     }
+ }
+@@ -197,46 +190,14 @@ int font_measure_text(const char *text) {
+     if (!text || !font_loaded) return 0;
+ 
+     int width = 0;
+-    int prev_codepoint = 0;
+-
+     while (*text) {
+         // Skip newlines
+         if (*text == '\n') {
+             text++;
+-            prev_codepoint = 0;
+             continue;
+         }
+-
+-        char c = *text;
+-
+-        // Convert to uppercase
+-        if (c >= 'a' && c <= 'z') {
+-            c = c - 'a' + 'A';
+-        }
+-
+-        // Get glyph index
+-        int glyph_index = stbtt_FindGlyphIndex(&font_info, c);
+-
+-        if (glyph_index != 0) {
+-            // Get advance width
+-            int advance_width, left_side_bearing;
+-            stbtt_GetGlyphHMetrics(&font_info, glyph_index, &advance_width, &left_side_bearing);
+-
+-            // Apply kerning if we have a previous character
+-            if (prev_codepoint != 0) {
+-                int kern = stbtt_GetGlyphKernAdvance(&font_info, prev_codepoint, glyph_index);
+-                width += (int)(kern * font_scale);
+-            }
+-
+-            // Add character width
+-            width += (int)(advance_width * font_scale);
+-            prev_codepoint = glyph_index;
+-        } else {
+-            // Space or unknown character
+-            width += FONT_CHAR_SPACING;
+-            prev_codepoint = 0;
+-        }
+-
++        CachedGlyph *glyph = get_glyph((unsigned char)*text);
++        width += glyph ? glyph->advance : FONT_CHAR_SPACING;
+         text++;
+     }
+ 
+diff --git a/frogui_libretro.c b/frogui_libretro.c
+index 263d1f1a55b3b061e6a4651032a00fa857ef8e5b..a52bd63ddc991838bf7e6c557f9f4a3f8a91f384 100644
+--- a/frogui_libretro.c
++++ b/frogui_libretro.c
+@@ -1,233 +1,145 @@
+-/*
+- * frogui_libretro.c - FrogUI as a libretro core for SF3000
+- *
+- * Picoarch loads this core and handles ALL display/input/SDL init.
+- * FrogUI renders its menu into a RGB565 buffer and passes it to video_cb.
+- * When user picks a game, write /tmp/frogui_launch.txt and signal SHUTDOWN.
+- * icube reads that file and launches picoarch with the real game core.
+- */
+-
++/* FrogUI libretro frontend adapted for UniFrog. */
++#include <dirent.h>
++#include <stdbool.h>
++#include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+-#include <stdint.h>
++#include <strings.h>
+ #include <sys/stat.h>
+-#include <sys/types.h>
+-#include <sys/ipc.h>
+-#include <sys/shm.h>
+-#include <sys/wait.h>
+-#include <unistd.h>
+-#include <dirent.h>
+-#include <stdbool.h>
+ 
+ #include "libretro.h"
+ #include "font.h"
+ #include "render.h"
+ #include "theme.h"
+-#include "recent_games.h"
+-#include "favorites.h"
+-#include "settings.h"
+-
+-#define SDCARD_BASE  "/mnt/sdcard"
+-#define CORES_PATH   SDCARD_BASE "/cubegm/cores"
+-#define ROMS_PATH    SDCARD_BASE "/roms"
+-#define LAUNCH_FILE  "/tmp/frogui_launch.txt"
+-
+-/* Console → core mapping (folder name → libretro .so)
+- * Folder names match /mnt/sdcard/roms/ subdirectories (gb300_multicore convention). */
+-typedef struct { const char *console_name; const char *core_path; } ConsoleMapping;
++
++#include <unifrog/config.h>
++#include <unifrog/libretro_extension.h>
++#include <unifrog/paths.h>
++
++#define MAX_PATH_LEN UNIFROG_LIBRETRO_CONTENT_PATH_MAX
++#define INITIAL_ENTRIES_CAPACITY 64
++#define MAX_SYSTEM_OVERRIDES 32
++#define SETTINGS_ENTRY_NAME ">> Settings"
++
++typedef struct {
++    char name[256];
++    int is_dir;
++} DirEntry;
++
++typedef struct {
++    char folder[32];
++    char core[UNIFROG_LIBRETRO_CORE_ID_MAX];
++} SystemOverride;
++
++typedef struct {
++    const char *folder;
++    const char *core;
++} ConsoleMapping;
++
+ static const ConsoleMapping console_mappings[] = {
+-    /* NES */
+-    {"nes",    CORES_PATH "/fceumm_libretro.so"},
+-    {"nesq",   CORES_PATH "/quicknes_libretro.so"},
+-    {"nest",   CORES_PATH "/nestopia_libretro.so"},
+-    {"FC",     CORES_PATH "/fceumm_libretro.so"},
+-    {"NES",    CORES_PATH "/quicknes_libretro.so"},
+-    /* SNES */
+-    {"snes",   CORES_PATH "/snes9x2005_plus_libretro.so"},
+-    {"snes02", CORES_PATH "/snes9x2002_libretro.so"},
+-    {"SFC",    CORES_PATH "/snes9x2005_plus_libretro.so"},
+-    /* Game Boy */
+-    {"gb",     CORES_PATH "/gambatte_libretro.so"},
+-    {"gbgb",   CORES_PATH "/gearboy_libretro.so"},
+-    {"gbb",    CORES_PATH "/tgbdual_libretro.so"},
+-    {"dblcherrygb", CORES_PATH "/gambatte_libretro.so"},
+-    /* GBA */
+-    {"gba",    CORES_PATH "/gpsp_libretro.so"},
+-    {"gbav",   CORES_PATH "/vba_next_libretro.so"},
+-    {"mgba",   CORES_PATH "/mgba_libretro.so"},
+-    {"gbaf",   CORES_PATH "/mgba_libretro.so"},
+-    {"GBA",    CORES_PATH "/gpsp_libretro.so"},
+-    /* Sega */
+-    {"sega",   CORES_PATH "/picodrive_libretro.so"},
+-    {"gg",     CORES_PATH "/gearsystem_libretro.so"},
+-    {"gpgx",   CORES_PATH "/genesis_plus_gx_libretro.so"},
+-    {"MD",     CORES_PATH "/picodrive_libretro.so"},
+-    {"SMS",    CORES_PATH "/picodrive_libretro.so"},
+-    {"GG",     CORES_PATH "/gearsystem_libretro.so"},
+-    /* Atari */
+-    {"a26",    CORES_PATH "/stella2014_libretro.so"},
+-    {"a5200",  CORES_PATH "/a5200_libretro.so"},
+-    {"a78",    CORES_PATH "/prosystem_libretro.so"},
+-    {"a800",   CORES_PATH "/atari800_libretro.so"},
+-    /* Lynx */
+-    {"lnx",    CORES_PATH "/handy_libretro.so"},
+-    /* PC Engine */
+-    {"pce",    CORES_PATH "/mednafen_pce_fast_libretro.so"},
+-    {"pcesgx", CORES_PATH "/mednafen_supergrafx_libretro.so"},
+-    /* Neo Geo Pocket */
+-    {"ngpc",   CORES_PATH "/race_libretro.so"},
+-    /* WonderSwan */
+-    {"wswan",  CORES_PATH "/mednafen_wswan_libretro.so"},
+-    {"wsv",    CORES_PATH "/potator_libretro.so"},
+-    /* Virtual Boy */
+-    {"vb",     CORES_PATH "/mednafen_vb_libretro.so"},
+-    /* PC-FX */
+-    {"pcfx",   CORES_PATH "/mednafen_pcfx_libretro.so"},
+-    /* PC-8800 */
+-    {"pc8800", CORES_PATH "/quasi88_libretro.so"},
+-    /* MSX */
+-    {"msx",    CORES_PATH "/bluemsx_libretro.so"},
+-    /* C64 */
+-    {"c64",    CORES_PATH "/vice_x64_libretro.so"},
+-    {"c64sc",  CORES_PATH "/vice_x64sc_libretro.so"},
+-    {"c64f",   CORES_PATH "/frodo_libretro.so"},
+-    {"c64fc",  CORES_PATH "/frodo_libretro.so"},
+-    {"vic20",  CORES_PATH "/vice_xvic_libretro.so"},
+-    /* Amstrad */
+-    {"amstrad",  CORES_PATH "/crocods_libretro.so"},
+-    {"amstradb", CORES_PATH "/cap32_libretro.so"},
+-    /* ZX Spectrum */
+-    {"spec",   CORES_PATH "/fuse_libretro.so"},
+-    {"zx81",   CORES_PATH "/81_libretro.so"},
+-    /* Coleco */
+-    {"col",    CORES_PATH "/gearcoleco_libretro.so"},
+-    /* Ports / games */
+-    {"Quake",  CORES_PATH "/tyrquake_libretro.so"},
+-    {"outrun", CORES_PATH "/cannonball_libretro.so"},
+-    {"wolf3d", CORES_PATH "/ecwolf_libretro.so"},
+-    {"prboom", CORES_PATH "/prboom_libretro.so"},
+-    {"cavestory", CORES_PATH "/nxengine_libretro.so"},
+-    {"flashback", CORES_PATH "/reminiscence_libretro.so"},
+-    {"xrick",  CORES_PATH "/xrick_libretro.so"},
+-    {"gw",     CORES_PATH "/gw_libretro.so"},
+-    {"jnb",    CORES_PATH "/jumpnbump_libretro.so"},
+-    /* Misc */
+-    {"fake08", CORES_PATH "/fake08_libretro.so"},
+-    {"lowres-nx", CORES_PATH "/lowresnx_libretro.so"},
+-    {"gme",    CORES_PATH "/gme_libretro.so"},
+-    {"m2k",    CORES_PATH "/mame2000_libretro.so"},
+-    {"pokem",  CORES_PATH "/pokemini_libretro.so"},
+-    {"int",    CORES_PATH "/freeintv_libretro.so"},
+-    {"fcf",    CORES_PATH "/freechaf_libretro.so"},
+-    {"cdg",    CORES_PATH "/pocketcdg_libretro.so"},
+-    {"chip8",  CORES_PATH "/jaxe_libretro.so"},
+-    {"retro8", CORES_PATH "/retro8_libretro.so"},
+-    {"arduboy",CORES_PATH "/arduous_libretro.so"},
+-    {"vec",    CORES_PATH "/vecx_libretro.so"},
+-    {"thom",   CORES_PATH "/theodore_libretro.so"},
+-    {"o2em",   CORES_PATH "/o2em_libretro.so"},
+-    {"xmil",   CORES_PATH "/x68k_libretro.so"},
+-    {"geolith",CORES_PATH "/geolith_libretro.so"},
+-    {"gong",   CORES_PATH "/gong_libretro.so"},
+-    {"vapor",  CORES_PATH "/vaporspec_libretro.so"},
+-    {"amiga",  CORES_PATH "/uae_libretro.so"},
+-    {"atari-st", CORES_PATH "/castaway_libretro.so"},
++    {"nes", "fceumm"}, {"nesq", "quicknes"}, {"fc", "fceumm"},
++    {"snes", "snes9x2005"}, {"snes02", "snes9x2002"}, {"sfc", "snes9x2005"},
++    {"gb", "gambatte"}, {"gbgb", "gearboy"},
++    {"gba", "gpsp"}, {"gbap", "gpsp-gbac-prosty"},
++    {"sega", "picodrive"}, {"md", "picodrive"}, {"sms", "picodrive"},
++    {"gg", "picodrive"}, {"a26", "stella2014"}, {"a5200", "a5200"},
++    {"a78", "prosystem"}, {"a800", "atari800lib"}, {"lnx", "handy"},
++    {"pce", "pce-fast"}, {"ngpc", "race"}, {"wswan", "beetle-cygne"},
++    {"col", "gearcoleco"}, {"msx", "bluemsx-prosty"},
++    {"c64", "frodo-prosty"}, {"fake08", "fake08-prosty"},
++    {"m2k", "mame2000"}, {"fba", "fbalpha2012"},
+     {NULL, NULL}
+ };
+ 
+-static const char* get_core_for_folder(const char *folder) {
+-    for (int i = 0; console_mappings[i].console_name; i++)
+-        if (strcasecmp(console_mappings[i].console_name, folder) == 0)
+-            return console_mappings[i].core_path;
+-    return NULL;
++static const char *font_names[] = {"GamePocket", "Monogram"};
++#define FONT_COUNT ((int)(sizeof(font_names) / sizeof(font_names[0])))
++
++static retro_video_refresh_t video_cb;
++static retro_environment_t environ_cb;
++static retro_input_poll_t input_poll_cb;
++static retro_input_state_t input_state_cb;
++static DirEntry *entries;
++static int entry_count;
++static int entry_capacity;
++static char rom_root[MAX_PATH_LEN] = UNIFROG_ROMS_ROOT;
++static char current_path[MAX_PATH_LEN] = UNIFROG_ROMS_ROOT;
++static int selected_index;
++static int scroll_offset;
++static uint16_t *framebuffer;
++static bool settings_menu_active;
++static int settings_menu_idx;
++static int settings_theme_idx;
++static int settings_font_idx;
++static bool exit_requested;
++static char status_text[96];
++static SystemOverride system_overrides[MAX_SYSTEM_OVERRIDES];
++static unsigned system_override_count;
++
++static void text_copy(char *out, size_t out_size, const char *in)
++{
++    if (!out || out_size == 0) return;
++    if (!in) in = "";
++    snprintf(out, out_size, "%s", in);
+ }
+ 
+-/* Libretro callbacks */
+-static retro_video_refresh_t     video_cb     = NULL;
+-static retro_environment_t       environ_cb   = NULL;
+-static retro_input_poll_t        input_poll_cb = NULL;
+-static retro_input_state_t       input_state_cb = NULL;
+-
+-/* App state */
+-#define MAX_PATH_LEN 512
+-#define INITIAL_ENTRIES_CAPACITY 64
+-#ifndef min
+-#define min(a,b) ((a)<(b)?(a):(b))
+-#endif
+-
+-typedef struct { char name[256]; int is_dir; } DirEntry;
+-
+-static DirEntry *entries    = NULL;
+-static int entry_count      = 0;
+-static int entry_capacity   = 0;
+-static char current_path[MAX_PATH_LEN] = ROMS_PATH;
+-static int selected_index   = 0;
+-static int scroll_offset    = 0;
+-static uint16_t *framebuffer = NULL;
+-static bool shutdown_requested = false;
+-
+-static void dbg(const char *msg) {
+-    FILE *f = fopen("/tmp/frogui_crash.log", "a");
+-    if (f) { fputs(msg, f); fputs("\n", f); fclose(f); }
+-    fprintf(stderr, "FROGUI_DBG: %s\n", msg);
++static const char *path_basename(const char *path)
++{
++    const char *base = strrchr(path, '/');
++    return base ? base + 1 : path;
+ }
+ 
+-/* --- Cubevol direct input (picoarch input_state_cb returns nothing on SF3000) --- */
+-#define CV_UP     4
+-#define CV_DOWN   6
+-#define CV_LEFT   7
+-#define CV_RIGHT  5
+-#define CV_A     13
+-#define CV_B     14
+-#define CV_X     12
+-#define CV_Y     15
+-#define CV_L     10
+-#define CV_R     11
+-#define CV_SEL    0
+-#define CV_START  3
+-
+-static volatile uint32_t *cv_keys = NULL;
+-static int cv_shmid = -1;
+-
+-static void cv_init(void) {
+-    key_t key = ftok("/tmp/joy_key", 'a');
+-    if (key == (key_t)-1) { dbg("cv_init: ftok failed"); return; }
+-    cv_shmid = shmget(key, 4, 0666);
+-    if (cv_shmid < 0) { dbg("cv_init: shmget failed"); return; }
+-    cv_keys = (volatile uint32_t *)shmat(cv_shmid, NULL, 0);
+-    if (cv_keys == (void *)-1) { cv_keys = NULL; dbg("cv_init: shmat failed"); return; }
+-    dbg("cv_init: OK");
++static void set_rom_root(const char *value)
++{
++    if (!value || !value[0]) return;
++    if (strncmp(value, UNIFROG_SD_ROOT "/", strlen(UNIFROG_SD_ROOT) + 1) == 0)
++        text_copy(rom_root, sizeof(rom_root), value);
++    else if (value[0] == '/')
++        snprintf(rom_root, sizeof(rom_root), "%s%s", UNIFROG_SD_ROOT, value);
+ }
+ 
+-static uint32_t cv_read(void) {
+-    return cv_keys ? (*cv_keys & 0xFFFF) : 0;
++static void add_system_override(const char *value)
++{
++    const char *colon;
++    size_t folder_len;
++    SystemOverride *entry;
++
++    if (!value || system_override_count >= MAX_SYSTEM_OVERRIDES) return;
++    colon = strchr(value, ':');
++    if (!colon || colon == value || !colon[1]) return;
++    folder_len = (size_t)(colon - value);
++    if (folder_len >= sizeof(system_overrides[0].folder) ||
++        strlen(colon + 1) >= sizeof(system_overrides[0].core)) return;
++    entry = &system_overrides[system_override_count++];
++    memcpy(entry->folder, value, folder_len);
++    entry->folder[folder_len] = '\0';
++    text_copy(entry->core, sizeof(entry->core), colon + 1);
+ }
+ 
+-static bool cv_btn(uint32_t state, int bit) { return (state >> bit) & 1; }
+-
+-/* --- Settings ---
+- * Stored at /mnt/sdcard/frogui/settings.txt, key=value format.
+- * Two options: theme + font. */
+-#define SETTINGS_DIR  "/mnt/sdcard/frogui"
+-#define SETTINGS_FILE SETTINGS_DIR "/settings.txt"
+-
+-static const char *font_names[] = {"GamePocket", "Monogram"};
+-#define FONT_COUNT 2
+-
+-static bool settings_menu_active = false;
+-static int settings_menu_idx = 0;       /* which row: 0=theme, 1=font */
+-static int settings_theme_idx = 0;
+-static int settings_font_idx = 0;
+-#define SETTINGS_ROW_COUNT 2
+-
+-static void mkdir_p(const char *path) {
+-    char cmd[300];
+-    snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", path);
+-    system(cmd);
++static int config_entry(void *userdata, const char *section,
++                        const char *key, const char *value, unsigned line)
++{
++    (void)userdata;
++    (void)line;
++    if (!section[0]) {
++        if (strcmp(key, "rom_root") == 0) set_rom_root(value);
++        else if (strcmp(key, "rom_system") == 0) add_system_override(value);
++    } else if (strcmp(section, "frogui") == 0) {
++        extern const int theme_count;
++        extern const Theme themes[];
++        if (strcmp(key, "theme") == 0) {
++            for (int i = 0; i < theme_count; ++i)
++                if (strcmp(themes[i].name, value) == 0) settings_theme_idx = i;
++        } else if (strcmp(key, "font") == 0) {
++            for (int i = 0; i < FONT_COUNT; ++i)
++                if (strcmp(font_names[i], value) == 0) settings_font_idx = i;
++        }
++    }
++    return 0;
+ }
+ 
+-static void settings_apply(void) {
++static void settings_apply(void)
++{
+     extern const int theme_count;
+     if (settings_theme_idx < 0 || settings_theme_idx >= theme_count) settings_theme_idx = 0;
+     if (settings_font_idx < 0 || settings_font_idx >= FONT_COUNT) settings_font_idx = 0;
+@@ -235,324 +147,323 @@ static void settings_apply(void) {
+     font_load_from_settings(font_names[settings_font_idx]);
+ }
+ 
+-static void settings_load_file(void) {
+-    FILE *f = fopen(SETTINGS_FILE, "r");
+-    if (!f) return;
+-    char line[256];
+-    extern const int theme_count;
++static int settings_writer(FILE *file, void *userdata)
++{
+     extern const Theme themes[];
+-    while (fgets(line, sizeof(line), f)) {
+-        char *eq = strchr(line, '=');
+-        if (!eq) continue;
+-        *eq = '\0';
+-        char *val = eq + 1;
+-        char *nl = strchr(val, '\n'); if (nl) *nl = '\0';
+-        char *cr = strchr(val, '\r'); if (cr) *cr = '\0';
+-        if (strcmp(line, "theme") == 0) {
+-            for (int i = 0; i < theme_count; i++)
+-                if (strcmp(themes[i].name, val) == 0) { settings_theme_idx = i; break; }
+-        } else if (strcmp(line, "font") == 0) {
+-            for (int i = 0; i < FONT_COUNT; i++)
+-                if (strcmp(font_names[i], val) == 0) { settings_font_idx = i; break; }
+-        }
+-    }
+-    fclose(f);
++    (void)userdata;
++    return fprintf(file, "theme=%s\nfont=%s\n",
++                   themes[settings_theme_idx].name,
++                   font_names[settings_font_idx]) < 0 ? -1 : 0;
+ }
+ 
+-static void settings_save_file(void) {
+-    extern const Theme themes[];
+-    mkdir_p(SETTINGS_DIR);
+-    FILE *f = fopen(SETTINGS_FILE, "w");
+-    if (!f) { dbg("settings save: fopen failed"); return; }
+-    fprintf(f, "theme=%s\n", themes[settings_theme_idx].name);
+-    fprintf(f, "font=%s\n", font_names[settings_font_idx]);
+-    fclose(f);
++static void settings_save(void)
++{
++    if (unifrog_config_replace_section(UNIFROG_CONFIG_PATH, "frogui",
++                                       settings_writer, NULL) != 0)
++        text_copy(status_text, sizeof(status_text), "Could not save settings");
+ }
+ 
+-static const char* get_basename(const char *path) {
+-    const char *b = strrchr(path, '/');
+-    return b ? b+1 : path;
++static const char *core_for_game(const char *folder, const char *filename)
++{
++    const char *ext;
++    for (unsigned i = 0; i < system_override_count; ++i)
++        if (strcasecmp(system_overrides[i].folder, folder) == 0)
++            return system_overrides[i].core;
++    for (unsigned i = 0; console_mappings[i].folder; ++i)
++        if (strcasecmp(console_mappings[i].folder, folder) == 0)
++            return console_mappings[i].core;
++    ext = strrchr(filename, '.');
++    if (!ext) return NULL;
++    if (!strcasecmp(ext, ".nes") || !strcasecmp(ext, ".fds")) return "fceumm";
++    if (!strcasecmp(ext, ".sfc") || !strcasecmp(ext, ".smc")) return "snes9x2005";
++    if (!strcasecmp(ext, ".gb") || !strcasecmp(ext, ".gbc")) return "gambatte";
++    if (!strcasecmp(ext, ".gba")) return "gpsp";
++    if (!strcasecmp(ext, ".md") || !strcasecmp(ext, ".gen") ||
++        !strcasecmp(ext, ".smd") || !strcasecmp(ext, ".sms") ||
++        !strcasecmp(ext, ".gg") || !strcasecmp(ext, ".32x")) return "picodrive";
++    if (!strcasecmp(ext, ".pce") || !strcasecmp(ext, ".sgx")) return "pce-fast";
++    return NULL;
+ }
+ 
+-#define SETTINGS_ENTRY_NAME ">> Settings"
++static int entry_compare(const void *left_ptr, const void *right_ptr)
++{
++    const DirEntry *left = left_ptr;
++    const DirEntry *right = right_ptr;
++    if (left->is_dir != right->is_dir) return right->is_dir - left->is_dir;
++    return strcasecmp(left->name, right->name);
++}
++
++static int reserve_entry(void)
++{
++    DirEntry *next;
++    int capacity;
++    if (entry_count < entry_capacity) return 0;
++    capacity = entry_capacity ? entry_capacity * 2 : INITIAL_ENTRIES_CAPACITY;
++    next = realloc(entries, (size_t)capacity * sizeof(*entries));
++    if (!next) return -1;
++    entries = next;
++    entry_capacity = capacity;
++    return 0;
++}
+ 
+-static void scan_directory(const char *path) {
++static void scan_directory(const char *path)
++{
+     DIR *dir = opendir(path);
+-    if (!dir) return;
++    struct dirent *entry;
++    if (!dir) {
++        text_copy(status_text, sizeof(status_text), "Directory is not readable");
++        return;
++    }
+     entry_count = 0;
+-    struct dirent *e;
+-    while ((e = readdir(dir)) != NULL) {
+-        if (e->d_name[0] == '.') continue;
++    while ((entry = readdir(dir)) != NULL) {
+         struct stat st;
+         char full[MAX_PATH_LEN];
+-        snprintf(full, sizeof(full), "%s/%s", path, e->d_name);
+-        if (stat(full, &st) != 0) continue;
+-        if (!S_ISDIR(st.st_mode)) {
+-            const char *ext = strrchr(e->d_name, '.');
+-            if (ext && (strcasecmp(ext,".csv")==0 || strcasecmp(ext,".txt")==0 ||
+-                        strcasecmp(ext,".xml")==0 || strcasecmp(ext,".jpg")==0 ||
+-                        strcasecmp(ext,".png")==0)) continue;
+-        }
+-        if (entry_count >= entry_capacity) {
+-            entry_capacity = entry_capacity ? entry_capacity*2 : INITIAL_ENTRIES_CAPACITY;
+-            entries = realloc(entries, entry_capacity * sizeof(DirEntry));
+-            if (!entries) { closedir(dir); return; }
+-        }
+-        strncpy(entries[entry_count].name, e->d_name, 255);
+-        entries[entry_count].name[255] = '\0';
++        const char *ext;
++        if (entry->d_name[0] == '.') continue;
++        if (snprintf(full, sizeof(full), "%s/%s", path, entry->d_name) >= (int)sizeof(full) ||
++            stat(full, &st) != 0) continue;
++        ext = strrchr(entry->d_name, '.');
++        if (!S_ISDIR(st.st_mode) && ext &&
++            (!strcasecmp(ext, ".csv") || !strcasecmp(ext, ".txt") ||
++             !strcasecmp(ext, ".xml") || !strcasecmp(ext, ".jpg") ||
++             !strcasecmp(ext, ".png"))) continue;
++        if (reserve_entry() != 0) break;
++        text_copy(entries[entry_count].name, sizeof(entries[entry_count].name), entry->d_name);
+         entries[entry_count].is_dir = S_ISDIR(st.st_mode);
+-        entry_count++;
++        ++entry_count;
+     }
+     closedir(dir);
+-    /* Sort: dirs first, then alpha */
+-    for (int i = 0; i < entry_count-1; i++)
+-        for (int j = i+1; j < entry_count; j++)
+-            if (entries[i].is_dir < entries[j].is_dir ||
+-                (entries[i].is_dir == entries[j].is_dir &&
+-                 strcasecmp(entries[i].name, entries[j].name) > 0)) {
+-                DirEntry tmp = entries[i]; entries[i] = entries[j]; entries[j] = tmp;
+-            }
+-    /* Append Settings shortcut at root level */
+-    if (strcmp(path, ROMS_PATH) == 0) {
+-        if (entry_count >= entry_capacity) {
+-            entry_capacity = entry_capacity ? entry_capacity*2 : INITIAL_ENTRIES_CAPACITY;
+-            entries = realloc(entries, entry_capacity * sizeof(DirEntry));
+-        }
+-        strncpy(entries[entry_count].name, SETTINGS_ENTRY_NAME, 255);
+-        entries[entry_count].name[255] = '\0';
+-        entries[entry_count].is_dir = 0;  /* treat as file so it appears last */
+-        entry_count++;
++    qsort(entries, (size_t)entry_count, sizeof(*entries), entry_compare);
++    if (strcmp(path, rom_root) == 0 && reserve_entry() == 0) {
++        text_copy(entries[entry_count].name, sizeof(entries[entry_count].name), SETTINGS_ENTRY_NAME);
++        entries[entry_count].is_dir = 0;
++        ++entry_count;
+     }
+-
+     selected_index = 0;
+-    scroll_offset  = 0;
++    scroll_offset = 0;
++    status_text[0] = '\0';
+ }
+ 
+-static void request_game_launch(const char *core_path, const char *rom_path) {
+-    dbg("fork picoarch");
+-    pid_t pid = fork();
+-    if (pid == 0) {
+-        /* Child: replace with picoarch+game */
+-        execl("/mnt/sdcard/cubegm/picoarch", "picoarch", core_path, rom_path, (char*)NULL);
+-        _exit(127);
+-    } else if (pid > 0) {
+-        /* Parent: wait for game to finish, then return to frogui menu */
+-        int status;
+-        waitpid(pid, &status, 0);
+-        dbg("game finished, returning to frogui");
+-    } else {
+-        dbg("fork failed");
+-    }
++static bool button(unsigned id)
++{
++    return input_state_cb && input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, id) != 0;
+ }
+ 
+-static void handle_input(void) {
+-    static bool a_last=false, b_last=false, up_last=false, dn_last=false;
+-    static bool l_last=false, r_last=false;
++static void request_game_launch(const char *core, const char *path)
++{
++    struct unifrog_libretro_launch_content request;
++    memset(&request, 0, sizeof(request));
++    request.size = sizeof(request);
++    request.version = UNIFROG_LIBRETRO_LAUNCH_VERSION;
++    text_copy(request.core_id, sizeof(request.core_id), core);
++    text_copy(request.path, sizeof(request.path), path);
++    if (!environ_cb || !environ_cb(UNIFROG_ENVIRONMENT_LAUNCH_CONTENT, &request)) {
++        text_copy(status_text, sizeof(status_text), "UniFrog rejected the launch");
++        return;
++    }
++    exit_requested = true;
++}
+ 
+-    uint32_t keys = cv_read();
+-    bool a  = cv_btn(keys, CV_A);
+-    bool b  = cv_btn(keys, CV_B);
+-    bool up = cv_btn(keys, CV_UP);
+-    bool dn = cv_btn(keys, CV_DOWN);
+-    bool lt = cv_btn(keys, CV_LEFT);
+-    bool rt = cv_btn(keys, CV_RIGHT);
++static void handle_input(void)
++{
++    static bool a_last, b_last, up_last, down_last, left_last, right_last;
++    bool a, b, up, down, left, right;
++    if (input_poll_cb) input_poll_cb();
++    a = button(RETRO_DEVICE_ID_JOYPAD_A);
++    b = button(RETRO_DEVICE_ID_JOYPAD_B);
++    up = button(RETRO_DEVICE_ID_JOYPAD_UP);
++    down = button(RETRO_DEVICE_ID_JOYPAD_DOWN);
++    left = button(RETRO_DEVICE_ID_JOYPAD_LEFT);
++    right = button(RETRO_DEVICE_ID_JOYPAD_RIGHT);
+ 
+     if (settings_menu_active) {
+         extern const int theme_count;
+-        if (up && !up_last) settings_menu_idx = (settings_menu_idx - 1 + SETTINGS_ROW_COUNT) % SETTINGS_ROW_COUNT;
+-        if (dn && !dn_last) settings_menu_idx = (settings_menu_idx + 1) % SETTINGS_ROW_COUNT;
+-        if ((lt && !l_last) || (rt && !r_last)) {
+-            int delta = (rt && !r_last) ? 1 : -1;
+-            if (settings_menu_idx == 0) {
++        if (up && !up_last) settings_menu_idx = (settings_menu_idx + 1) % 2;
++        if (down && !down_last) settings_menu_idx = (settings_menu_idx + 1) % 2;
++        if ((left && !left_last) || (right && !right_last)) {
++            int delta = right && !right_last ? 1 : -1;
++            if (settings_menu_idx == 0)
+                 settings_theme_idx = (settings_theme_idx + delta + theme_count) % theme_count;
+-            } else {
++            else
+                 settings_font_idx = (settings_font_idx + delta + FONT_COUNT) % FONT_COUNT;
+-            }
+             settings_apply();
+         }
+         if ((a && !a_last) || (b && !b_last)) {
+-            settings_save_file();
++            settings_save();
+             settings_menu_active = false;
+         }
+-        a_last=a; b_last=b; up_last=up; dn_last=dn; l_last=lt; r_last=rt;
+-        return;
++        goto done;
+     }
+ 
+-    if (a && !a_last && selected_index < entry_count) {
+-        if (entries[selected_index].is_dir) {
+-            char new_path[MAX_PATH_LEN];
+-            snprintf(new_path, sizeof(new_path), "%s/%s", current_path, entries[selected_index].name);
+-            strncpy(current_path, new_path, MAX_PATH_LEN-1);
+-            current_path[MAX_PATH_LEN-1] = '\0';
+-            scan_directory(current_path);
+-        } else {
+-            if (strcmp(entries[selected_index].name, SETTINGS_ENTRY_NAME) == 0) {
+-                settings_menu_active = true;
+-                settings_menu_idx = 0;
+-            } else {
+-                const char *folder = get_basename(current_path);
+-                const char *core   = get_core_for_folder(folder);
+-                if (core) {
+-                    char rom_path[MAX_PATH_LEN];
+-                    snprintf(rom_path, sizeof(rom_path), "%s/%s", current_path, entries[selected_index].name);
+-                    request_game_launch(core, rom_path);
+-                }
++    if (a && !a_last && selected_index >= 0 && selected_index < entry_count) {
++        DirEntry *selected = &entries[selected_index];
++        if (selected->is_dir) {
++            char next[MAX_PATH_LEN];
++            if (snprintf(next, sizeof(next), "%s/%s", current_path, selected->name) < (int)sizeof(next)) {
++                text_copy(current_path, sizeof(current_path), next);
++                scan_directory(current_path);
+             }
++        } else if (strcmp(selected->name, SETTINGS_ENTRY_NAME) == 0) {
++            settings_menu_active = true;
++            settings_menu_idx = 0;
++        } else {
++            const char *core = core_for_game(path_basename(current_path), selected->name);
++            char game_path[MAX_PATH_LEN];
++            if (!core)
++                text_copy(status_text, sizeof(status_text), "No core configured for this game");
++            else if (snprintf(game_path, sizeof(game_path), "%s/%s", current_path,
++                              selected->name) < (int)sizeof(game_path))
++                request_game_launch(core, game_path);
+         }
+     }
+-
+-    if (b && !b_last && strcmp(current_path, ROMS_PATH) != 0) {
+-        char *slash = strrchr(current_path, '/');
+-        if (slash) { *slash = '\0'; scan_directory(current_path); }
++    if (b && !b_last) {
++        if (strcmp(current_path, rom_root) == 0) {
++            if (environ_cb) environ_cb(RETRO_ENVIRONMENT_SHUTDOWN, NULL);
++            exit_requested = true;
++        } else {
++            char *slash = strrchr(current_path, '/');
++            if (slash && slash > current_path) {
++                *slash = '\0';
++                scan_directory(current_path);
++            }
++        }
+     }
+-
+     if (up && !up_last && selected_index > 0) {
+-        selected_index--;
++        --selected_index;
+         if (selected_index < scroll_offset) scroll_offset = selected_index;
+     }
+-    if (dn && !dn_last && selected_index < entry_count-1) {
+-        selected_index++;
++    if (down && !down_last && selected_index + 1 < entry_count) {
++        ++selected_index;
+         if (selected_index >= scroll_offset + VISIBLE_ENTRIES)
+             scroll_offset = selected_index - VISIBLE_ENTRIES + 1;
+     }
+-
+-    a_last=a; b_last=b; up_last=up; dn_last=dn; l_last=lt; r_last=rt;
++done:
++    a_last = a; b_last = b; up_last = up; down_last = down;
++    left_last = left; right_last = right;
+ }
+ 
+-/* ---- libretro API ---- */
++static void render_settings_menu(void)
++{
++    extern const Theme themes[];
++    char line[128];
++    render_clear_screen(framebuffer);
++    render_header(framebuffer, "FROGUI SETTINGS");
++    snprintf(line, sizeof(line), "Theme: < %s >", themes[settings_theme_idx].name);
++    if (settings_menu_idx == 0)
++        render_text_pillbox(framebuffer, PADDING, START_Y, line,
++                            COLOR_SELECT_BG, COLOR_SELECT_TEXT, 7);
++    else
++        font_draw_text(framebuffer, SCREEN_WIDTH, SCREEN_HEIGHT, PADDING,
++                       START_Y, line, COLOR_TEXT);
++    snprintf(line, sizeof(line), "Font: < %s >", font_names[settings_font_idx]);
++    if (settings_menu_idx == 1)
++        render_text_pillbox(framebuffer, PADDING, START_Y + ITEM_HEIGHT, line,
++                            COLOR_SELECT_BG, COLOR_SELECT_TEXT, 7);
++    else
++        font_draw_text(framebuffer, SCREEN_WIDTH, SCREEN_HEIGHT, PADDING,
++                       START_Y + ITEM_HEIGHT, line, COLOR_TEXT);
++    render_legend(framebuffer, LEGEND_X_NONE);
++}
+ 
+ unsigned retro_api_version(void) { return RETRO_API_VERSION; }
+ 
+-void retro_get_system_info(struct retro_system_info *info) {
++void retro_get_system_info(struct retro_system_info *info)
++{
+     memset(info, 0, sizeof(*info));
+-    info->library_name     = "TreeFrogUI";
+-    info->library_version  = "1.0-sf3000";
+-    info->valid_extensions = "";
+-    info->need_fullpath    = false;
+-    info->block_extract    = false;
++    info->library_name = "FrogUI for UniFrog";
++    info->library_version = "1.0-unifrog";
++    info->valid_extensions = "frogui";
++    info->need_fullpath = true;
+ }
+ 
+-void retro_get_system_av_info(struct retro_system_av_info *info) {
++void retro_get_system_av_info(struct retro_system_av_info *info)
++{
+     memset(info, 0, sizeof(*info));
+-    info->geometry.base_width   = SCREEN_WIDTH;
+-    info->geometry.base_height  = SCREEN_HEIGHT;
+-    info->geometry.max_width    = SCREEN_WIDTH;
+-    info->geometry.max_height   = SCREEN_HEIGHT;
+-    info->geometry.aspect_ratio = (float)SCREEN_WIDTH / SCREEN_HEIGHT;
+-    info->timing.fps            = 60.0;
+-    info->timing.sample_rate    = 44100.0;
++    info->geometry.base_width = SCREEN_WIDTH;
++    info->geometry.base_height = SCREEN_HEIGHT;
++    info->geometry.max_width = SCREEN_WIDTH;
++    info->geometry.max_height = SCREEN_HEIGHT;
++    info->geometry.aspect_ratio = (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT;
++    info->timing.fps = 60.0;
++    info->timing.sample_rate = 32000.0;
+ }
+ 
+-void retro_set_environment(retro_environment_t cb) {
++void retro_set_environment(retro_environment_t cb)
++{
++    enum retro_pixel_format format = RETRO_PIXEL_FORMAT_RGB565;
+     environ_cb = cb;
+-    bool no_game = true;
+-    cb(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &no_game);
+-    enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_RGB565;
+-    cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt);
++    cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &format);
+ }
+ 
+-void retro_set_video_refresh(retro_video_refresh_t cb)          { video_cb      = cb; }
+-void retro_set_audio_sample(retro_audio_sample_t cb)            { (void)cb; }
+-void retro_set_audio_sample_batch(retro_audio_sample_batch_t cb){ (void)cb; }
+-void retro_set_input_poll(retro_input_poll_t cb)                { input_poll_cb = cb; }
+-void retro_set_input_state(retro_input_state_t cb)              { input_state_cb = cb; }
+-
++void retro_set_video_refresh(retro_video_refresh_t cb) { video_cb = cb; }
++void retro_set_audio_sample(retro_audio_sample_t cb) { (void)cb; }
++void retro_set_audio_sample_batch(retro_audio_sample_batch_t cb) { (void)cb; }
++void retro_set_input_poll(retro_input_poll_t cb) { input_poll_cb = cb; }
++void retro_set_input_state(retro_input_state_t cb) { input_state_cb = cb; }
+ 
+-void retro_init(void) {
+-    dbg("retro_init start");
+-    cv_init();
++void retro_init(void)
++{
++    unsigned errors = 0;
+     font_init();
+-    dbg("font_init done");
+     theme_init();
+-    dbg("theme_init done");
+-    settings_load_file();
++    (void)unifrog_config_read(UNIFROG_CONFIG_PATH, config_entry, NULL, &errors);
+     settings_apply();
+-    dbg("settings loaded");
+-    recent_games_init();
+-    dbg("recent_games_init done");
+-    favorites_init();
+-    dbg("favorites_init done");
+-
+-    framebuffer = calloc(SCREEN_WIDTH * SCREEN_HEIGHT, sizeof(uint16_t));
+-    dbg("calloc done");
+-    render_init(framebuffer);
+-    dbg("render_init done");
++    text_copy(current_path, sizeof(current_path), rom_root);
++    framebuffer = calloc((size_t)SCREEN_WIDTH * SCREEN_HEIGHT, sizeof(*framebuffer));
++    if (framebuffer) render_init(framebuffer);
+     scan_directory(current_path);
+-    dbg("scan_directory done");
+-    shutdown_requested = false;
+-    dbg("retro_init complete");
++    exit_requested = false;
+ }
+ 
+-void retro_deinit(void) {
++void retro_deinit(void)
++{
+     free(framebuffer); framebuffer = NULL;
+-    free(entries);     entries = NULL;
++    free(entries); entries = NULL;
+     entry_count = entry_capacity = 0;
+ }
+ 
+-bool retro_load_game(const struct retro_game_info *info) {
+-    (void)info;
+-    return true;  /* supports no-game */
+-}
+-
++bool retro_load_game(const struct retro_game_info *info) { (void)info; return framebuffer != NULL; }
+ void retro_unload_game(void) {}
+ 
+-static void render_settings_menu(void) {
+-    extern const Theme themes[];
+-    render_clear_screen(framebuffer);
+-    render_header(framebuffer, "SETTINGS");
+-
+-    char line[128];
+-    int y0 = START_Y;
+-    /* Theme row */
+-    snprintf(line, sizeof(line), "Theme: < %s >", themes[settings_theme_idx].name);
+-    if (settings_menu_idx == 0) {
+-        render_text_pillbox(framebuffer, PADDING, y0, line, COLOR_SELECT_BG, COLOR_SELECT_TEXT, 7);
+-    } else {
+-        font_draw_text(framebuffer, SCREEN_WIDTH, SCREEN_HEIGHT, PADDING, y0, line, COLOR_TEXT);
+-    }
+-    /* Font row */
+-    snprintf(line, sizeof(line), "Font: < %s >", font_names[settings_font_idx]);
+-    int y1 = y0 + ITEM_HEIGHT;
+-    if (settings_menu_idx == 1) {
+-        render_text_pillbox(framebuffer, PADDING, y1, line, COLOR_SELECT_BG, COLOR_SELECT_TEXT, 7);
+-    } else {
+-        font_draw_text(framebuffer, SCREEN_WIDTH, SCREEN_HEIGHT, PADDING, y1, line, COLOR_TEXT);
+-    }
+-    render_legend(framebuffer, LEGEND_X_NONE);
+-}
+-
+-void retro_run(void) {
++void retro_run(void)
++{
++    int visible;
++    if (exit_requested || !framebuffer) return;
+     handle_input();
+-
++    if (exit_requested) return;
+     if (settings_menu_active) {
+         render_settings_menu();
+     } else {
+         render_clear_screen(framebuffer);
+-        const char *title = (strcmp(current_path, ROMS_PATH) == 0)
+-                            ? "TREEFROGUI: SYSTEMS" : get_basename(current_path);
+-        render_header(framebuffer, title);
+-        int visible = min(entry_count - scroll_offset, VISIBLE_ENTRIES);
+-        for (int i = 0; i < visible; i++) {
+-            int idx = scroll_offset + i;
+-            render_menu_item(framebuffer, i, entries[idx].name, entries[idx].is_dir,
+-                             (idx == selected_index), scroll_offset, 0);
++        render_header(framebuffer, strcmp(current_path, rom_root) == 0 ?
++                      "FROGUI: SYSTEMS" : path_basename(current_path));
++        visible = entry_count - scroll_offset;
++        if (visible > VISIBLE_ENTRIES) visible = VISIBLE_ENTRIES;
++        for (int i = 0; i < visible; ++i) {
++            int index = scroll_offset + i;
++            render_menu_item(framebuffer, index, entries[index].name,
++                             entries[index].is_dir, index == selected_index,
++                             scroll_offset, 0);
+         }
++        if (status_text[0])
++            font_draw_text(framebuffer, SCREEN_WIDTH, SCREEN_HEIGHT, PADDING,
++                           SCREEN_HEIGHT - ITEM_HEIGHT * 2, status_text, COLOR_HEADER);
+         render_legend(framebuffer, LEGEND_X_NONE);
+     }
+-
+     if (video_cb)
+-        video_cb(framebuffer, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_WIDTH * sizeof(uint16_t));
++        video_cb(framebuffer, SCREEN_WIDTH, SCREEN_HEIGHT,
++                 SCREEN_WIDTH * sizeof(*framebuffer));
+ }
+ 
+-void retro_reset(void) { scan_directory(ROMS_PATH); strncpy(current_path, ROMS_PATH, MAX_PATH_LEN-1); }
+-
+-unsigned retro_get_region(void)                                    { return RETRO_REGION_NTSC; }
+-size_t   retro_serialize_size(void)                                { return 0; }
+-bool     retro_serialize(void *d, size_t s)                        { (void)d;(void)s; return false; }
+-bool     retro_unserialize(const void *d, size_t s)                { (void)d;(void)s; return false; }
+-void     retro_cheat_reset(void)                                   {}
+-void     retro_cheat_set(unsigned i, bool e, const char *c)        { (void)i;(void)e;(void)c; }
+-void    *retro_get_memory_data(unsigned id)                        { (void)id; return NULL; }
+-size_t   retro_get_memory_size(unsigned id)                        { (void)id; return 0; }
+-bool     retro_load_game_special(unsigned t,
+-             const struct retro_game_info *i, size_t n)            { (void)t;(void)i;(void)n; return false; }
++void retro_reset(void) { text_copy(current_path, sizeof(current_path), rom_root); scan_directory(current_path); }
++void retro_set_controller_port_device(unsigned port, unsigned device) { (void)port; (void)device; }
++unsigned retro_get_region(void) { return RETRO_REGION_NTSC; }
++size_t retro_serialize_size(void) { return 0; }
++bool retro_serialize(void *data, size_t size) { (void)data; (void)size; return false; }
++bool retro_unserialize(const void *data, size_t size) { (void)data; (void)size; return false; }
++void retro_cheat_reset(void) {}
++void retro_cheat_set(unsigned index, bool enabled, const char *code) { (void)index; (void)enabled; (void)code; }
++void *retro_get_memory_data(unsigned id) { (void)id; return NULL; }
++size_t retro_get_memory_size(unsigned id) { (void)id; return 0; }
++bool retro_load_game_special(unsigned type, const struct retro_game_info *info, size_t count)
++{ (void)type; (void)info; (void)count; return false; }
+
+base-commit: 2f41acebe50e4529b7c697b04eab2e92d2785bdd
+-- 
+2.54.0
+

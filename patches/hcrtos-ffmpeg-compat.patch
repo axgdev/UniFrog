@@ -1,107 +1,21 @@
-diff --git a/libavcodec/bmp.c b/libavcodec/bmp.c
-index 0c33e65..6cfc58b 100644
---- a/libavcodec/bmp.c
-+++ b/libavcodec/bmp.c
-@@ -25,8 +25,8 @@
- #include "internal.h"
- #include "msrledec.h"
-
--static int bmp_decode_frame(AVCodecContext *avctx,
--                            void *data, int *got_frame,
-+int avcodec_decode_bmp_frame(AVCodecContext *avctx,
-+                            void *data, int *got_frame,
-                             AVPacket *avpkt)
- {
-     const uint8_t *buf = avpkt->data;
-@@ -373,6 +373,6 @@ AVCodec ff_bmp_decoder = {
-     .long_name      = NULL_IF_CONFIG_SMALL("BMP (Windows and OS/2 bitmap)"),
-     .type           = AVMEDIA_TYPE_VIDEO,
-     .id             = AV_CODEC_ID_BMP,
--    .decode         = bmp_decode_frame,
-+    .decode         = avcodec_decode_bmp_frame,
-     .capabilities   = AV_CODEC_CAP_DR1,
- };
 diff --git a/configure b/configure
-index 7f3bf5a..e3a5b44 100755
+index 17596942749abe569c7d42f8abc1b48ce88cb148..c628aa8b92109f9cedaa8e5a70c62282f9ea79ff 100755
 --- a/configure
 +++ b/configure
-@@ -6304,8 +6304,7 @@ enabled vaapi &&
+@@ -5793,7 +5793,6 @@ elif enabled mips; then
+         disable mipsdsp
+         disable mipsdspr2
+         # Disable DSP stuff for generic CPU, it can't be detected at runtime.
+-        warn 'generic cpu selected'
+     fi
+ 
+ elif enabled ppc; then
+@@ -7182,7 +7181,6 @@ if ! disabled pthreads && ! enabled w32threads && ! enabled os2threads; then
      fi
  fi
-
+ 
 -enabled  zlib && { check_pkg_config zlib zlib "zlib.h" zlibVersion ||
 -                   check_lib zlib   zlib.h      zlibVersion    -lz; }
 +enabled  zlib && enable zlib
  enabled bzlib && check_lib bzlib bzlib.h BZ2_bzlibVersion    -lbz2
  enabled  lzma && check_lib lzma   lzma.h lzma_version_number -llzma
-
-@@ -5143,6 +5142,5 @@ elif enabled mips; then
-     else
-         disable mipsdsp
-         disable mipsdspr2
--        # Disable DSP stuff for generic CPU, it can't be detected at runtime.
--        warn 'generic cpu selected'
-+        # Disable DSP stuff for generic CPU, it can't be detected at runtime.
-     fi
-diff --git a/libavcodec/avcodec.h b/libavcodec/avcodec.h
-index 62f4c9f..86ea91e 100644
---- a/libavcodec/avcodec.h
-+++ b/libavcodec/avcodec.h
-@@ -4171,6 +4171,8 @@ AVCPBProperties *av_cpb_properties_alloc(size_t *size);
-  */
- int avcodec_is_open(AVCodecContext *s);
- 
-+int avcodec_decode_bmp_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPacket *avpkt);
-+
- /**
-  * Allocate a CPB properties structure and initialize its fields to default
-  * values.
-diff --git a/libswscale/swscale.h b/libswscale/swscale.h
-index 27252c0..b357842 100644
---- a/libswscale/swscale.h
-+++ b/libswscale/swscale.h
-@@ -185,6 +185,11 @@ struct SwsContext *sws_getContext(int srcW, int srcH, enum AVPixelFormat srcForm
-                                   int flags, SwsFilter *srcFilter,
-                                   SwsFilter *dstFilter, const double *param);
- 
-+struct SwsContext *sws_getContext_with_alphablend(int srcW, int srcH, enum AVPixelFormat srcFormat,
-+                                  int dstW, int dstH, enum AVPixelFormat dstFormat,
-+                                  int flags, SwsFilter *srcFilter,
-+                                  SwsFilter *dstFilter, const double *param, int alphablend);
-+
- /**
-  * Scale the image slice in srcSlice and put the resulting scaled
-  * slice in the image in dst. A slice is a sequence of consecutive
-diff --git a/libswscale/utils.c b/libswscale/utils.c
-index 389d28a..232bf90 100644
---- a/libswscale/utils.c
-+++ b/libswscale/utils.c
-@@ -1924,6 +1924,28 @@ SwsContext *sws_getContext(int srcW, int srcH, enum AVPixelFormat srcFormat,
-     return c;
- }
- 
-+SwsContext *sws_getContext_with_alphablend(int srcW, int srcH, enum AVPixelFormat srcFormat,
-+                           int dstW, int dstH, enum AVPixelFormat dstFormat,
-+                           int flags, SwsFilter *srcFilter,
-+                           SwsFilter *dstFilter, const double *param,
-+                           int alphablend)
-+{
-+    SwsContext *c;
-+
-+    c = sws_alloc_set_opts(srcW, srcH, srcFormat,
-+                           dstW, dstH, dstFormat,
-+                           flags, param);
-+    if (!c)
-+        return NULL;
-+
-+    c->alphablend = alphablend;
-+    if (sws_init_context(c, srcFilter, dstFilter) < 0) {
-+        sws_freeContext(c);
-+        return NULL;
-+    }
-+    return c;
-+}
-+
- static int isnan_vec(SwsVector *a)
- {
-     int i;

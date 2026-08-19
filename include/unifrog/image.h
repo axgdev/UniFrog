@@ -1,6 +1,7 @@
 #ifndef UNIFROG_IMAGE_H
 #define UNIFROG_IMAGE_H
 
+#include <unifrog/build_info.h>
 #include <unifrog/png.h>
 
 #ifdef __cplusplus

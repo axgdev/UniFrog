@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog Maintainers <unifrog@example.invalid>
+Date: Mon, 22 Jun 2026 05:29:21 +0000
+Subject: [PATCH] Add the UniFrog SF2000 RACE port
+
+Device-specific changes are maintained as a focused patch over the original upstream pin. Vendored libretro-common and unrelated platform assets remain owned by upstream.
+---
+ Makefile            | 17 ++++++++++++++++-
+ libretro/libretro.c |  4 ++++
+ neopopsound.c       |  6 +++++-
+ 3 files changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 792a6d82915c32edd3df6ceec541499f6ca25ac5..2e31288386167ea5cae29b66a8944eaf09f5f49b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -360,7 +360,22 @@ else ifeq ($(platform), retrofw)
+    PLATFORM_DEFINES := -DCC_RESAMPLER -DCC_RESAMPLER_NO_HIGHPASS
+    CFLAGS += -fomit-frame-pointer -ffast-math -march=mips32 -mtune=mips32 -mhard-float
+    CXXFLAGS += $(CFLAGS)
+-   
++
++# SF2000
++else ifeq ($(platform), sf2000)
++    TARGET := $(TARGET_NAME)_libretro_$(platform).a
++    MIPS=/opt/mips32-mti-elf/2019.09-03-2/bin/mips-mti-elf-
++    CC = $(MIPS)gcc
++    CXX = $(MIPS)g++
++    AR = $(MIPS)ar
++    PLATFORM_DEFINES := -DCC_RESAMPLER -DCC_RESAMPLER_NO_HIGHPASS
++    CFLAGS =-EL -march=mips32 -mtune=mips32 -msoft-float -ffast-math -fomit-frame-pointer
++    CFLAGS+=-G0 -mno-abicalls -fno-pic -ffreestanding
++    CFLAGS+=-fno-use-cxa-atexit
++    CFLAGS+=-DSF2000 -DFRONTEND_SUPPORTS_RGB565  -DLOWRES -DINLINE="inline" -DM16BPP
++    CXXFLAGS=$(CFLAGS)
++    STATIC_LINKING = 1
++	
+ # MIYOO
+ else ifeq ($(platform), miyoo)
+    TARGET := $(TARGET_NAME)_libretro.so
+diff --git a/libretro/libretro.c b/libretro/libretro.c
+index 0edbe1198f99bc10f55f31849ef315649a8d485b..7e0ff5f0db25f986902a1bbf4bba305631186a27 100755
+--- a/libretro/libretro.c
++++ b/libretro/libretro.c
+@@ -102,7 +102,11 @@ static void init_frameskip(void)
+ }
+ 
+ /* core options */
++#if !defined(SF2000)
+ static int RETRO_SAMPLE_RATE = 44100;
++#else
++static int RETRO_SAMPLE_RATE = 11025;
++#endif
+ 
+ struct ngp_screen* screen;
+ int setting_ngp_language; /* 0x6F87 - language */
+diff --git a/neopopsound.c b/neopopsound.c
+index b1e462cf603778f3e68b5eb0eaf3ce7cf94e8ec6..d99538ccfb8914858b55b50430fed0a01d9c859c 100644
+--- a/neopopsound.c
++++ b/neopopsound.c
+@@ -418,7 +418,11 @@ void sound_init(int SampleRate)
+ void system_sound_chipreset(void)
+ {
+    /* Initialises sound chips, matching frequencies */
+-   sound_init(44100);
++#if !defined(SF2000)
++	sound_init(44100);
++#else
++	sound_init(11025);
++#endif
+ }
+ 
+ int sound_system_init(void)
+-- 
+2.54.0
+

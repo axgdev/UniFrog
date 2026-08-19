@@ -1,4 +1,4 @@
-From 2a73845d5ad5ef425a945d51abceb80ac83424f1 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Tue, 5 May 2026 18:57:45 +0000
 Subject: [PATCH 3/5] Use qpsx C GPU fallbacks without MIPS32r2
@@ -9,7 +9,7 @@ Route GPU helper macros to the C fallback implementations unless QPSX_ENABLE_MIP
  1 file changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/src/gpu/gpu_unai/gpu_inner_mips32.h b/src/gpu/gpu_unai/gpu_inner_mips32.h
-index eca1ff7..73d62a4 100644
+index eca1ff76add89992b1677ccad15f84776b2e5ef8..73d62a4f683b2c92a72a94580af4d27491bca718 100644
 --- a/src/gpu/gpu_unai/gpu_inner_mips32.h
 +++ b/src/gpu/gpu_unai/gpu_inner_mips32.h
 @@ -22,7 +22,7 @@
@@ -38,3 +38,6 @@ index eca1ff7..73d62a4 100644
 +#endif /* QPSX_ENABLE_MIPS32R2 */
  
  #endif /* GPU_INNER_MIPS32_H */
+-- 
+2.54.0
+

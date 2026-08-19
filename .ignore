@@ -1,0 +1,20 @@
+# Keep broad local searches focused on UniFrog-owned source by default.
+# Use `rg --no-ignore` or an explicit path when auditing fetched dependencies.
+/.deps*/
+/build/
+/output/
+/sdcard-package/
+/toolchain/
+/cores/build/
+/cores/output/
+/js2300/build/
+/js2300/output/
+/unifrog-hcrtos-sdk/
+
+*.a
+*.asd
+*.bin
+*.dtb
+*.map
+*.o
+*.out

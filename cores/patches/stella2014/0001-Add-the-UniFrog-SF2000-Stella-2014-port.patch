@@ -1,0 +1,234 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog Maintainers <unifrog@example.invalid>
+Date: Mon, 22 Jun 2026 05:29:20 +0000
+Subject: [PATCH] Add the UniFrog SF2000 Stella 2014 port
+
+Device-specific changes are maintained as a focused patch over the original upstream pin. Vendored libretro-common and unrelated platform assets remain owned by upstream.
+---
+ Makefile                        | 15 +++++++++++++++
+ Makefile.common                 |  2 ++
+ libretro.cxx                    |  8 ++++++++
+ stella/src/common/Sound.cxx     | 16 ++++++++++++++++
+ stella/src/emucore/Settings.cxx |  4 ++++
+ stella/src/emucore/TIASnd.cxx   | 24 ++++++++++++++++++++++++
+ stella/src/emucore/TIASnd.hxx   |  4 ++++
+ 7 files changed, 73 insertions(+)
+
+diff --git a/Makefile b/Makefile
+index 18885d808ff15777f7ac3f8a04edf99f0c2110d2..d486d148229f54da6a032f9b6e816b84c4850a76 100644
+--- a/Makefile
++++ b/Makefile
+@@ -365,6 +365,21 @@ else ifeq ($(platform), retrofw)
+ 	FLAGS += -fomit-frame-pointer -ffast-math -march=mips32 -mtune=mips32 -mhard-float
+ 	fpic := -fPIC
+ 
++# SF2000
++else ifeq ($(platform), sf2000)
++	TARGET := $(TARGET_NAME)_libretro_$(platform).a
++	MIPS=/opt/mips32-mti-elf/2019.09-03-2/bin/mips-mti-elf-
++	CC = $(MIPS)gcc
++	CXX = $(MIPS)g++
++	AR = $(MIPS)ar
++    CFLAGS = -EL -march=mips32 -mtune=mips32 -msoft-float -G0 -mno-abicalls -fno-pic
++    CFLAGS += -ffast-math -fomit-frame-pointer -ffunction-sections -fdata-sections 
++	# -ffreestanding
++	CFLAGS+=-I../..
++	CFLAGS+=-DSF2000 -DHAVE_STRL
++	CXXFLAGS=$(CFLAGS) -fno-use-cxa-atexit
++	STATIC_LINKING = 1
++
+ # MIYOO
+ else ifeq ($(platform), miyoo)
+ 	TARGET := $(TARGET_NAME)_libretro.so
+diff --git a/Makefile.common b/Makefile.common
+index e2d74a44e39917125d8fca05b92501881d5d74a8..81779a601f2cc5fb951a488b86fe0c2766e9566c 100644
+--- a/Makefile.common
++++ b/Makefile.common
+@@ -83,6 +83,7 @@ SOURCES_CXX := $(CORE_DIR)/src/common/Base.cxx \
+ 	       $(CORE_DIR)/src/emucore/TrackBall.cxx \
+ 	       $(LIBRETRO_DIR)/libretro.cxx
+ 
++ifneq ($(STATIC_LINKING), 1)
+ SOURCES_C := \
+ 	     $(LIBRETRO_COMM_DIR)/compat/compat_posix_string.c \
+ 	     $(LIBRETRO_COMM_DIR)/compat/compat_strcasestr.c \
+@@ -97,3 +98,4 @@ SOURCES_C := \
+ 	     $(LIBRETRO_COMM_DIR)/streams/file_stream_transforms.c \
+ 	     $(LIBRETRO_COMM_DIR)/string/stdstring.c \
+ 	     $(LIBRETRO_COMM_DIR)/vfs/vfs_implementation.c
++endif
+diff --git a/libretro.cxx b/libretro.cxx
+index 15c6d1271f7327b28dd525232b31d54ed2231dd8..e01bd992814beaeeccc164fb710618665fc1269a 100644
+--- a/libretro.cxx
++++ b/libretro.cxx
+@@ -1015,7 +1015,11 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
+ {
+    memset(info, 0, sizeof(*info));
+    info->timing.fps            = console->getFramerate();
++#if !defined(SF2000)
+    info->timing.sample_rate    = 31400;
++#else
++   info->timing.sample_rate    = 22050;
++#endif
+    info->geometry.base_width   = 160 * 2;
+    info->geometry.base_height  = videoHeight;
+    info->geometry.max_width    = 320;
+@@ -1336,7 +1340,11 @@ void retro_run(void)
+ {
+    static int16_t sampleBuffer[2048];
+    //Get the number of samples in a frame
++#if !defined(SF2000)
+    static uint32_t tiaSamplesPerFrame = (uint32_t)(31400.0f/console->getFramerate());
++#else
++   static uint32_t tiaSamplesPerFrame = (uint32_t)(22050.0f/console->getFramerate());
++#endif
+ 
+    //CORE OPTIONS
+    bool updated = false;
+diff --git a/stella/src/common/Sound.cxx b/stella/src/common/Sound.cxx
+index e0d8770c5d22e4e5e422a33cb4a8c2819484a9d4..58899e9c29716a4156f6ad0d8bdc6061d114d138 100644
+--- a/stella/src/common/Sound.cxx
++++ b/stella/src/common/Sound.cxx
+@@ -64,7 +64,11 @@ void Sound::open()
+   }
+ 
+   // Now initialize the TIASound object which will actually generate sound
++  #if !defined(SF2000)
+   myTIASound.outputFrequency(31400);
++#else
++  myTIASound.outputFrequency(22050);
++#endif
+   myTIASound.channels(2, myNumChannels == 2);
+ 
+   // Adjust volume to that defined in settings
+@@ -172,7 +176,11 @@ void Sound::set(uInt16 addr, uInt8 value, Int32 cycle)
+ void Sound::processFragment(Int16* stream, uInt32 length)
+ {
+     const uInt32 channels = 2;
++#if !defined(SF2000)
+     double streamLengthInSecs = (double)length/(double)31400;
++#else
++    double streamLengthInSecs = (double)length/(double)22050;
++#endif
+     double excessStreamSecs = myRegWriteQueue.duration() - streamLengthInSecs;
+     if(excessStreamSecs > 0.0)
+     {
+@@ -212,7 +220,11 @@ void Sound::processFragment(Int16* stream, uInt32 length)
+       RegWrite& info = myRegWriteQueue.front();
+ 
+       // How long will the remaining samples in the fragment take to play
++#if !defined(SF2000)
+       double duration = remaining / (double)31400;
++#else
++      double duration = remaining / (double)22050;
++#endif
+ 
+       // Does the register update occur before the end of the fragment?
+       if(info.delta <= duration)
+@@ -223,7 +235,11 @@ void Sound::processFragment(Int16* stream, uInt32 length)
+         {
+           // Process the fragment upto the next TIA register write.  We
+           // round the count passed to process up if needed.
++#if !defined(SF2000)
+           double samples = (31400 * info.delta);
++#else
++          double samples = (22050 * info.delta);
++#endif
+           myTIASound.process(stream + ((uInt32)position * channels),
+               (uInt32)samples + (uInt32)(position + samples) - 
+               ((uInt32)position + (uInt32)samples));
+diff --git a/stella/src/emucore/Settings.cxx b/stella/src/emucore/Settings.cxx
+index 9507a0ed4d8deb0e9fc157c402f8146022ff54f8..01c161c4d5339c29ad329df3f0f8989f502f6c2d 100644
+--- a/stella/src/emucore/Settings.cxx
++++ b/stella/src/emucore/Settings.cxx
+@@ -42,7 +42,11 @@ Settings::Settings(OSystem* osystem)
+ 
+   // Sound options
+   setInternal("sound", "true");
++#if !defined(SF2000)
+   setInternal("freq", "31400");
++#else
++  setInternal("freq", "22050");
++#endif
+   setInternal("volume", "100");
+ 
+   // Input event options
+diff --git a/stella/src/emucore/TIASnd.cxx b/stella/src/emucore/TIASnd.cxx
+index e10c4ae49cf2ee1f96579d64e2a2e123b486a259..4f9a9659c2bc7d413626ef977d0cf450df431038 100644
+--- a/stella/src/emucore/TIASnd.cxx
++++ b/stella/src/emucore/TIASnd.cxx
+@@ -337,31 +337,55 @@ void TIASound::process(Int16* buffer, uInt32 samples)
+     switch(myChannelMode)
+     {
+       case Hardware2Mono:  // mono sampling with 2 hardware channels
++#if !defined(SF2000)
+         while((samples > 0) && (myOutputCounter >= 31400))
++#else
++        while((samples > 0) && (myOutputCounter >= 22050))
++#endif
+         {
+           Int16 byte = v0 + v1;
+           *(buffer++) = byte;
+           *(buffer++) = byte;
++#if !defined(SF2000)
+           myOutputCounter -= 31400;
++#else
++          myOutputCounter -= 22050;
++#endif
+           samples--;
+         }
+         break;
+ 
+       case Hardware2Stereo:  // stereo sampling with 2 hardware channels
++#if !defined(SF2000)
+         while((samples > 0) && (myOutputCounter >= 31400))
++#else
++        while((samples > 0) && (myOutputCounter >= 22050))
++#endif
+         {
+           *(buffer++) = v0;
+           *(buffer++) = v1;
++#if !defined(SF2000)
+           myOutputCounter -= 31400;
++#else
++          myOutputCounter -= 22050;
++#endif
+           samples--;
+         }
+         break;
+ 
+       case Hardware1:  // mono/stereo sampling with only 1 hardware channel
++#if !defined(SF2000)
+         while((samples > 0) && (myOutputCounter >= 31400))
++#else
++        while((samples > 0) && (myOutputCounter >= 22050))
++#endif
+         {
+           *(buffer++) = v0 + v1;
++#if !defined(SF2000)
+           myOutputCounter -= 31400;
++#else
++          myOutputCounter -= 22050;
++#endif
+           samples--;
+         }
+         break;
+diff --git a/stella/src/emucore/TIASnd.hxx b/stella/src/emucore/TIASnd.hxx
+index 9bbbd00879f78b90803aae83406e4612401e63bc..3ba7046c589e104f8e76aceff76be2b510757128 100644
+--- a/stella/src/emucore/TIASnd.hxx
++++ b/stella/src/emucore/TIASnd.hxx
+@@ -38,7 +38,11 @@ class TIASound
+     /**
+       Create a new TIA Sound object using the specified output frequency
+     */
++#if !defined(SF2000)
+     TIASound(Int32 outputFrequency = 31400);
++#else
++    TIASound(Int32 outputFrequency = 22050);
++#endif
+ 
+     /**
+       Destructor
+-- 
+2.54.0
+

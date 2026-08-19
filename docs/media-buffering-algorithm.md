@@ -1,7 +1,7 @@
 # Media Buffering Algorithm
 
 This document describes the native FFmpeg plus HCRTOS decoder buffering path in
-`src/unifrog_media.c`. The goal is smooth SD-card playback without bringing
+`components/media/src/platform/sf2000/unifrog_media.c`. The goal is smooth SD-card playback without bringing
 `hcplayer` back as a dependency.
 
 ## Problem Model
@@ -52,8 +52,8 @@ The 0119 logs added a low-resolution-specific finding:
 Native media uses a small LRU read-window cache in front of FFmpeg's AVIO
 callbacks.
 
-- `MEDIA_VIDEO_READAHEAD_SIZE` is the physical read size for one video window.
-- `MEDIA_VIDEO_READAHEAD_SLOTS` is the number of recent windows retained.
+- `media_video_readahead_size` is the physical read size for one video window.
+- `media_video_readahead_slots` is the number of recent windows retained.
 - The default video cache is `16 x 512 KiB = 8 MiB` total.
 - The default audio/file cache remains `1 x 2 MiB = 2 MiB` total.
 - A seek into an existing window is a cache hit and does not call `lseek()`.
@@ -68,12 +68,12 @@ callbacks.
 - For video streams at or below 640x360, native video asks `/dev/viddec` for an
   8 MiB compressed KSHM ring by default instead of the 16 MiB high-resolution
   ring. This leaves normal heap available for the full 8 MiB SD cache without
-  changing the fixed `mmz0` decoded-surface pool.
+  changing the dynamic `mmz0` decoded-surface lease.
 - Before packet feeding starts, native video pre-fills a bounded startup
   cushion. The default target is 5 seconds of file bitrate, clamped between
   512 KiB and 2 MiB. This moves the first SD stall into the loading screen
   rather than the first seconds of playback.
-- `MEDIA_VIDEO_PRELOAD_MAX_BYTES` can enable whole-file preload for small
+- `media_video_preload_max_bytes` can enable whole-file preload for small
   videos. It defaults to `0` because full preload trades stutter resistance for
   a longer startup wait. If whole-file allocation fails after the decoders have
   reserved memory, playback falls back to the normal window cache.
@@ -100,7 +100,7 @@ The default uses several medium windows:
 - Hardware decoder ahead is still bounded so a long SD stall cannot be followed
   by a many-second packet dump into `/dev/auddec` or `/dev/viddec`.
 - Audio uses one global hardware feed lead for audio-only and all video
-  resolutions (`MEDIA_AUDIO_FEED_LEAD_MS=3000`). The 0120 logs showed 240p and
+  resolutions (`media_audio_feed_lead_ms=3000`). The 0120 logs showed 240p and
   360p stutter with clean SD counters but low `ahead_a`, so the simpler robust
   policy is to keep a conservative audio cushion everywhere rather than
   carrying resolution-specific audio pacing. The separate hardware-ahead cap
@@ -113,65 +113,65 @@ previous `200/1000 ms` local values.
 
 ## Tuning Knobs
 
-Set these in `config.mk` or on the `make` command line:
+Set these in `/unifrog_data/unifrog.ini`; the same file documents the defaults:
 
-- `MEDIA_VIDEO_READAHEAD_SIZE`: bytes per physical video read window.
-- `MEDIA_VIDEO_READAHEAD_SLOTS`: number of retained video windows, capped in
+- `media_video_readahead_size`: bytes per physical video read window.
+- `media_video_readahead_slots`: number of retained video windows, capped in
   code at `16`.
-- `MEDIA_VIDEO_KSHM_SIZE`: default video decoder compressed KSHM ring size. The
+- `media_video_kshm_size`: default video decoder compressed KSHM ring size. The
   default is 8 MiB so high-resolution decode leaves more memory for decoded
   surfaces and SD readahead.
-- `MEDIA_VIDEO_LOWRES_KSHM_SIZE`: optional override for streams at or below
-  640x360. By default it matches `MEDIA_VIDEO_KSHM_SIZE`.
-- `MEDIA_AUDIO_FEED_LEAD_MS`: hardware-audio feed lead used by audio-only and
+- `media_video_lowres_kshm_size`: optional override for streams at or below
+  640x360. By default it matches `media_video_kshm_size`.
+- `media_audio_feed_lead_ms`: hardware-audio feed lead used by audio-only and
   native video playback. The default is 3000 ms.
-- `MEDIA_VIDEO_PREFILL_TARGET_MS`: target media time for startup prefill.
-- `MEDIA_VIDEO_PREFILL_MIN_BYTES` and `MEDIA_VIDEO_PREFILL_MAX_BYTES`: clamp the
+- `media_video_prefill_target_ms`: target media time for startup prefill.
+- `media_video_prefill_min_bytes` and `media_video_prefill_max_bytes`: clamp the
   startup prefill size so low-bitrate clips do not under-buffer and slow cards
   do not force an excessive wait.
-- `MEDIA_VIDEO_PRELOAD_MAX_BYTES`: if non-zero, files at or below this byte size
+- `media_video_preload_max_bytes`: if non-zero, files at or below this byte size
   are read fully into RAM before playback.
-- `MEDIA_FILE_READAHEAD_SIZE`: bytes per audio/file read window.
-- `MEDIA_FILE_READAHEAD_SLOTS`: number of retained audio/file windows.
-- `MEDIA_VIDEO_MAX_HW_AHEAD_MS`: maximum video packets queued ahead of the
+- `media_file_readahead_size`: bytes per audio/file read window.
+- `media_file_readahead_slots`: number of retained audio/file windows.
+- `media_video_max_hw_ahead_ms`: maximum video packets queued ahead of the
   hardware video clock.
-- `MEDIA_AUDIO_MAX_HW_AHEAD_MS`: maximum audio packets queued ahead of the
-  hardware audio clock. Keep this above `MEDIA_AUDIO_FEED_LEAD_MS`; if both
+- `media_audio_max_hw_ahead_ms`: maximum audio packets queued ahead of the
+  hardware audio clock. Keep this above `media_audio_feed_lead_ms`; if both
   values are equal, tiny decoder-clock jitter can become constant wait/log
   churn.
-- `MEDIA_SEEK_WARMUP_PACKETS`: default bounded packet window allowed through
+- `media_seek_warmup_packets`: default bounded packet window allowed through
   after a demux seek before hardware-ahead caps resume. This is separate from
   steady playback buffering; it only gives the flushed HCRTOS decoder clocks
   enough data to advance from zero again.
-- `MEDIA_SEEK_VIDEO_WARMUP_PACKETS` and
-  `MEDIA_SEEK_VIDEO_RECOVER_WARMUP_PACKETS`: smaller video-only warmup windows
+- `media_seek_video_warmup_packets` and
+  `media_seek_video_recover_warmup_packets`: smaller video-only warmup windows
   used after normal seeks and true post-seek video recovery. Audio keeps the
   larger default window because queued audio is the clock source; video should
   not flood `/dev/viddec` with seconds of packets while it is catching up.
-- `MEDIA_SEEK_SETTLE_MS`: short debounce window after each seek request. It
+- `media_seek_settle_ms`: short debounce window after each seek request. It
   lets rapid repeated LEFT/RIGHT taps collapse into the newest target before
   the demuxer starts feeding intermediate video packets that will never be
   shown.
-- `MEDIA_HW_AHEAD_MAX_WAIT_MS`: maximum time to wait for `/dev/auddec` or
+- `media_hw_ahead_max_wait_ms`: maximum time to wait for `/dev/auddec` or
   `/dev/viddec` clocks to reduce an over-ahead condition. If the hardware clock
   stalls after repeated seeks, UniFrog caps its internal feed timestamp and
   resumes instead of risking a watchdog reset.
-- `MEDIA_VIDEO_STUCK_BEHIND_MS`: post-seek recovery threshold. When viddec times
+- `media_video_stuck_behind_ms`: post-seek recovery threshold. When viddec times
   out and its clock remains this far behind auddec, UniFrog first checks whether
   the viddec clock or decode/display counters have advanced recently. Only a
   true stall jumps the demuxer to the current audio clock, flushes viddec, drops
   audio packets that would duplicate already queued audio, and resumes from the
   next usable video keyframe.
-- `MEDIA_VIDEO_STALL_RECOVER_MS` and `MEDIA_VIDEO_RECOVER_GAP_MS`: guards for
+- `media_video_stall_recover_ms` and `media_video_recover_gap_ms`: guards for
   that recovery. They prevent repeated blind viddec flushes while video is
   actively catching up, which can leave the audio clock running while displayed
   video stops advancing.
-- `MEDIA_SEEK_PREROLL_DECODE_MS`, `MEDIA_SEEK_PREROLL_HD_DECODE_MS`, and
-  `MEDIA_SEEK_PREROLL_KEYFRAME_MAX_BYTES`: cost budget for decoding a
+- `media_seek_preroll_decode_ms`, `media_seek_preroll_hd_decode_ms`, and
+  `media_seek_preroll_keyframe_max_bytes`: cost budget for decoding a
   pre-target keyframe and its short reference pre-roll. Low-resolution clips may
   use a longer pre-roll for cleaner resumes; HD clips and very large keyframes
   skip directly toward the target keyframe instead.
-- `MEDIA_SEEK_ACCELERATE_FRAMES`: set to `1` to show the older visible
+- `media_seek_accelerate_frames`: set to `1` to show the older visible
   fast-forward catch-up after seeks. The default `0` keeps the video plane
   hidden and drops pre-target video packets until demux reaches the requested
   timestamp. This is intentionally more aggressive than the old hidden-feed path:
@@ -179,18 +179,18 @@ Set these in `config.mk` or on the `make` command line:
   wedge `/dev/viddec` writes with `errno=1`, after which later `VIDDEC_INIT`
   calls fail until the decoder module is reset. Set this to `1` only when the
   visible fast-forward effect is preferred over fast post-seek recovery.
-- `MEDIA_RESET_VIDDEC_ON_FAIL`: defaults to `1`. If native video hits a hard
+- `media_reset_viddec_on_fail`: defaults to `1`. If native video hits a hard
   write failure or `VIDDEC_INIT` returns `EPERM`, UniFrog releases `/dev/viddec`
   with `closevp=1` and reinitializes the `viddec` module after closing the
   descriptor. Normal exits still use the lighter release path.
-- `MEDIA_VIDEO_BUFFERING_START_MS` and `MEDIA_VIDEO_BUFFERING_END_MS`: decoder
+- `media_video_buffering_start_ms` and `media_video_buffering_end_ms`: decoder
   buffering thresholds passed to `/dev/viddec`.
-- `MEDIA_AUDIO_BUFFERING_START_MS` and `MEDIA_AUDIO_BUFFERING_END_MS`: decoder
+- `media_audio_buffering_start_ms` and `media_audio_buffering_end_ms`: decoder
   buffering thresholds passed to `/dev/auddec`.
 - The media progress overlay is always enabled during native audio/video
   playback. Press `A` to hide or show it at runtime; normal progress refreshes
   avoid log spam and framebuffer panning to keep the real-time path quiet.
-- `MEDIA_FILE_SLOW_READ_LOG_MS`: threshold for logging slow physical reads.
+- `media_file_slow_read_log_ms`: threshold for logging slow physical reads.
 
 Practical tuning rules:
 
@@ -199,14 +199,14 @@ Practical tuning rules:
 - If `slow_read max_disk_ms` is too high, reduce window size and increase slots
   to keep the same total cache with shorter individual SD reads.
 - If startup stutter remains but mid-play is smooth, increase
-  `MEDIA_VIDEO_PREFILL_MAX_BYTES` first.
+  `media_video_prefill_max_bytes` first.
 - If low-resolution video has clean `slow=0` cache close stats but monitor
   lines show `ahead_a` approaching zero, inspect feed pacing before increasing
   SD cache sizes. When hardware auddec owns sync, native video raises video
   packet feed lead to the audio lead so MP4 demuxing can read far enough ahead
   to keep interleaved audio queued.
 - If a card is fast and users prefer stutter-free small videos over fast start,
-  set `MEDIA_VIDEO_PRELOAD_MAX_BYTES` to a safe cap such as `16777216`.
+  set `media_video_preload_max_bytes` to a safe cap such as `16777216`.
 - If `VIDDEC_INIT` returns `errno=12`, do not increase the startup cache before
   checking log order. The `native_video readahead enabled` line should appear
   after `native video_open done fd=...`; a cache allocated before decoder init
@@ -217,8 +217,8 @@ Practical tuning rules:
   hardware ahead caps; that indicates decoder rings are being overfilled.
 
 Developer -> Storage -> Storage quick bench writes a media buffer suggestion
-based on measured read speed. Treat it as a starting point for `config.mk`, not
-as an automatic runtime profile.
+based on measured read speed. Treat it as a starting point for
+`/unifrog_data/unifrog.ini`, not as an automatic runtime profile.
 
 ## Device Log Contract
 

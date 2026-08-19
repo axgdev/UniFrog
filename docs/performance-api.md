@@ -22,17 +22,14 @@ and by device testing.
   - Supports explicit framebuffer cache flush, vsync wait, and y-pan buffer
     switching when extra framebuffer memory is available.
 - `unifrog/ge.h`
-  - Wraps the HCGE accelerator as a stable UniFrog API.
+  - Wraps the HCGE accelerator as a UniFrog display API.
   - Supports queued fill, blit, and stretch-blit operations.
   - Leaves synchronization explicit with `unifrog_ge_sync()` so callers can
     batch operations.
   - Supports explicit source/destination cache flush flags for DMA-style use.
-  - Provides `unifrog_ge_set_fast_clock()` as an explicit raw-selector
-    diagnostic/runtime operation. Normal GE startup inherits the stable clock
-    configured by the bootloader/kernel; an idempotent request for that
-    selector is suppressed, while a real runtime change synchronizes the GE
-    before writing the clock register.
-
+  - Provides `unifrog_ge_set_fast_clock()`, currently mapped to the 198 MHz
+    selector because the latest device run showed it is faster than the
+    225/238 selectors for fill and stretch workloads.
 - `unifrog/presenter.h`
   - Combines framebuffer and GE setup into the preferred RGB565 presentation
     path for emulator frames.
@@ -58,19 +55,26 @@ Avoid CPU-side full-screen scaling for common handheld resolutions such as
 160x144, 240x160, 256x224, and 320x240. GE stretch-blit is the hardware path
 already shown to work on device.
 
+The presenter caches invariant aspect-fit geometry and pans using the tracked
+framebuffer mode, avoiding 64-bit scale division and an extra framebuffer mode
+ioctl on every emulated frame. Source cache flush and GE synchronization remain
+mandatory: cores may reuse their frame buffer immediately after the video
+callback returns.
+
 ## Build Optimization Policy
 
 UniFrog keeps optimization policy in the parent build instead of carrying
 extra source changes in upstream libretro cores. The default split is:
 
 - `OPT_SIZE=-Os` for most firmware and runtime code.
-- `OPT_FAST=-O2` for shared hot presentation and cache helper objects.
-- `OPT_AUDIO=-Os` for audio-sensitive host/audio objects.
+- `OPT_FAST=-O2` for shared hot presentation/cache helpers and the libretro
+  run-loop/runtime callbacks.
+- `OPT_AUDIO=-Os` for the low-level, device-specific audio driver objects.
 
-This keeps the measured-safe audio path on `-Os` while letting all cores benefit
-from faster shared video presentation code. Local experiments should use
-untracked `config.mk` overrides, for example `OPT_FAST=-O3`, before promoting a
-new default.
+This keeps the measured-safe SF2000/GB300 audio hardware paths on `-Os` while
+letting all cores benefit from faster shared frame, callback, mixing, and video
+presentation code. Local experiments should use untracked `config.mk`
+overrides, for example `OPT_FAST=-O3`, before promoting a new default.
 
 ## Runtime Performance Logs
 
@@ -118,13 +122,19 @@ Key fields:
   calibrated from the OS tick, per-frame count budget, and how many frames in
   the interval exceeded it. Treat these as CPU-cost fields; the real-time speed
   fields above are authoritative for "too fast" or "too slow" behavior.
+- `slow125`, `slow150`, `slow200`, and `active_max_frame`: how many frames
+  exceeded 125%, 150%, or 200% of the calibrated budget, and which frame was
+  worst in the report window. Sparse `perf_slow` lines are emitted for severe
+  spikes and include recent presenter GE/sync/pan timing plus audio delay, so a
+  benchmark can separate core CPU from display or audio backpressure.
 - `present_avg`, `ge`, `sync`, `vsync`, `pan`: presenter timing split.
   Libretro presentation avoids mandatory vsync waits by default; a nonzero
   `vsync` field means a caller explicitly requested synchronized pan.
 - `audio_delay`, `audio_fail`, `audio_write_avg`, `audio_write_max`, `gain`,
-  `peak`, `clip`, `gate`, `quiet`: audio backlog, write-wait pressure,
+  `peak`, `clip`, `gate`, `quiet_frames`: audio backlog, write-wait pressure,
   fixed software gain, output level, clipping, and silence-gate state for
-  crackle or analog-noise diagnosis.
+  crackle or analog-noise diagnosis. `quiet_frames` is duration-independent of
+  the core's callback batch size.
 - `status`, `status_active`, `status_under`, `occ_avg`, `occ_min`, `occ_max`:
   libretro audio-buffer-status callback activity. These fields show whether a
   core with upstream frameskip support is receiving enough information to skip
@@ -136,7 +146,7 @@ stable nonzero `audio_delay` point in the right direction.
 
 ## Runtime Launch Options
 
-The native frontend opens launch and pause options around libretro games.
+The frontend opens launch and pause options around libretro games.
 These options are handled by UniFrog's generic libretro host and are
 intentionally outside individual core source changes:
 
@@ -153,6 +163,13 @@ intentionally outside individual core source changes:
   drop/duplicate resampling path for normal cores. Output is duplicated to both
   I2SO channels after software mono mixing because the SF2000 speaker route is
   effectively mono.
+- Silence gating measures quiet duration in PCM frames instead of callback
+  count and preserves low-level samples instead of zeroing them. Opening the
+  physical route waits briefly before the first real PCM write, which keeps
+  AUDSINK transfers at the normal chunk size and preserves GB300's rule that
+  the route stays muted until real PCM exists. The SND layer also holds mute
+  across brief gaps and uses separate SF2000/GB300 one-shot settle windows,
+  without delaying steady-state writes.
 - Frameskip can be left off, set to auto, or set to fixed intervals. UniFrog
   implements the standard libretro audio-buffer-status callback so upstream
   cores that already support frameskip can react without SF2000-specific core
@@ -167,13 +184,59 @@ intentionally outside individual core source changes:
   only dropping already-rendered frames.
 - SCPU can be kept at the boot profile or switched to guarded known profiles
   at 198, 297, 396, 594, 702, 756, 810, 864, or 918 MHz. Runtime changes are
-  captured before launch and restored after the core exits.
-- GE clock can be selected between raw driver selectors 0 through 3. Their
-  vendor MHz labels are not trusted on this silicon; selector 3 is the stable
-  bootloader/kernel setting. This tunes presentation only; it will not reduce
-  core CPU time unless presentation is the bottleneck.
+  captured before launch and restored after the core exits. The native
+  launcher default is 918 MHz for libretro games; a saved user setting still
+  wins until the user changes Runtime Settings -> CPU.
+- GE clock can be selected between the driver-supported 198, 148, 225, and
+  238 MHz selectors. This tunes presentation only; it will not reduce core CPU
+  time unless presentation is the bottleneck.
 - Backlight can be set for the game session and restored on return to the
   frontend. This is a power/comfort knob, not a speed knob.
+
+## Benchmark Script
+
+`js2300/scripts/libretro-benchmark.js` runs one core/game for a fixed frame count and
+writes `/media/mmcblk0/unifrog_data/logs/reports/libretro-benchmark.txt`. By
+default it benchmarks the first GBA ROM it finds with `gpsp`, audio enabled,
+918 MHz SCPU, and auto frameskip. To target a specific game, create
+`/media/mmcblk0/unifrog_data/config/libretro-benchmark.ini`:
+
+```ini
+core=gpsp
+path=/media/mmcblk0/ROMS/GBA/example.gba
+frames=3600
+audio=1
+scpu=918
+frameskip=1
+```
+
+Use `frameskips=0,1,2,3` instead of `frameskip=...` to run the same ROM
+through all frontend modes in one script invocation. The values are the
+frontend enum: off, auto, fixed 1, fixed 2. That is the quickest way to compare
+behavior for a scene that visibly slows down.
+
+Use `cores=gpsp,gpsp-gbac-prosty` instead of `core=...` to benchmark multiple
+compatible core implementations against the same ROM and settings. It can be
+combined with `frameskips`; the script runs every core/mode pair and identifies
+the core on each `RUN` and `PASS` log line. When core execution time already
+dominates the frame budget, selecting a faster core is the remaining way to
+improve gameplay without changing core code.
+
+The benchmark script uses a smaller normal JS heap, not an application-memory
+heap, because the JS runtime remains alive while each `run+...` action loads a
+core and ROM. This leaves the single top-reserved application-memory slot free
+for large zipped ROMs, which is required for 32 MiB GBA images.
+
+Use the retained log from the same run for `perf_cpu`, `perf_audio`, and
+`perf_slow` lines; the report file records the exact action and elapsed time.
+
+When interpreting slow-core results, compare `run_avg`/`active_avg` against
+`budget` first. If active core time is already far over budget while
+`present_avg` is small, the bottleneck is emulation CPU time rather than GE or
+framebuffer presentation. After a large stall, the frontend pacer preserves a
+bounded three-frame catch-up window so cheap skipped frames can recover time
+instead of being throttled by an artificial post-stall sleep. The bound avoids
+long unpaced bursts after loading or menus.
 
 ## Confirmed Hardware Paths
 
@@ -184,13 +247,12 @@ intentionally outside individual core source changes:
 - Framebuffer: `/dev/fb0` RGB565, mmap, pan, and vsync are available.
 - GE: `/dev/ge` supports accelerated fill, blit, and stretch-blit. GE clock
   control is available through the driver and affects the accelerator, not SCPU.
-  The retained handoff and Linux/vendor reset both establish selector 3 as
-  the stable source. The runtime API therefore treats clock values as raw
-  selectors and does not infer a frequency from the vendor labels.
+  In `loghcrtos38.txt`, selector 198/148 was faster than selector 225/238 for
+  the measured workloads, so `UNIFROG_GE_CLOCK_FAST` intentionally selects 198.
 - Display controller: `/dev/dis` supports layer ordering and zoom used by the
   hardware video plane.
-- Video: HCRTOS `/dev/viddec` can decode media through hardware when the board
-  DTS reserves a nonzero MMZ media heap and `viddec.kshm_size`.
+- Video: HCRTOS `/dev/viddec` can decode media through hardware when UniFrog
+  creates MMZ id 0 before decoder init and provides `viddec.kshm_size`.
 - Audio: `/dev/sndC0i2so` supports DMA-style PCM output.
 - Storage: SD/MMC is functional; current board DTS defaults to a resilient
   4-bit 16 MHz boot profile, with 1-bit safe mode and faster profiles available
@@ -200,8 +262,8 @@ intentionally outside individual core source changes:
   `loghcrtos38.txt`, so battery sampling still uses the direct fallback path.
 - Wireless: UniFrog owns the stock-compatible RF gamepad polling path.
 - MMZ/DSC: `/dev/mmz` and `/dev/dsc` opened in `loghcrtos38.txt`; UniFrog
-  exposes them as runtime capability bits. The media-capable SF2000 layout
-  reserves `mmz0` for decoded video/display surfaces, while compressed KSHM
+  exposes them as runtime capability bits. Native video leases `mmz0` from the
+  reclaimable arena for decoded video/display surfaces, while compressed KSHM
   packet rings still allocate dynamically because no named `kshm` MMZ pool is
   defined.
 

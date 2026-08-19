@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog Maintainers <unifrog@example.invalid>
+Date: Mon, 22 Jun 2026 05:29:21 +0000
+Subject: [PATCH] Add the UniFrog SF2000 Handy port
+
+Device-specific changes are maintained as a focused patch over the original upstream pin. Vendored libretro-common and unrelated platform assets remain owned by upstream.
+---
+ Makefile           | 13 +++++++++++++
+ blip/Blip_Buffer.h |  4 ++++
+ lynx/system.h      |  4 ++++
+ 3 files changed, 21 insertions(+)
+
+diff --git a/Makefile b/Makefile
+index 172222009589220d257e6056917808bb99a618fc..85994c164bede6b58be267435673e71a0a70bc25 100644
+--- a/Makefile
++++ b/Makefile
+@@ -256,6 +256,19 @@ else ifeq ($(platform), gcw0)
+     SHARED := -shared -Wl,--no-undefined -Wl,-version-script=$(LIBRETRO_DIR)/link.T
+     FLAGS += -DDINGUX -fomit-frame-pointer -ffast-math -march=mips32 -mtune=mips32 -mhard-float
+ 
++# SF2000
++else ifeq ($(platform), sf2000)
++   TARGET := $(TARGET_NAME)_libretro_$(platform).a
++   MIPS:=/opt/mips32-mti-elf/2019.09-03-2/bin/mips-mti-elf-
++   CC = $(MIPS)gcc
++   CXX = $(MIPS)g++
++   AR = $(MIPS)ar
++   CFLAGS = -EL -march=mips32 -mtune=mips32 -msoft-float -G0 -mno-abicalls -fno-pic
++   CFLAGS += -ffast-math -fomit-frame-pointer -ffunction-sections -fdata-sections 
++   CFLAGS += -DSF2000
++   CXXFLAGS = $(CFLAGS)
++   STATIC_LINKING = 1
++
+  # MIYOO
+  else ifeq ($(platform), miyoo)
+     TARGET := $(TARGET_NAME)_libretro.so
+diff --git a/blip/Blip_Buffer.h b/blip/Blip_Buffer.h
+index 2b69645259f23f78605a78cf5417e9ab45a3f04b..613b2f23a15c8215f8b04a0a011cd2aa988e167b 100644
+--- a/blip/Blip_Buffer.h
++++ b/blip/Blip_Buffer.h
+@@ -360,7 +360,11 @@ blip_inline void Blip_Synth<quality,range>::update( blip_time_t t, int amp )
+ }
+ 
+ blip_inline blip_eq_t::blip_eq_t( double t ) :
++#if !defined(SF2000)
+ 		treble( t ), rolloff_freq( 0 ), sample_rate( 44100 ), cutoff_freq( 0 ) { }
++#else
++		treble( t ), rolloff_freq( 0 ), sample_rate( 11025 ), cutoff_freq( 0 ) { }
++#endif
+ blip_inline blip_eq_t::blip_eq_t( double t, long rf, long sr, long cf ) :
+ 		treble( t ), rolloff_freq( rf ), sample_rate( sr ), cutoff_freq( cf ) { }
+ 
+diff --git a/lynx/system.h b/lynx/system.h
+index 79c673515258bfb5c3cf4e0be9fcf6d59a91b492..d8d9029d83fe2ec67b16feadb773f9fbde5279de 100644
+--- a/lynx/system.h
++++ b/lynx/system.h
+@@ -54,7 +54,11 @@
+ 
+ #define HANDY_SYSTEM_FREQ                       16000000
+ #define HANDY_TIMER_FREQ                        20
++#if !defined(SF2000)
+ #define HANDY_AUDIO_SAMPLE_FREQ                 48000
++#else
++#define HANDY_AUDIO_SAMPLE_FREQ                 11025
++#endif
+ #define HANDY_AUDIO_SAMPLE_PERIOD               (HANDY_SYSTEM_FREQ/HANDY_AUDIO_SAMPLE_FREQ)
+ #define HANDY_AUDIO_WAVESHAPER_TABLE_LENGTH     0x200000
+ 
+-- 
+2.54.0
+

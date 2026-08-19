@@ -1,7 +1,7 @@
-From 70e7f3640b754ca9d5e8d528cf044c9fc908f00b Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: UniFrog CI <ci@unifrog.local>
 Date: Thu, 7 May 2026 02:51:08 +0000
-Subject: [PATCH] Avoid SF2000 MIN MAX redefinition warnings
+Subject: [PATCH 2/2] Avoid SF2000 MIN MAX redefinition warnings
 
 Undefine MIN and MAX from the HCRTOS/newlib limits wrapper before Snes9x 2005 installs its local helpers. This keeps the core's existing macro semantics while removing repeated preprocessor warnings from every translation unit.
 ---
@@ -9,7 +9,7 @@ Undefine MIN and MAX from the HCRTOS/newlib limits wrapper before Snes9x 2005 in
  1 file changed, 6 insertions(+)
 
 diff --git a/source/port.h b/source/port.h
-index 5defb76..e52eaa2 100644
+index 5defb769b1e344051781a9c17e2b64fdc0ef5194..e52eaa2d00eff017669805635a79885dac4d69a8 100644
 --- a/source/port.h
 +++ b/source/port.h
 @@ -62,6 +62,12 @@

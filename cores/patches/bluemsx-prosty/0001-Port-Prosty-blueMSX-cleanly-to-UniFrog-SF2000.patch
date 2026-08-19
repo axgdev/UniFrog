@@ -1,0 +1,127 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog CI <unifrog@example.invalid>
+Date: Mon, 22 Jun 2026 05:15:14 +0000
+Subject: [PATCH] Port Prosty blueMSX cleanly to UniFrog SF2000
+
+Keep legacy C interfaces compatible with GCC 15, fix invalid callbacks and signed lookup data, and retain the self-contained zlib and directory support required by separately linked UniFrog core modules.
+---
+ Makefile.common                     |  2 --
+ Makefile.libretro                   |  2 +-
+ Src/Board/Board.c                   |  2 +-
+ Src/Board/Board.h                   | 11 +++++------
+ Src/Memory/romMapperActivisionPcb.c |  1 -
+ Src/Memory/sramMapperMatsuchita.h   |  2 +-
+ Src/SoundChips/OpenMsxYM2413.cpp    |  2 +-
+ 7 files changed, 9 insertions(+), 13 deletions(-)
+
+diff --git a/Makefile.common b/Makefile.common
+index 1fa2d0258bd1a7c8d5f3d9398a49ac3f275eba6b..4c89f1090bb1346f88c320a9f36db15249e9fadb 100644
+--- a/Makefile.common
++++ b/Makefile.common
+@@ -315,7 +315,6 @@ SOURCES_CXX  := $(CORE_DIR)/Src/SoundChips/Moonsound.cpp \
+ 		$(CORE_DIR)/Src/SoundChips/YM2413.cpp
+ 
+ #SOURCES_CXX  += $(CORE_DIR)/Src/IoDevice/msxgr.cpp
+-ifneq ($(STATIC_LINKING), 1)
+ SOURCES_C += $(LIBRETRO_COMM_DIR)/file/retro_dirent.c \
+ 	     $(LIBRETRO_COMM_DIR)/compat/compat_snprintf.c \
+ 	     $(LIBRETRO_COMM_DIR)/compat/compat_strcasestr.c
+@@ -331,7 +330,6 @@ SOURCES_C += $(DEPS_DIR)/zlib/adler32.c \
+ 	     $(DEPS_DIR)/zlib/trees.c \
+ 	     $(DEPS_DIR)/zlib/uncompr.c \
+ 	     $(DEPS_DIR)/zlib/zutil.c
+-endif
+ 
+ ifeq ($(HAVE_COMPAT), 1)
+ 	SOURCES_C  += $(CORE_DIR)/Src/Libretro/psp/diet-glob.c
+diff --git a/Makefile.libretro b/Makefile.libretro
+index 87b596a8e156c89315eff9b26b133257db9567bc..954c1b753b513b5b8d95a7e9edf8cdfc4a93947f 100644
+--- a/Makefile.libretro
++++ b/Makefile.libretro
+@@ -136,7 +136,7 @@ else ifeq ($(platform), sf2000)
+    AR = $(MIPS)ar
+    CFLAGS = -EL -march=mips32 -mtune=mips32 -msoft-float -G0 -mno-abicalls -fno-pic
+    CFLAGS += -ffast-math -fomit-frame-pointer -ffunction-sections -fdata-sections 
+-   CFLAGS += -DSF2000
++   CFLAGS += -DSF2000 -std=gnu17 -Wno-error=incompatible-pointer-types
+    CXXFLAGS = $(CFLAGS)
+    STATIC_LINKING = 1
+    HAVE_COMPAT = 1
+diff --git a/Src/Board/Board.c b/Src/Board/Board.c
+index dbbe066db15fac5ce2ce0880a92eb085cbf636b2..fa5dcd81263beb51f3b71325d6615260958e184d 100644
+--- a/Src/Board/Board.c
++++ b/Src/Board/Board.c
+@@ -1012,7 +1012,7 @@ void boardSaveState(const char* stateFile, int screenshot)
+     machineSaveState(boardMachine);
+ 
+     // Call board dependent save state
+-    boardInfo.saveState(stateFile);
++    boardInfo.saveState();
+ 
+     if (screenshot) {
+         bitmap = archScreenCapture(SC_SMALL, &size, 1);
+diff --git a/Src/Board/Board.h b/Src/Board/Board.h
+index 9e6505d9f7c05d01fc60cea4df9bb782f501eaea..1c44e729561b3577eff54875cb4f51a6584029cd 100644
+--- a/Src/Board/Board.h
++++ b/Src/Board/Board.h
+@@ -64,11 +64,11 @@ typedef struct {
+ 
+     void* cpuRef;
+ 
+-    void   (*destroy)();
+-    void   (*softReset)();
+-    void   (*loadState)();
+-    void   (*saveState)();
+-    int    (*getRefreshRate)();
++    void   (*destroy)(void);
++    void   (*softReset)(void);
++    void   (*loadState)(void);
++    void   (*saveState)(void);
++    int    (*getRefreshRate)(void);
+     UInt8* (*getRamPage)(int);
+     void   (*setDataBus)(void*, UInt8, UInt8, int);
+ 
+@@ -214,4 +214,3 @@ int  boardGetVideoAutodetect();
+ void boardSetPeriodicCallback(BoardTimerCb cb, void* reference, UInt32 frequency);
+ 
+ #endif /* BOARD_H */
+-
+diff --git a/Src/Memory/romMapperActivisionPcb.c b/Src/Memory/romMapperActivisionPcb.c
+index 89d3b4db1e01c6e2432220ff4f74f63ffd223ebe..a69637baa7588a6b1bc2b088f026bbc41e149794 100644
+--- a/Src/Memory/romMapperActivisionPcb.c
++++ b/Src/Memory/romMapperActivisionPcb.c
+@@ -230,4 +230,3 @@ int romMapperActivisionPcbCreate(const char* filename, int romType, UInt8* romDa
+ 
+     return 1;
+ }
+-
+diff --git a/Src/Memory/sramMapperMatsuchita.h b/Src/Memory/sramMapperMatsuchita.h
+index dcda36fbd9fd379f6e4e62d77e886eb3320d9032..ab8a01416860dda83edc83d958234337af0ed893 100644
+--- a/Src/Memory/sramMapperMatsuchita.h
++++ b/Src/Memory/sramMapperMatsuchita.h
+@@ -30,6 +30,6 @@
+ 
+ #include "MsxTypes.h"
+ 
+-int sramMapperMatsushitaCreate();
++int sramMapperMatsushitaCreate(int inverted);
+ 
+ #endif
+diff --git a/Src/SoundChips/OpenMsxYM2413.cpp b/Src/SoundChips/OpenMsxYM2413.cpp
+index 416d3badfc34dbe0dfaa2218d66eb8387f390c91..f5a7c405a537df87af21f211e883f9f2b764acf6 100644
+--- a/Src/SoundChips/OpenMsxYM2413.cpp
++++ b/Src/SoundChips/OpenMsxYM2413.cpp
+@@ -304,7 +304,7 @@ static const UINT8 lfo_am_table[LFO_AM_TAB_ELEMENTS] =
+ };
+ 
+ // LFO Phase Modulation table (verified on real YM2413)
+-static const char lfo_pm_table[8 * 8] = 
++static const signed char lfo_pm_table[8 * 8] = 
+ {
+ 	// FNUM2/FNUM = 0 00xxxxxx (0x0000)
+ 	0, 0, 0, 0, 0, 0, 0, 0,
+
+base-commit: 0b47ea3e7370bab5766eaa7c470d21247da3764a
+-- 
+2.54.0
+

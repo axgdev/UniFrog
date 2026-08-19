@@ -1,31 +1,31 @@
 # Documentation Map
 
-Start with the repository root `README.md` for build commands and layout.
-Use `AGENTS.md` for agent-specific build and editing rules.
-Use `../THIRD_PARTY.md` for third-party source layout, attribution, and
-binary package notice requirements.
+Start with `../README.md`, then use the smallest focused document that answers
+the question.
 
-Current component docs:
+## Architecture
 
-- `../cores/README.md`: libretro source workflow, patches, and core ABI rules
-- [frog2k-javascript](https://github.com/axgdev/frog2k-javascript-private): standalone JS2300 runtime and MQuickJS embedding layer
-- `js2300-scripting.md`: optional JS2300 script contract
-- `muos-integration.md`: upstream MuOS/LVGL checkout and shim policy
-- `../THIRD_PARTY.md`: third-party license and source inventory
-- `unifrog-architecture.md`: current firmware/runtime/module boundaries
-- `external-core-loading.md`: SD-loaded module format and loader details
-- `memory-layout.md`: linker and arena memory map
-- `performance-api.md`: CP0/cache/timing support
-- `link-layout-diagnostics.md`: map-file and no-load reservation checks
-- `libretro-core-quirks.md`: per-core integration notes
-- `firmware-switching.md`: reset-mediated fastboot handoff
-- `update-layout.md`: SD-card update packages and version slots
-- `clock-speed-resilience.md`: CPU/GE clock behavior
-- `sf2000-hardware-findings.md`: board-level hardware findings
-- `sf2000-backlight-pwm.md`: backlight PWM notes
-- `sf2000-gb300-audio.md`: current SF2000/GB300 audio routes and gotchas
-- `audio-quirks.md`: SF2000 audio gate/mute behavior and buzz diagnostics
-- `filesystem-mmc-notes.md`: confirmed FatFs/MMC/logging behavior
-- `media-video-freeze-handoff.md`: native MP4/H.264 freeze signature and fix path
-- `av-output.md`: AV output notes
-- `WIRELESS_STATUS.md`: wireless controller investigation status
+- `source-layout.md`: source ownership and boundary rules.
+- `ownership-map.md`: review/check routing by subsystem.
+- `architecture-roadmap.md`: repository strategy and C/C++ policy.
+- `unifrog-architecture.md`: firmware, runtime, package, and ABI boundaries.
+- `external-core-loading.md`: SD-loaded module format and loader details.
+
+## Workflows
+
+- `developer-onboarding.md`: first build, edit loop, and handoff checks.
+- `dependency-workflow.md`: dependency pins, patch queues, and selected cores.
+- `../cores/README.md`: libretro core build and patch workflow.
+- `../js2300/README.md`: embedded JavaScript runtime layer.
+- `js2300-scripting.md`: optional JS2300 script contract.
+
+## Hardware Notes
+
+- `sf2000-hardware-findings.md`: board-level findings.
+- `sf2000-mmc-driver.md`: HC15xx MMC driver work.
+- `sf2000-gb300-audio.md` and `audio-quirks.md`: audio routes and gotchas.
+- `memory-layout.md` and `link-layout-diagnostics.md`: linker and arena layout.
+- `firmware-switching.md` and `update-layout.md`: fastboot and SD update layout.
+
+Keep docs short. If a source rename or clearer function removes the need for a
+paragraph, prefer the code change.

@@ -101,6 +101,12 @@ int unifrog_frontend_lvgl_draw_list(struct unifrog_ui *ui,
    const struct unifrog_ui_theme *theme, const char *title, unsigned selected,
    const char *detail, const char *status, const char *const *labels,
    const char *const *values, const char *const *glyphs, unsigned count);
+int unifrog_frontend_lvgl_draw_list_preview(struct unifrog_ui *ui,
+   const struct unifrog_ui_theme *theme, const char *title, unsigned selected,
+   const char *detail, const char *status, const char *const *labels,
+   const char *const *values, const char *const *glyphs, unsigned count,
+   const char *box_path, const char *preview_path, const char *description);
+int unifrog_frontend_lvgl_animation_active(void);
 
 #ifdef __cplusplus
 }

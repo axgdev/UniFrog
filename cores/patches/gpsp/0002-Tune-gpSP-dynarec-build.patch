@@ -1,4 +1,4 @@
-From 0599ec42624e40eaa45ce8bc948584f01c9d2640 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Wed, 6 May 2026 09:26:42 +0000
 Subject: [PATCH 2/2] Tune gpSP dynarec build
@@ -9,7 +9,7 @@ Add a per-file optimization override for cpu_threaded.c so the SF2000 build can 
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/Makefile b/Makefile
-index f06310d..f7bae60 100644
+index f06310db0657325172b7530d7aaa8344bbcd5185..f7bae607524a66e482d8cbca08178f4480cf7a21 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -581,6 +581,7 @@ WARNINGS_DEFINES =
@@ -29,3 +29,6 @@ index f06310d..f7bae60 100644
  
  %.o: %.S
  	$(CC) $(ASFLAGS) $(CFLAGS) $(OPTIMIZE) -c -o $@ $<
+-- 
+2.54.0
+

@@ -15,7 +15,7 @@
 
 ### Applied Fixes
 - Commit: `de5d47c`
-- Changes in `src/unifrog_media.c`:
+- Changes in `components/media/src/platform/sf2000/unifrog_media.c`:
   1. Force freerun packet timing (`PTS=-1`, `dur=0`) whenever video playback is in freerun mode.
   2. Treat `auddec` absence as the freerun boundary even if software audio decode is active.
   3. Align H264 post-init extradata send with ffplayer-style ES packet delivery in the post-extra phase.
@@ -95,16 +95,17 @@
   from SD refill or display geometry.
 
 ### v050 0105 Follow-Up
-- Logs from `../latest_log/v050/0105` show the zero-MMZ experiment was invalid
-  for this hardware path. Every tested H.264 file failed native
+- Logs from `../latest_log/v050/0105` show why zero-size DTS `mmz0` requires a
+  runtime MMZ lease. That test did not create the lease, so every H.264 file
+  failed native
   `VIDDEC_INIT` immediately with `errno=1`, before any video packets were fed.
 - The visible artifact path was then the software-video fallback repeatedly
   failing `VIDSINK_DISPLAY_FRAME`, not confirmed hardware decode corruption.
   The fallback now aborts after a small number of display failures instead of
   continuing to spam the display path.
-- The DTS now restores a deterministic `mmz0` pool sized from the upstream
-  hc15xx 1080p media formula. KSHM compressed packet rings remain dynamic
-  because no named `kshm` MMZ pool is defined.
+- The DTS now keeps `mmz0` at zero and native video creates MMZ id 0 from the
+  reclaimable arena before decoder init. KSHM compressed packet rings remain
+  dynamic because no named `kshm` MMZ pool is defined.
 - AVCC H.264 is back to the known-good feed contract from 0102/0103:
   `avcC` extradata in `video_config.extra_data` and raw FFmpeg packet bytes to
   `/dev/viddec`. Converted SPS/PPS post-extra delivery is kept only for
@@ -119,10 +120,10 @@
   behavior, but monitor lines still showed hardware audio `ahead_a` dipping
   close to underrun.
 - Native playback now uses one conservative audio feed lead for audio-only and
-  all video resolutions: `MEDIA_AUDIO_FEED_LEAD_MS=3000`. This removes the
-  low-resolution-only audio lead branch. `MEDIA_VIDEO_KSHM_SIZE` is the default
-  viddec compressed-ring knob, while `MEDIA_VIDEO_LOWRES_KSHM_SIZE` can still
-  override low-resolution streams.
+  all video resolutions: `media_audio_feed_lead_ms=3000`. This removes the
+  low-resolution-only audio lead branch. `media_video_kshm_size` is the runtime
+  viddec compressed-ring setting, while `media_video_lowres_kshm_size` can
+  still override low-resolution streams.
 - The screen scramble/stale black-bar symptom matched a display handoff issue:
   `/dev/viddec` made the video layer visible before the first displayable frame
   (`decoded=0 displayed=0 show=0`). UniFrog now clears the framebuffer after

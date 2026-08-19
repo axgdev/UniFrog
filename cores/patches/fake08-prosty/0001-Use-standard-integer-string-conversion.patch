@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog CI <unifrog@example.invalid>
+Date: Mon, 22 Jun 2026 05:14:39 +0000
+Subject: [PATCH 1/2] Use standard integer string conversion
+
+---
+ source/hostCommonFunctions.cpp | 14 +-------------
+ 1 file changed, 1 insertion(+), 13 deletions(-)
+
+diff --git a/source/hostCommonFunctions.cpp b/source/hostCommonFunctions.cpp
+index 7c0821bdc72506ce7baeb54a1495bebc87ef470a..adf8809a1ef70f1061aea0980e030fb74b1fee0a 100644
+--- a/source/hostCommonFunctions.cpp
++++ b/source/hostCommonFunctions.cpp
+@@ -14,18 +14,6 @@
+ #include "cartzip.h"
+ #endif
+ 
+-#if defined(SF2000)
+-namespace std
+-{
+-	std::string to_string(int i)
+-	{
+-		char str[20];
+-		snprintf(str, sizeof(str), "%d", i);
+-		return str;
+-	}
+-}
+-#endif
+-
+ #if defined(SF2000)
+ // use fopen and fwrite from stock libc instead of freopen and fprintf from toolchain libc
+ #define freopen(filename,mode,x)	fopen(filename, mode);
+@@ -352,4 +340,4 @@ void Host::setSetting(std::string sname, int sval) {
+ 		Logger_Write(" not found!");
+ 	}
+ 	
+-}
+\ No newline at end of file
++}
+
+base-commit: b87983eaf7492fdd945f2897024e0bb725e1e15d
+-- 
+2.54.0
+

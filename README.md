@@ -1,180 +1,102 @@
 # UniFrog
 
-UniFrog builds a native SF2000 firmware payload, MuOS-style frontend package,
-native modules, and libretro core modules for an SD-card based setup.
+UniFrog is an OS/libretro frontend for the SF2000/GB300 device family. The
+target is MIPS32r1 little-endian, 128 MiB RAM, no FPU, no MMU, and HCRTOS /
+FreeRTOS with several closed-source hardware libraries.
 
-The root Makefile is the authoritative entry point. It builds `bisrv.asd`,
-`output/unifrog.bin`, and the complete `output/sdcard` layout.
+The root `Makefile` is the source of truth. Use it for setup, builds, checks,
+packaging, and dependency maintenance.
 
-## Requirements
-
-- Alpine or another Unix-like host with `make`, a C compiler, Git, and `dtc`
-- Frog newlib MIPS toolchain v1.3.2, downloaded below `.deps/` by default
-- HCRTOS SDK submodule at `unifrog-hcrtos-sdk`
-- External source checkouts fetched under `.deps`
-
-Install Alpine host packages with:
+## First Build
 
 ```sh
-make deps-alpine
+make deps-alpine        # Alpine host packages, if needed
+make setup              # SDK submodule and external source checkouts
+make doctor             # toolchain, SDK, and dependency sanity checks
+make dev-check          # fast path: Linux tests, firmware link, one quick core
+make                    # firmware, SD-card tree, and selected cores
+make verify             # full verification before handoff
 ```
 
-Fetch the SDK submodule, standalone JS2300 runtime, libretro cores, and support
-libraries:
-
-```sh
-make deps
-```
-
-Local paths can be overridden in untracked `config.mk`:
+The default MIPS toolchain is downloaded from frog-toolchain v1.3.2 into
+`.deps/` by `make setup`. Override local paths in an untracked `config.mk`:
 
 ```make
-TOOLCHAIN := .deps/frog-toolchain-v1.3.2-<host-arch>/mipsel-mti-elf
+TOOLCHAIN := .deps/frog-toolchain-v1.3.2-$(TOOLCHAIN_HOST_ARCH)/mipsel-mti-elf
 SDK := unifrog-hcrtos-sdk
 DEPS := .deps
 ```
 
-## Build
+Use `make help`, `make help-options`, and `make print-config` when in doubt.
+
+## Fast Checks
 
 ```sh
-make setup
-make doctor
+make dev-check QUICK_CORE=quicknes
 make quick-check
-make
-make verify
+make frontend-structure-check
+make architecture-check
 ```
 
-Useful targets:
+`dev-check` and `quick-check` intentionally build one quick core instead of the
+full core set. Run `make clean && make verify` after changing Makefiles, linker
+scripts, or dependency/link wiring.
+
+## Source Map
 
 ```text
-make help             Show the common workflow and focused entry points
-make print-config     Show current paths, tools, and optimization settings
-make setup            Fetch required external source inputs
-make deps-status      Show pins vs each repository policy
-make upgrade-deps     Bump pins by policy and fetch them
-make doctor           Check tools, SDK, and fetched inputs
-make quick-check      Run fast repository, core smoke, frontend, and JS2300 checks
-make                  Build firmware, modules, and core package
-make verify           Build and verify firmware, fastboot, JS, and layout
-make fastboot-only-check
-                      Build and verify only the fastboot ASD
-make boot-logo-check  Generate the stamped full-screen boot logo assets
-make sd-zip           Build output/UniFrog-sdcard.zip
-make clean            Remove generated build/output files
-make distclean        Also clean sub-build outputs
+apps/                    Firmware, Linux runner, and fastboot entrypoints
+foundation/src/          Hardware backends and reusable runtime services
+components/frontend/     Device UI, settings, themes, reader UI, quick menu
+components/libretro/     Core loading, sessions, content, saves, pacing
+components/media/        Media classification, buffering, playback
+components/diagnostics/  Device test algorithms and reports
+js2300/                  JS2300 host bridge, libretro core, and scripts
+cores/                   Libretro source manifest, build rules, patches
+include/unifrog/         Public C interfaces, one header per API area
+mk/                      Shared Makefile fragments
+tools/                   Host tools and procedural helpers
+docs/                    Architecture and hardware notes worth keeping
 ```
 
-`make deps` remains a supported alias for `make setup`; `make check` is the
-firmware/package/layout build check used inside the fuller `make verify` gate.
-Dependency status and upgrades follow the policy declared beside each pin; use
-`MODE=head` or `MODE=tag` only for an explicit one-off override. Use
-`make quick-check` while iterating. `make verify` is the normal
-verification before handing off changes. If linker scripts or link libraries
-change, run `make clean && make verify`.
+Generated output lives in `build/`, `output/`, `cores/output/`, and
+`js2300/output/`. Third-party source checkouts live in untracked `.deps/`.
+Do not commit generated files, `.deps`, SDK build products, or downloaded
+toolchains.
 
-If `ccache` is installed, the build uses it automatically. Set `CCACHE=` in
-`config.mk` or on the command line to disable it.
+## Dependency Model
 
-The boot logo source lives at `assets/boot/unifrog-logo.png` and is converted
-to a full-screen 320x240 RGB565 RLE include during the build. The version text
-at the bottom is stamped from an exact git tag when available, otherwise from
-the current commit hash with a `revision` label.
+- The HCRTOS SDK is the only Git submodule because it has separate licensing
+  and release ownership.
+- Libretro cores and support libraries are manifest-pinned `.deps` checkouts
+  with generated patch queues.
+- Core source is expected to be replaced or refreshed from upstream; UniFrog
+  owns the pins, build rules, and patches.
 
-The default `HCRTOS_MEDIA=native` uses the native FFmpeg/HCRTOS media path.
-`HCRTOS_MEDIA=module` still packages `/unifrog/modules/hcrtos-media.bin` for
-loader diagnostics; frontend video playback fails safely in unsupported module
-builds and returns to the menu instead of entering known black-screen paths.
+Use `make -C cores help` and `docs/dependency-workflow.md` for dependency
+maintenance.
 
-The SD-card package also installs `LICENSE.txt` and `THIRD_PARTY.md` under
-`/unifrog`. Keep `THIRD_PARTY.md` current whenever adding, removing, or
-replacing fetched or vendored third-party code.
+## Packaging
 
-Game discovery is directory based. The `rom_root` setting defaults to
-`/ROMS`, which means the frontend browses system folders directly under
-`/ROMS`. Older `rom_roots` settings are accepted for compatibility and use the
-first configured root. Files inside a recognized system folder are treated as
-games without guessing from their file extensions. Common retro-handheld folder
-aliases such as `gba`, `gb`, `gbc`, `nes`, `snes`, `megadrive`, `pcengine`,
-and `psx` are matched case-insensitively. Edit
-`/unifrog_data/settings.ini` on the SD card to change user options without
-modifying packaged defaults.
-
-SD builds boot in `wide20` by default: 4-bit SD, 20 MHz, high-speed disabled,
-and no UHS/1.8 V negotiation. ROM and native module loading stay on that boot
-profile; the old runtime fast-read mount/remount windows are disabled by the
-default `SD_READ_MODE=boot`. The UHS profiles remain available as diagnostics,
-but they advertise 1.8 V/UHS capability to the vendor MMC stack and can wedge
-under repeated runtime switching on SF2000-class boards. The frontend
-`fast_sd` option and MuOS Storage -> Mode expose `boot`, `wide1`, `wide2`,
-`wide4`, `wide8`, `wide10`, `wide12`, `wide14`, `wide16`, `wide18`,
-`wide20`, `wide22`, `wide24`, `wide25`, `hs1`, `wide50`, `wide`, `uhs12`,
-`uhs25`, and `uhs` because card behavior varies.
-The low `wide*` profiles keep 4-bit 3.3 V signaling with high-speed timing
-disabled; only the bus clock changes. In theory, throughput scales with clock
-and bus width, and 1.8 V/UHS can reduce SD I/O switching power, but card and
-host reliability dominate here. At these clocks SD-card power is usually small
-next to the SoC, DRAM, backlight, audio, and emulator load, so 1.8 V is not
-expected to be a meaningful heat or battery win on this board. If a ROM load
-stalls while using an experimental runtime profile, the load watchdog attempts
-to restore the boot storage profile once before showing the core hang screen.
-Developer -> Storage test buffers logs, shows progress on screen, prefers
-`/ROMS/test.md` when present, and writes `/unifrog/storage-test-result.txt` plus
-the on-device report. Default `SD_MODE=wide20` builds test the boot profile;
-`SD_MODE=safe` builds enable guarded runtime sweeps through the SD bus
-suspend/resume hooks. Developer -> Storage full test uses
-`/ROMS/probes/test*.md`, restores the boot profile after each experimental read,
-and checkpoints `/unifrog/storage-full-test-result.txt` between modes.
-Developer -> Storage mode test selects one profile, switches once, runs all
-probes, then restores the boot profile and writes
-`/unifrog/storage-mode-test-result.txt`. The on-screen stage is the best freeze
-clue; warm reboot diagnostics may also keep it, but a full power cycle can
-overwrite that memory. Fixed-profile diagnostic boot
-builds are still available with `SD_MODE=safe`, `wide1`, `wide2`, `wide4`,
-`wide8`, `wide10`, `wide12`, `wide14`, `wide16`, `wide18`, `wide20`,
-`wide22`, `wide24`, `wide25`, `wide37`, `hs1`, `wide50`, `wide`, `uhs12`,
-`uhs25`, or `uhs`; non-default modes are diagnostic. Device logs
-rotate to `log-prev.txt` when `log.txt` grows past 1 MiB. Buffered UniFrog log
-flushes and SDK file UART drains use synchronous SD writes before closing the
-log file, except during libretro core sessions and storage quiet windows where
-sync log records stay in retained RAM until a safer flush point. The board DTS in
-`board/hc15xx/common/dts/sf2000_min.dts` is the single source used by both the
-firmware and SDK kernel rebuild.
-
-## Layout
+Important build outputs:
 
 ```text
-board/                 Local SF2000 device tree input
-cores/                 Libretro source manifest, patches, and core build
-docs/                  Hardware, ABI, loader, and diagnostics notes
-include/unifrog/       Public UniFrog C interfaces
-.deps/frog2k-javascript/
-                       Standalone JS2300 runtime checkout
-linker/                HCRTOS/SF2000 linker scripts
-output/sdcard/unifrog/modules/
-                       Runtime-loaded native modules
-src/                   Native runtime implementation
-src/third_party/       Small vendored source libraries with local notices
-THIRD_PARTY.md         Third-party source, binary, and attribution inventory
-tools/asdpack.c        Host tool used to pack and verify ASD images
-unifrog-hcrtos-sdk/    SDK submodule
+bisrv.asd                         fastboot ASD image
+fastboot.asd                      fastboot-only diagnostic ASD
+output/unifrog.bin                raw firmware image
+output/sdcard/                    SD-card package tree
+output/UniFrog-sdcard.zip         distributable SD-card archive
 ```
 
-Fetched third-party source checkouts live in untracked `.deps/` after
-`make deps`. Generated files live in `build/`, `output/`, `cores/output/`,
-the standalone JS2300 output, and packaging directories. They are not
-source.
+The SD package installs firmware under `unifrog/firmware/`, libretro core
+modules under `unifrog/cores/`, runtime modules under `unifrog/modules/`, and
+user-owned state under `unifrog_data/`.
 
-## Component Docs
+## Reading Next
 
-- `docs/README.md` maps the retained hardware and architecture notes.
-- `cores/README.md` explains core source fetching, patching, and ABI rules.
-- `docs/js2300-scripting.md` covers optional JS2300 scripts.
-- The [frog2k-javascript repository](https://github.com/axgdev/frog2k-javascript-private)
-  covers the embedded JavaScript runtime layer.
-
-Each component Makefile has its own quick reference:
-
-```sh
-make -C cores help
-make -C .deps/frog2k-javascript help
-```
+- `docs/source-layout.md`: source ownership and boundary rules.
+- `docs/developer-onboarding.md`: how to make a first change safely.
+- `docs/dependency-workflow.md`: dependency pins and patch queues.
+- `docs/external-core-loading.md`: module ABI and loader details.
+- `docs/sf2000-hardware-findings.md`: hardware notes that are not obvious from
+  source.

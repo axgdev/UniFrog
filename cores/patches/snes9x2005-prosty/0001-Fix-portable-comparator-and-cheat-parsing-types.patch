@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog CI <unifrog@example.invalid>
+Date: Mon, 22 Jun 2026 05:10:39 +0000
+Subject: [PATCH] Fix portable comparator and cheat parsing types
+
+---
+ source/cheats.c | 13 +++++++------
+ source/clip.c   | 12 ++++++++----
+ 2 files changed, 15 insertions(+), 10 deletions(-)
+
+diff --git a/source/cheats.c b/source/cheats.c
+index 0bedfd489dc9cc74c94b4d3d6b71c258e73466c9..8557dab22036ca87bcdbdb6184a77b787425c5de 100644
+--- a/source/cheats.c
++++ b/source/cheats.c
+@@ -2,6 +2,7 @@
+ 
+ #include <stdio.h>
+ #include <ctype.h>
++#include <inttypes.h>
+ #include <string.h>
+ #include "snes9x.h"
+ #include "cheats.h"
+@@ -22,7 +23,7 @@ static bool S9xAllHex(const char* code, int32_t len)
+ const char* S9xProActionReplayToRaw(const char* code, uint32_t* address, uint8_t* byte)
+ {
+    uint32_t data = 0;
+-   if (strlen(code) != 8 || !S9xAllHex(code, 8) || sscanf(code, "%x", &data) != 1)
++   if (strlen(code) != 8 || !S9xAllHex(code, 8) || sscanf(code, "%" SCNx32, &data) != 1)
+       return "Invalid Pro Action Replay code - should be 8 hex digits in length.";
+ 
+    *address = data >> 8;
+@@ -39,12 +40,12 @@ const char* S9xGoldFingerToRaw(const char* code, uint32_t* address, bool* sram,
+ 
+    strncpy(tmp, code, 5);
+    tmp [5] = 0;
+-   if (sscanf(tmp, "%x", address) != 1)
++   if (sscanf(tmp, "%" SCNx32, address) != 1)
+       return "Invalid Gold Finger code.";
+ 
+    for (i = 0; i < 3; i++)
+    {
+-      int32_t byte;
++      unsigned int byte;
+       strncpy(tmp, code + 5 + i * 2, 2);
+       tmp [2] = 0;
+       if (sscanf(tmp, "%x", &byte) != 1)
+@@ -74,8 +75,8 @@ const char* S9xGameGenieToRaw(const char* code, uint32_t* address, uint8_t* byte
+    for (i = 2; i < 10; i++)
+    {
+       int32_t j;
+-      if (islower(new_code [i]))
+-         new_code [i] = toupper(new_code [i]);
++      if (islower((unsigned char)new_code [i]))
++         new_code [i] = (char)toupper((unsigned char)new_code [i]);
+       for (j = 0; j < 16; j++)
+       {
+          if (new_code [i] == genie_hex [j])
+@@ -87,7 +88,7 @@ const char* S9xGameGenieToRaw(const char* code, uint32_t* address, uint8_t* byte
+       if (j == 16)
+          return "Invalid hex-character in Game Genie(tm) code";
+    }
+-   sscanf(new_code, "%x", &data);
++   sscanf(new_code, "%" SCNx32, &data);
+    *byte = (uint8_t)(data >> 24);
+    *address = ((data & 0x003c00) << 10) +
+               ((data & 0x00003c) << 14) +
+diff --git a/source/clip.c b/source/clip.c
+index db68e1ee3eb5fb3c3c467a8766614ea2cedef3b1..5bd36b30b4876189aa24ed02100d3460928f9403 100644
+--- a/source/clip.c
++++ b/source/clip.c
+@@ -26,14 +26,18 @@ typedef struct
+     R.Right = MIN(A.Right, B.Right); \
+ }
+ 
+-static int32_t IntCompare(const void* d1, const void* d2)
++static int IntCompare(const void* d1, const void* d2)
+ {
+-   return *(uint32_t*) d1 - *(uint32_t*) d2;
++   uint32_t a = *(const uint32_t*)d1;
++   uint32_t b = *(const uint32_t*)d2;
++   return (a > b) - (a < b);
+ }
+ 
+-static int32_t BandCompare(const void* d1, const void* d2)
++static int BandCompare(const void* d1, const void* d2)
+ {
+-   return ((Band*) d1)->Left  - ((Band*) d2)->Left;
++   uint32_t a = ((const Band*)d1)->Left;
++   uint32_t b = ((const Band*)d2)->Left;
++   return (a > b) - (a < b);
+ }
+ 
+ void ComputeClipWindows()
+
+base-commit: fa25aaf57a043e999f1bc3d9327a71c4cdb1d942
+-- 
+2.54.0
+

@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog CI <ci@unifrog.local>
+Date: Mon, 22 Jun 2026 07:19:09 +0000
+Subject: [PATCH 2/2] Avoid dead NEC opcode temporaries
+
+Consume AAM and AAD immediate bytes explicitly without assigning and clearing an unused local, preserving instruction-pointer behavior while removing work and compiler noise.
+---
+ src/cpu/nec/nec.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/cpu/nec/nec.c b/src/cpu/nec/nec.c
+index 646a08db371a983970de005900c8b0567438d049..ee54724ef50916753ba878d4deb957f67d2f04c4 100644
+--- a/src/cpu/nec/nec.c
++++ b/src/cpu/nec/nec.c
+@@ -709,8 +709,8 @@ OP( 0xd3, i_rotshft_wcl ) {
+ 	}
+ }
+ 
+-OP( 0xd4, i_aam    ) { UINT32 mult=FETCH; mult=0; I.regs.b[AH] = I.regs.b[AL] / 10; I.regs.b[AL] %= 10; SetSZPF_Word(I.regs.w[AW]); CLKS(15,15,12); }
+-OP( 0xd5, i_aad    ) { UINT32 mult=FETCH; mult=0; I.regs.b[AL] = I.regs.b[AH] * 10 + I.regs.b[AL]; I.regs.b[AH] = 0; SetSZPF_Byte(I.regs.b[AL]); CLKS(7,7,8); }
++OP( 0xd4, i_aam    ) { (void)FETCH; I.regs.b[AH] = I.regs.b[AL] / 10; I.regs.b[AL] %= 10; SetSZPF_Word(I.regs.w[AW]); CLKS(15,15,12); }
++OP( 0xd5, i_aad    ) { (void)FETCH; I.regs.b[AL] = I.regs.b[AH] * 10 + I.regs.b[AL]; I.regs.b[AH] = 0; SetSZPF_Byte(I.regs.b[AL]); CLKS(7,7,8); }
+ OP( 0xd6, i_setalc ) { I.regs.b[AL] = (CF)?0xff:0x00; nec_ICount-=3; }
+ OP( 0xd7, i_trans  ) { UINT32 dest = (I.regs.w[BW]+I.regs.b[AL])&0xffff; I.regs.b[AL] = GetMemB(DS, dest); CLKS(9,9,5); }
+ OP( 0xd8, i_fpo    ) { nec_ICount-=2;	}
+-- 
+2.54.0
+

@@ -1,4 +1,4 @@
-From 6a5d363731c6cc3f7e5317f83fe2fb7bab94ea22 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Tue, 5 May 2026 18:57:44 +0000
 Subject: [PATCH 2/4] Use int32 Tremor point accumulators
@@ -9,7 +9,7 @@ Keep Tremor point intermediates at int32 width to match the fixed-point code pat
  1 file changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/mednafen/tremor/sharedbook.c b/mednafen/tremor/sharedbook.c
-index 454638e..9c5b920 100644
+index 454638e7e9537ef0512231a23aa60d82db7a2930..9c5b92048f759299022b89ae558e7f97e3c002e6 100644
 --- a/mednafen/tremor/sharedbook.c
 +++ b/mednafen/tremor/sharedbook.c
 @@ -225,11 +225,11 @@ int32_t *_book_unquantize(const static_codebook *b,int n,int *sparsemap,
@@ -39,3 +39,6 @@ index 454638e..9c5b920 100644
                       int val=VFLOAT_MULTI(delta,delpoint,
                             abs(b->quantlist[j*b->dim+k]),&point);
  
+-- 
+2.54.0
+

@@ -1,4 +1,4 @@
-From bc42a5ed40142088af7882c0130e38f5ffd925fc Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Tue, 5 May 2026 18:57:43 +0000
 Subject: [PATCH 1/4] Add SF2000 PicoDrive memory compatibility
@@ -10,7 +10,7 @@ Treat SF2000 like other no-mman libretro targets and make plat_mem_set_exec a no
  2 files changed, 5 insertions(+), 1 deletion(-)
 
 diff --git a/platform/libretro/libretro-common/include/memmap.h b/platform/libretro/libretro-common/include/memmap.h
-index 5c038160..e2f05070 100644
+index 5c03816054100d89a32de04409e20940dfc8cd05..e2f050702819830c0bb0e3f00cfd5eccd0a237f9 100644
 --- a/platform/libretro/libretro-common/include/memmap.h
 +++ b/platform/libretro/libretro-common/include/memmap.h
 @@ -26,7 +26,7 @@
@@ -23,7 +23,7 @@ index 5c038160..e2f05070 100644
  #elif defined(_WIN32) && !defined(_XBOX)
  #include <windows.h>
 diff --git a/platform/libretro/libretro.c b/platform/libretro/libretro.c
-index 7612396f..e51c30d9 100644
+index 7612396ff0b7041c2928f2e6e2bf8b3bcf87f96c..e51c30d965f14d4aacdc7f2f5c3880f2712f0fd0 100644
 --- a/platform/libretro/libretro.c
 +++ b/platform/libretro/libretro.c
 @@ -528,6 +528,10 @@ int plat_mem_set_exec(void *ptr, size_t size)
@@ -37,3 +37,8 @@ index 7612396f..e51c30d9 100644
  #else
     ret = mprotect(ptr, size, PROT_READ | PROT_WRITE | PROT_EXEC);
     if (ret != 0 && log_cb)
+
+base-commit: f0d4a0118a9733a1f10bce5a4ac772c474f9300d
+-- 
+2.54.0
+
