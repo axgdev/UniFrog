@@ -1,5 +1,12 @@
 #include "js2300_frontend_internal.h"
 
+static const char *host_execution_mode(void *opaque)
+{
+   const struct js2300_frontend *frontend = opaque;
+
+   return frontend && frontend->extension_mode ? "extension" : "standalone";
+}
+
 static int split_script_path(const char *path, char *root, size_t root_size,
    char *entry, size_t entry_size)
 {
@@ -49,6 +56,7 @@ void frontend_configure_host(struct js2300_frontend *frontend,
    host->fs_index = host_fs_index;
    host->file_size = host_file_size;
    host->file_read = host_file_read;
+   host->execution_mode = host_execution_mode;
 }
 
 int run_js_script_file(struct js2300_frontend *frontend, const char *path)
