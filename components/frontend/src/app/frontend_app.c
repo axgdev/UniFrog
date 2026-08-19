@@ -287,10 +287,6 @@ static void browser_back(struct frontend_state *fe)
       restore_view_selection(fe, selected, fe->scroll);
       return;
    }
-   if (frontend_path_is_rom_root(fe, fe->current_dir)) {
-      frontend_show_rom_systems(fe);
-      return;
-   }
    if (strcmp(fe->current_dir, FRONTEND_ROOT) == 0) {
       show_launch(fe);
       return;
@@ -301,11 +297,6 @@ static void browser_back(struct frontend_state *fe)
       *slash = '\0';
    else
       unifrog_text_copy(parent, sizeof(parent), FRONTEND_ROOT);
-   if (frontend_path_is_inside_rom_root(fe, fe->current_dir) &&
-       !frontend_path_is_inside_rom_root(fe, parent)) {
-      frontend_show_rom_systems(fe);
-      return;
-   }
    unifrog_log("frontend nav back explore parent=%s\n", parent);
    frontend_show_explore(fe, parent);
 }
@@ -315,6 +306,11 @@ static int activate_typed_action(struct frontend_state *fe,
    const struct frontend_item *item)
 {
    switch (item->action) {
+   case UNIFROG_FRONTEND_ACTION_EXPLORE_SD:
+      frontend_parent_view_clear(fe);
+      frontend_nav_reset(fe);
+      frontend_show_explore(fe, FRONTEND_ROOT);
+      return 1;
    case UNIFROG_FRONTEND_ACTION_EXPLORE:
       frontend_parent_view_clear(fe);
       frontend_nav_reset(fe);

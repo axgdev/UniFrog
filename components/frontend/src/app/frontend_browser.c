@@ -73,6 +73,10 @@ static void add_dir_entry(struct frontend_state *fe, const char *dir,
    }
    if (!known_file)
       return;
+   /* The SD browser is intentionally permissive.  A file without an
+    * extension association is still useful content: its folder can select a
+    * default core, and Open With -> Other Cores can try any installed core. */
+   add_content_item(fe, name, full);
 }
 
 static void add_rom_dir_entry(struct frontend_state *fe, const char *dir,
@@ -617,6 +621,9 @@ void frontend_show_open_with(struct frontend_state *fe,
    if (!fe || !item)
       return;
    fe->pending_open_item = *item;
+   /* reset_items()/add_item() reuse fe->items.  Continue from the stable
+    * pending copy instead of observing the list as it is rebuilt below. */
+   item = &fe->pending_open_item;
    dir[0] = '\0';
    if (item->path[0]) {
       unifrog_text_copy(dir, sizeof(dir), item->path);

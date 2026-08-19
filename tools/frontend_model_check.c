@@ -42,7 +42,13 @@ int main(void)
 
    unifrog_frontend_model_build(&model, UNIFROG_FRONTEND_MODEL_LAUNCH,
       &settings);
-   if (model.count != 8u || !has_action(&model, UNIFROG_FRONTEND_ACTION_SHUTDOWN))
+   if (model.count != 8u ||
+       !has_action(&model, UNIFROG_FRONTEND_ACTION_EXPLORE_SD) ||
+       !has_action(&model, UNIFROG_FRONTEND_ACTION_SHUTDOWN))
+      return 1;
+   item = find_label(&model, "Explore");
+   if (!item || item->action != UNIFROG_FRONTEND_ACTION_EXPLORE_SD ||
+       strcmp(item->detail, "SD root") != 0)
       return 1;
    unifrog_frontend_model_move(&model, -1);
    if (model.selected != 7u)

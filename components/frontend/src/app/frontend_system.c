@@ -146,10 +146,14 @@ void frontend_prepare_safe_shutdown(struct frontend_state *fe)
 
    if (fe->shutdown_safe)
       return;
-   frontend_loading_show(fe, "Safe Shutdown", "saving state",
-      "flushing SD writes", 40);
+   frontend_loading_show(fe, "Safe Shutdown", "saving settings",
+      "writing configuration", 20);
    settings_ret = save_settings(fe);
+   frontend_loading_show(fe, "Safe Shutdown", "saving clock",
+      "writing clock state", 40);
    clock_ret = unifrog_clock_persist();
+   frontend_loading_show(fe, "Safe Shutdown", "flushing logs",
+      "committing SD writes", 70);
    UF_LOG_INFO("shutdown", "event=prepare settings_ret=%d clock_ret=%d",
       settings_ret, clock_ret);
    log_ret = unifrog_log_flush_force();
@@ -160,12 +164,17 @@ void frontend_prepare_safe_shutdown(struct frontend_state *fe)
       return;
    }
 
+   frontend_loading_show(fe, "Safe Shutdown", "finishing",
+      "stopping output and logging", 95);
    frontend_sound_shutdown();
    (void)unifrog_scpu_apply_mhz(198u);
    (void)unifrog_ge_set_clock(&fe->ui.ge, UNIFROG_GE_CLOCK_148MHZ);
    unifrog_platform_set_storage_log_suspended(1);
    fe->shutdown_safe = 1;
-   fe->needs_draw = 1;
+   /* Present the completion screen synchronously.  The old path waited for
+    * the next frontend loop, leaving the 40% progress frame visible while
+    * users were deciding whether it was safe to remove power. */
+   frontend_draw(fe);
 }
 
 int frontend_adjust_clock_item(struct frontend_state *fe, const char *path,

@@ -109,10 +109,10 @@ static void test_mutation_and_services(void)
    unifrog_frontend_controller_back(&controller);
    unifrog_frontend_controller_back(&controller);
    unifrog_frontend_controller_back(&controller);
-   select_action(&controller, UNIFROG_FRONTEND_ACTION_EXPLORE);
+   select_action(&controller, UNIFROG_FRONTEND_ACTION_EXPLORE_SD);
    unifrog_frontend_controller_activate(&controller);
    TEST_EQ_INT(3, log.calls);
-   TEST_EQ_INT(UNIFROG_FRONTEND_ACTION_EXPLORE, log.action);
+   TEST_EQ_INT(UNIFROG_FRONTEND_ACTION_EXPLORE_SD, log.action);
 }
 
 int main(void)

@@ -12,6 +12,7 @@ struct action_id {
 
 static const struct action_id action_ids[] = {
    { UNIFROG_FRONTEND_ACTION_EXPLORE, "explore" },
+   { UNIFROG_FRONTEND_ACTION_EXPLORE_SD, "explore_sd" },
    { UNIFROG_FRONTEND_ACTION_FAVORITES, "favorites" },
    { UNIFROG_FRONTEND_ACTION_HISTORY, "history" },
    { UNIFROG_FRONTEND_ACTION_APPS, "apps" },
@@ -101,7 +102,7 @@ enum unifrog_frontend_action unifrog_frontend_action_from_id(const char *id)
 static void build_launch(struct unifrog_frontend_model *model)
 {
    reset(model, UNIFROG_FRONTEND_MODEL_LAUNCH, "muOS");
-   add(model, "Explore", "content", UNIFROG_FRONTEND_ACTION_EXPLORE, NULL);
+   add(model, "Explore", "SD root", UNIFROG_FRONTEND_ACTION_EXPLORE_SD, NULL);
    add(model, "Collection", "favorites", UNIFROG_FRONTEND_ACTION_FAVORITES, NULL);
    add(model, "History", "recent", UNIFROG_FRONTEND_ACTION_HISTORY, NULL);
    add(model, "Apps", "native", UNIFROG_FRONTEND_ACTION_APPS, NULL);
