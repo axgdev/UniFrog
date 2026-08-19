@@ -36,7 +36,8 @@ users should stay inside `/unifrog_data/scripts`.
 The `JS2300` object exposes:
 
 - `JS2300.log(message)`, `JS2300.flushLog()`, `JS2300.now()`,
-  `JS2300.sleep(ms)`, `JS2300.gc()`, `JS2300.exit(reason)`
+  `JS2300.sleep(ms)`, `JS2300.gc()`, `JS2300.exit(reason)`,
+  `JS2300.mode()`
 - `JS2300.system.battery()`, `backlight(level)`, `avOutput(mode)`,
   `action(id)`
 - `JS2300.fs.list(path)`, `index(root, gameIndexPath, mediaIndexPath)`,
