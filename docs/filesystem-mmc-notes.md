@@ -23,7 +23,7 @@ working theories.
 
 ## Confirmed From Device Logs
 
-- With `SD_MODE=wide20`, repeated Storage -> Write Probe runs completed without
+- With the former `wide16` boot profile, repeated Storage -> Write Probe runs completed without
   crashes in `logmuos0151`.
 - Typical 512 KiB sequential write phase:
   - total around 208-225 ms;
@@ -45,9 +45,8 @@ working theories.
 ## Working Theory
 
 - Not every write is equally risky. Large sequential writes are relatively
-  stable. The default is currently `wide20` because `wide18` still showed
-  later frontend freezes; nearby `wide14`, `wide18`, `wide22`, and `wide24`
-  profiles exist to locate the actual stability knee on weak cards or SD
+  stable. The default build now boots `wide25`; nearby lower-speed profiles
+  remain available at runtime to locate the stability knee on weak cards or SD
   extenders.
 - Many small files stress FAT directory/FAT metadata more than sequential data
   writes.

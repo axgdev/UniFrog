@@ -9,6 +9,10 @@
 #define UNIFROG_GIT_DIRTY 1
 #endif
 
+#ifndef UNIFROG_BUILD_EPOCH
+#define UNIFROG_BUILD_EPOCH 1704067200L
+#endif
+
 #ifndef UNIFROG_SDK_GIT_COMMIT
 #define UNIFROG_SDK_GIT_COMMIT "unknown"
 #endif
@@ -27,10 +31,6 @@
 
 #ifndef UNIFROG_SD_MODE
 #define UNIFROG_SD_MODE "unknown"
-#endif
-
-#ifndef UNIFROG_SD_READ_MODE
-#define UNIFROG_SD_READ_MODE "boot"
 #endif
 
 #ifndef UNIFROG_SD_EXPERIMENTAL

@@ -1,8 +1,9 @@
 # SF2000/GB300 Audio Quirks
 
 This document records the confirmed audio behavior of UniFrog on the
-SF2000/GB300 HCRTOS runtime. Keep it updated when changing `src/unifrog_audio.c`
-or `src/unifrog_media.c`.
+SF2000/GB300 HCRTOS runtime. Keep it updated when changing
+`foundation/src/platform/sf2000/audio/unifrog_audio.c`
+or `components/media/src/platform/sf2000/unifrog_media.c`.
 
 For the current device route contract and GB300 hardware-decoder gotchas, see
 `docs/sf2000-gb300-audio.md`.
@@ -25,12 +26,12 @@ For the current device route contract and GB300 hardware-decoder gotchas, see
   with `level=0` after `run_sound_init(0, sample_rate, channels)`, so UniFrog
   keeps L15 active-low and changes only the same GPIO direction/output state
   when the audio gate is enabled.
-- The LCD panel ID is only a default board hint. Some GB300 units can have an
-  SF2000 panel, so UniFrog also switches to the GB300/L15 audio gate when the
-  local input scanner proves that the GB300 stock-bit keypad bus is present.
-  That GB300 bus probe runs periodically even while the SF2000 scanner reports
-  plausible buttons, because a screen-swapped GB300 can otherwise look like an
-  SF2000 until audio and controls are already routed incorrectly.
+- The LCD panel ID is only the panel marker. Fastboot detects the board before
+  UniFrog mutates GPIO state by combining the GB300 keypad-bus idle scan with
+  passive GPIO L27/R07 input bits. UniFrog uses that retained board marker for
+  early audio/input routing and then combines it with the LCD panel ID to name
+  normal and screen-swapped devices. The later local input scanner can still
+  correct the route if it proves a different keypad bus.
 - The wireless RF code temporarily owns part of the GPIO-L group and historically
   configured L15 as an input. UniFrog reasserts the enabled audio gate after RF
   polling so GB300 audio is not silently disabled by controller polling.
@@ -67,9 +68,14 @@ For the current device route contract and GB300 hardware-decoder gotchas, see
   GB300 input bus still gets the GB300 L15 gate, but release playback sends
   mono-mixed content through stereo s16 hardware frames. This matches the stock
   GB300 `run_sound_init(..., 2)` transport while preserving the single-speaker
-  mono content policy. AUTO PCM still tries AUDSINK first, matching the
-  v0.4.4-era route more closely than the silent direct-SND experiment.
-- On GB300, UniFrog's AUTO PCM opener tries AUDSINK before direct
+  mono content policy. Libretro uses the v0.4.4-style direct-SND route with
+  2048-frame coalesced writes because active GB300 AUDSINK playback rejects
+  repeated 512-frame stereo writes and produces audible gaps.
+- Libretro discards quiet GB300 buffers while the L15 output route is closed.
+  This avoids feeding inaudible PCM into a closed route. AUDSINK keeps a short
+  retry budget on both boards, while the direct GB300 SND path applies its
+  longer transient-full retry policy inside the audio layer.
+- On GB300, UniFrog's general AUTO PCM opener tries AUDSINK before direct
   `/dev/sndC0i2so`. The direct SND fallback intentionally uses the simpler
   v0.4.4-style parameters (`O_WRONLY`, no AUDPAD source, `start_threshold=0`)
   because 0142 and 0147 showed the newer vendor-style `O_RDWR`/AUDPAD route can
@@ -170,11 +176,11 @@ For the current device route contract and GB300 hardware-decoder gotchas, see
   packets advance through the hardware rings as quickly as SD reads complete.
   SD jitter is handled by the separate file readahead buffer, not by keeping the
   running decoder rings seconds ahead.
-- The hardware feed lead and SD read buffers are build tunables. Use
-  `MEDIA_AUDIO_FEED_LEAD_MS`, `MEDIA_VIDEO_FEED_LEAD_MS`,
-  `MEDIA_FILE_BUFFER_SIZE`, `MEDIA_FILE_READAHEAD_SIZE`, and
-  `MEDIA_VIDEO_READAHEAD_SIZE`/`MEDIA_VIDEO_READAHEAD_SLOTS` in `config.mk` or
-  on the `make` command line when device logs show either
+- The hardware feed lead and SD read buffers are runtime settings. Use
+  `media_audio_feed_lead_ms`, `media_video_feed_lead_ms`,
+  `media_file_buffer_size`, `media_file_readahead_size`, and
+  `media_video_readahead_size`/`media_video_readahead_slots` in
+  `/unifrog_data/unifrog.ini` when device logs show either
   `ahead_ms`/`ahead_a` too close to zero or excessive SD reads. The default
   hardware-audio feed lead is now one global `3000 ms` value for audio-only and
   all video resolutions; the audio payload is small enough that this is simpler
@@ -182,29 +188,29 @@ For the current device route contract and GB300 hardware-decoder gotchas, see
   small multi-window cache with a bounded startup prefill. Native video
   allocates that cache after the audio/video decoder KSHM setup so it cannot
   starve hardware decode. The video KSHM ring defaults to a bounded 8 MiB via
-  `MEDIA_VIDEO_KSHM_SIZE`, with `MEDIA_VIDEO_LOWRES_KSHM_SIZE` available only
+  `media_video_kshm_size`, with `media_video_lowres_kshm_size` available only
   as a low-resolution override. For slower cards, tune
-  `MEDIA_VIDEO_PREFILL_MAX_BYTES`; for no-stutter small-video playback,
-  optionally set `MEDIA_VIDEO_PRELOAD_MAX_BYTES`. See
+  `media_video_prefill_max_bytes`; for no-stutter small-video playback,
+  optionally set `media_video_preload_max_bytes`. See
   `docs/media-buffering-algorithm.md`.
 - Video and audio hardware queues are also capped against the actual decoder
-  clocks with `MEDIA_VIDEO_MAX_HW_AHEAD_MS` and
-  `MEDIA_AUDIO_MAX_HW_AHEAD_MS`. This prevents a long SD/demux stall from being
+  clocks with `media_video_max_hw_ahead_ms` and
+  `media_audio_max_hw_ahead_ms`. This prevents a long SD/demux stall from being
   followed by a large catch-up burst that queues many seconds into `/dev/viddec`
   or `/dev/auddec`. The caps should remain above the active feed lead; equal
   values make normal decoder-clock jitter look like constant over-ahead waits.
 - After an explicit seek, `/dev/auddec` and `/dev/viddec` report their decoded
   clocks from zero until enough post-flush packets are fed. The bounded
-  `MEDIA_SEEK_WARMUP_PACKETS` window lets those packets through before
+  `media_seek_warmup_packets` window lets those packets through before
   re-enabling hardware-ahead caps; without it, seeks can stall forever with
   `clock=0` and a large absolute packet PTS.
-- Hardware-ahead waits are also bounded by `MEDIA_HW_AHEAD_MAX_WAIT_MS`. If the
+- Hardware-ahead waits are also bounded by `media_hw_ahead_max_wait_ms`. If the
   decoder clock remains stuck after a seek, UniFrog logs `hw_ahead timeout`,
   caps its internal feed timestamp, and continues instead of waiting until the
   watchdog resets the device.
 - Video seeks also reset `/dev/avsync0` with `AVSYNC_SET_STC_MS`, which matches
   the HCRTOS cast player timebase path. If repeated seeks still leave viddec
-  behind audio by more than `MEDIA_VIDEO_STUCK_BEHIND_MS`, UniFrog logs
+  behind audio by more than `media_video_stuck_behind_ms`, UniFrog logs
   `seek video recover`, flushes viddec with the stock-style `1.0` flush rate,
   resets AVSYNC to the audio clock, and hides the video layer until post-seek
   catch-up reaches the requested timestamp.
@@ -299,17 +305,17 @@ remaining failure is inside `/dev/auddec` output routing or mute sequencing. If
 one auddec probe tone is audible, use that label as the production GB300
 auddec route before investigating compressed codec packet details.
 
-The legacy `UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE` and
-`UNIFROG_MEDIA_GB300_AUDDEC_PROBE_ONCE` compile-time probes remain for automatic
-startup capture, but they are not the normal GB300 workflow. Prefer Developer ->
-Audio test because it exercises the widest set of route and gate combinations
-in one firmware build.
+The legacy `UNIFROG_AUDIO_GB300_ROUTE_PROBE_ONCE` compile-time probe and the
+`media_gb300_auddec_probe_once` runtime setting remain for automatic startup
+capture, but they are not the normal GB300 workflow. Prefer Developer -> Audio
+test because it exercises the widest set of route and gate combinations in one
+firmware build.
 
 ## Open Work
 
 - Native video is rendered by the HCRTOS hardware video plane. UniFrog can set
   the source/destination rectangle, but it does not currently receive video
-  frames as normal UI surfaces. Arbitrary compositing inside the native UI would
+  frames as normal UI surfaces. Arbitrary compositing inside the frontend UI would
   need a separate decode/readback path or a confirmed hardware-plane overlay
   contract.
 - If the HCRTOS player internals expose a private PCM sink or `AUDDEV_PCMO`

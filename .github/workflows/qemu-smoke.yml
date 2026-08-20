@@ -1,0 +1,60 @@
+name: QEMU smoke
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: qemu-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qemu-smoke:
+    timeout-minutes: 30
+    runs-on: [self-hosted, sf2000-qemu]
+    env:
+      QEMU_DIR: ${{ vars.UNIFROG_QEMU_DIR }}
+      QEMU_WORK: ${{ vars.UNIFROG_QEMU_WORK }}
+      DEPS: ${{ vars.UNIFROG_DEPS }}
+      SDK: ${{ vars.UNIFROG_SDK }}
+      JS2300: ${{ vars.UNIFROG_JS2300 }}
+      TOOLCHAIN: ${{ vars.UNIFROG_TOOLCHAIN }}
+    steps:
+      - name: Check out UniFrog
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Verify private runner inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in QEMU_DIR QEMU_WORK DEPS SDK JS2300 TOOLCHAIN; do
+            test -n "${!name:-}" || { echo "missing runner variable: $name" >&2; exit 1; }
+          done
+          test -d "$QEMU_DIR"
+          test -f "$QEMU_DIR/firmware/SF2000_XMC_XM25QH40B_4mbit_bugfix.bin"
+          test -d "$DEPS"
+          test -d "$SDK"
+          test -d "$JS2300"
+          test -x "$TOOLCHAIN/bin/mipsel-mti-elf-gcc"
+
+      - name: Build and boot UniFrog in QEMU
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CCACHE_DIR="${CCACHE_DIR:-$RUNNER_TEMP/unifrog-ccache}"
+          jobs="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+          ccache_cmd=
+          if command -v ccache >/dev/null 2>&1; then
+            ccache_cmd="$(command -v ccache)"
+          fi
+          timeout 25m make qemu-smoke \
+            JOBS="$jobs" \
+            QEMU_DIR="$QEMU_DIR" \
+            QEMU_WORK="$QEMU_WORK" \
+            DEPS="$DEPS" \
+            SDK="$SDK" \
+            JS2300="$JS2300" \
+            TOOLCHAIN="$TOOLCHAIN" \
+            CCACHE="$ccache_cmd"

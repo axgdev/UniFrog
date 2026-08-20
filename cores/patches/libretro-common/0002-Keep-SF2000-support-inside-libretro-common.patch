@@ -1,4 +1,4 @@
-From 6417e7cb44a8f1871900c6dc59a1432ce4b8c9c4 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Wed, 6 May 2026 08:06:06 +0000
 Subject: [PATCH 2/2] Keep SF2000 support inside libretro-common
@@ -14,7 +14,7 @@ Move the SF2000 libco backend and compatibility header into the libretro-common 
 
 diff --git a/include/sf2000_compat.h b/include/sf2000_compat.h
 new file mode 100644
-index 0000000..7a93259
+index 0000000000000000000000000000000000000000..7a9325959baae4e6870753934fd3d3ddcc77a86f
 --- /dev/null
 +++ b/include/sf2000_compat.h
 @@ -0,0 +1,26 @@
@@ -45,7 +45,7 @@ index 0000000..7a93259
 +
 +#endif
 diff --git a/libco/libco.c b/libco/libco.c
-index 1e83c32..790d869 100644
+index 1e83c32201950836ec7030841f2a83ce5416da6b..790d8696983b7ccca204dfb0714c1f96a009ed25 100644
 --- a/libco/libco.c
 +++ b/libco/libco.c
 @@ -38,7 +38,7 @@ void genode_free_secondary_stack(void *stack);
@@ -59,7 +59,7 @@ index 1e83c32..790d869 100644
    #endif
 diff --git a/libco/sjlj_sf2000.c b/libco/sjlj_sf2000.c
 new file mode 100644
-index 0000000..64a2df8
+index 0000000000000000000000000000000000000000..64a2df87b95b12eb291573554c0270ef5121762a
 --- /dev/null
 +++ b/libco/sjlj_sf2000.c
 @@ -0,0 +1,103 @@
@@ -166,3 +166,6 @@ index 0000000..64a2df8
 +#ifdef __cplusplus
 +}
 +#endif
+-- 
+2.54.0
+

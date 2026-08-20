@@ -1,5 +1,5 @@
 /bl/
-/.deps/
+/.deps*/
 /output/
 /build/
 /sdcard-package/
@@ -7,8 +7,6 @@
 /cores/build/
 /cores/output/
 /frontend/output/
-/js2300/build/
-/js2300/output/
 /config.mk
 /.ccache/
 /asdpack
@@ -24,3 +22,4 @@
 *.dtb
 *.dts.tmp
 *.pre.tmp
+.commandcode

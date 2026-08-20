@@ -143,6 +143,9 @@ struct unifrog_abi {
    void (*input_save_previous)(void);
    void (*input_poll_with_wireless_divisor)(unsigned wireless_divisor);
    uint32_t (*input_menu_buttons)(void);
+   int (*application_memory_reserve_top)(size_t bytes, size_t alignment,
+                                         void **out_ptr);
+   void (*application_memory_release_top)(void *ptr);
 };
 
 #define UNIFROG_ABI_MEMBER_END(type, member) \

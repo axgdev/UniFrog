@@ -32,7 +32,7 @@ This matches prior stable behavior and vendor-style decoder usage.
 
 ## Current Code Path
 
-`src/unifrog_media.c` now does:
+`components/media/src/platform/sf2000/unifrog_media.c` now does:
 
 - `media_h264_extradata_annexb(...)` conversion for H.264 container extradata
 - post-init extra packet send (`media_send_extra_packet`) before start

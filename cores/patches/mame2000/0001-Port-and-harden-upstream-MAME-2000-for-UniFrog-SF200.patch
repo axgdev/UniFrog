@@ -1,0 +1,1018 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog Maintainers <unifrog@example.invalid>
+Date: Mon, 22 Jun 2026 05:29:20 +0000
+Subject: [PATCH 1/2] Port and harden upstream MAME 2000 for UniFrog SF2000
+
+Add the MIPS32r1 soft-float static port and device controls, then fix upstream out-of-bounds array loops, invalid discrete saturation, stale i86 flag reads, unbounded NES APU counts, and content-directory lifetime. The fixes keep the module safe under GCC 15 optimization without changing its supported driver set.
+---
+ Makefile                |  15 ++++
+ Makefile.common         |  10 ++-
+ src/common.c            |   3 +
+ src/cpu/i86/i286.c      |   2 +-
+ src/cpu/i86/i86.c       |   2 +-
+ src/inptport.c          |  15 ++++
+ src/libretro/fileio.c   |   3 +-
+ src/libretro/libretro.c | 171 +++++++++++++++++++++++++++++++++++-----
+ src/libretro/video.c    |  14 ++++
+ src/mame.c              |  48 +++++++++++
+ src/osdepend.h          |   4 +
+ src/sound/disc_mth.c    |   2 +-
+ src/sound/nes_apu.c     |  20 +++--
+ src/tilemap.c           |  13 +++
+ src/ui_text.c           |   3 +
+ src/ui_text.h           |   3 +
+ src/usrintrf.c          |  65 +++++++++++++++
+ src/vidhrdw/btime.c     |   2 +-
+ src/vidhrdw/cheekyms.c  |   2 +-
+ src/vidhrdw/sf1.c       |  33 ++++++++
+ 20 files changed, 391 insertions(+), 39 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 64d8115ccf3c522278dbc17eb51890a9e3eacf5f..eee8cdb7f4ecca8dcfb900dd00936c5fa1e237e1 100644
+--- a/Makefile
++++ b/Makefile
+@@ -322,6 +322,17 @@ else ifeq ($(platform), gcw0)
+    DISABLE_ERROR_LOGGING := 1
+    CFLAGS += -march=mips32 -mtune=mips32r2 -mhard-float
+ 
++# SF2000
++else ifeq ($(platform), sf2000)
++   TARGET := $(TARGET_NAME)_libretro_$(platform).a
++   MIPS:=/opt/mips32-mti-elf/2019.09-03-2/bin/mips-mti-elf-
++   CC = $(MIPS)gcc
++   AR = $(MIPS)ar
++   CFLAGS = -EL -march=mips32 -mtune=mips32 -msoft-float -G0 -mno-abicalls -fno-pic
++   CFLAGS += -ffast-math -fomit-frame-pointer -ffunction-sections -fdata-sections 
++   CFLAGS += -DSF2000 -DDISABLE_ERROR_LOGGING
++   STATIC_LINKING = 1
++
+ # MIYOO
+ else ifeq ($(platform), miyoo)
+    TARGET := $(TARGET_NAME)_libretro.so
+@@ -524,8 +535,12 @@ endif
+ ifeq ($(DEBUG), 1)
+ CFLAGS += -O0 -g
+ else
++ifeq ($(platform), sf2000)
++CFLAGS += -O3 -DNDEBUG
++else
+ CFLAGS += -O2 -DNDEBUG
+ endif
++endif
+ 
+ # compiler, linker and utilities
+ RM = rm -f
+diff --git a/Makefile.common b/Makefile.common
+index ad7793b8001fe05a0d941acef2cb8d62e0025392..4b5028223d7a9953bedcde5165f31f6c67ed9b45 100644
+--- a/Makefile.common
++++ b/Makefile.common
+@@ -1811,13 +1811,15 @@ SOURCES_C += $(CORE_DIR)/src/libretro/libretro.c \
+ 				 $(CORE_DIR)/src/libretro/shared.c
+ 
+ ifeq ($(WANT_LIBCO), 1)
+-	DEFS += -DWANT_LIBCO -I$(LIBRETRO_COMM_DIR)/include
+-	SOURCES_C += $(LIBRETRO_COMM_DIR)/libco/libco.c
+-else
+-	SOURCES_C += $(LIBRETRO_COMM_DIR)/rthreads/rthreads.c
++	DEFS += -DWANT_LIBCO
+ endif
+ 
+ ifneq ($(STATIC_LINKING), 1)
++	ifeq ($(WANT_LIBCO), 1)
++		SOURCES_C += $(LIBRETRO_COMM_DIR)/libco/libco.c
++	else
++		SOURCES_C += $(LIBRETRO_COMM_DIR)/rthreads/rthreads.c
++	endif
+ 	SOURCES_C += $(LIBRETRO_COMM_DIR)/compat/compat_strl.c \
+ 		$(LIBRETRO_COMM_DIR)/compat/compat_strcasestr.c \
+ 		$(LIBRETRO_COMM_DIR)/file/file_path.c 
+diff --git a/src/common.c b/src/common.c
+index 49305a5b9bc466c5e8481e2057eecc5a38a1cd04..fc4d2587b0575a60525b0bd97d895aef39050599 100644
+--- a/src/common.c
++++ b/src/common.c
+@@ -14,6 +14,9 @@ unsigned int dispensed_tickets;
+ unsigned int coins[COIN_COUNTERS];
+ unsigned int lastcoin[COIN_COUNTERS];
+ unsigned int coinlockedout[COIN_COUNTERS];
++#if defined(SF2000)
++unsigned int original_machine_orientation;
++#endif
+ 
+ data_t flip_screen_x, flip_screen_y;
+ 
+diff --git a/src/cpu/i86/i286.c b/src/cpu/i86/i286.c
+index e5e9d86c5d80f8de825ba3e0ae334e8c2b6126f8..e2bc90d9bbf754c366106c59fdf8538b87942a04 100644
+--- a/src/cpu/i86/i286.c
++++ b/src/cpu/i86/i286.c
+@@ -242,7 +242,7 @@ unsigned i286_get_reg(int regnum)
+ 	{
+ 		case I286_IP: return I.pc - I.base[CS];
+ 		case I286_SP: return I.regs.w[SP];
+-		case I286_FLAGS: CompressFlags(); return I.flags;
++		case I286_FLAGS: return CompressFlags();
+ 		case I286_AX: return I.regs.w[AX];
+ 		case I286_CX: return I.regs.w[CX];
+ 		case I286_DX: return I.regs.w[DX];
+diff --git a/src/cpu/i86/i86.c b/src/cpu/i86/i86.c
+index efc6675cbc01ab21c41487ec2ab6a25ca9202f60..d983e8c5e65a1725386908bad19a6016e4ff89e5 100644
+--- a/src/cpu/i86/i86.c
++++ b/src/cpu/i86/i86.c
+@@ -184,7 +184,7 @@ unsigned i86_get_reg(int regnum)
+ 	{
+ 	case I86_IP:		return I.pc - I.base[CS];
+ 	case I86_SP:		return I.regs.w[SP];
+-	case I86_FLAGS: 	CompressFlags(); return I.flags;
++	case I86_FLAGS: 	return CompressFlags();
+ 	case I86_AX:		return I.regs.w[AX];
+ 	case I86_CX:		return I.regs.w[CX];
+ 	case I86_DX:		return I.regs.w[DX];
+diff --git a/src/inptport.c b/src/inptport.c
+index bd2712a8bd17452d16f53a074f248b6d283d0fa7..fdc032624da5e1c50a40a96a791ac5f99637d09a 100644
+--- a/src/inptport.c
++++ b/src/inptport.c
+@@ -679,8 +679,18 @@ int load_input_port_settings(void)
+ 			if (readint(f,&coins[i]) != 0)
+ 				goto getout;
+ 		}
++#if !defined(SF2000)
+ 		if (readint(f,&dispensed_tickets) != 0)
+ 			goto getout;
++#else
++		osd_set_rotation_mode(0);
++		/* HACK: ignore ticket tracking; reuse value for TATE Mode */
++		unsigned int rotation_mode;
++		if (readint(f,&rotation_mode) != 0)
++			goto getout;
++		else
++			osd_set_rotation_mode(rotation_mode);
++#endif
+ 
+ 		mixer_read_config(f);
+ 
+@@ -988,8 +998,13 @@ void save_input_port_settings(void)
+ 		/* write out the coin/ticket counters for this machine - LBO 042898 */
+ 		for (i = 0; i < COIN_COUNTERS; i ++)
+ 			writeint(f,coins[i]);
++#if !defined(SF2000)
+ 		writeint(f,dispensed_tickets);
+ 
++#else
++		/* HACK: ignore ticket tracking; reuse value for TATE Mode */
++		writeint(f,osd_get_rotation_mode());
++#endif
+ 		mixer_write_config(f);
+ 
+ 		osd_fclose(f);
+diff --git a/src/libretro/fileio.c b/src/libretro/fileio.c
+index 4b47a302bd7295107dcd59280ee5f063137c84ca..a9a2d4cfdbdf32e4531b51eb86b8142fa00caceb 100644
+--- a/src/libretro/fileio.c
++++ b/src/libretro/fileio.c
+@@ -1448,8 +1448,9 @@ int osd_display_loading_rom_message (const char *name, int current, int total)
+ 		printf ("loading %-12s\n", name);
+ 	else
+ 		printf ("             \n");
++#if !defined(SF2000)
+ 	fflush (stdout);
+-
++#endif
+ 	if( keyboard_pressed (KEYCODE_LCONTROL) && keyboard_pressed (KEYCODE_C) )
+ 		return 1;
+ 
+diff --git a/src/libretro/libretro.c b/src/libretro/libretro.c
+index 7fd366219e15121629125246af09182b88a2aeea..e5305b24cf5ffaf6b030eb20e99804ee236e9993 100644
+--- a/src/libretro/libretro.c
++++ b/src/libretro/libretro.c
+@@ -33,7 +33,7 @@ char *IMAMESAMPLEPATH = NULL;
+ 
+ const char *retro_save_directory;
+ const char *retro_system_directory;
+-const char *retro_content_directory;
++char *retro_content_directory;
+ char core_save_directory[1024];
+ char core_sys_directory[1024];
+ 
+@@ -67,6 +67,7 @@ int should_skip_frame                    = 0;
+ 
+ static int sample_rate                   = 22050;
+ static int stereo_enabled                = true;
++static int audio_enabled                 = true;
+ 
+ int game_index = -1;
+ unsigned short *gp2x_screen15;
+@@ -89,7 +90,11 @@ void decompose_rom_sample_path(char *rompath, char *samplepath);
+ void init_joy_list(void);
+ 
+ extern UINT32 create_path_recursive(char *path);
+-	
++
++#if defined(SF2000)
++static retro_log_printf_t log_cb;
++#endif
++
+ #if defined(_3DS)
+ void* linearMemAlign(size_t size, size_t alignment);
+ void linearFree(void* mem);
+@@ -98,11 +103,15 @@ void linearFree(void* mem);
+ void CLIB_DECL logerror(const char *text,...)
+ {
+ #ifdef DISABLE_ERROR_LOGGING
++#if defined(SF2000)
++   //log_cb(RETRO_LOG_DEBUG, text);
++#else
+    va_list arg;
+    va_start(arg,text);
+    vprintf(text,arg);
+    va_end(arg);
+ #endif
++#endif
+ }
+ 
+ int global_showinfo = 1;
+@@ -119,11 +128,22 @@ int attenuation = 0;
+ 
+ void gp2x_printf(char* fmt, ...)
+ {
+-   va_list marker;
+-	
+-   va_start(marker, fmt);
+-   vprintf(fmt, marker);
+-   va_end(marker);
++#if defined(SF2000)
++	char buffer[500];
++
++	va_list args;
++	va_start(args, fmt);
++	vsnprintf(buffer, sizeof(buffer), fmt, args);
++	va_end(args);
++
++	if (log_cb)
++		log_cb(RETRO_LOG_INFO, buffer);
++#else
++    va_list marker;
++    va_start(marker, fmt);
++    vprintf(fmt, marker);
++    va_end(marker);
++#endif
+ }
+ 
+ void gp2x_set_video_mode(int bpp,int width,int height)
+@@ -140,6 +160,9 @@ void gp2x_video_setpalette(void)
+ unsigned long gp2x_joystick_read(int n)
+ {
+    (void)n;
++#if defined(SF2000)
++   return 0;
++#endif
+ }
+ 
+ int osd_init(void)
+@@ -295,6 +318,19 @@ static void update_variables(bool first_run)
+     else
+         stereo_enabled = true;
+ 
++	var.value = NULL;
++    var.key = "mame2000-audio";
++    
++    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
++    {
++        if(strcmp(var.value, "enabled") == 0)
++            audio_enabled = true;
++        else
++            audio_enabled = false;
++    }
++    else
++        audio_enabled = true;
++	
+    /* Reinitialise frameskipping, if required */
+    if (!first_run &&
+        ((frameskip_type     != prev_frameskip_type)))
+@@ -311,11 +347,20 @@ void retro_set_environment(retro_environment_t cb)
+       { "mame2000-show_gameinfo", "Show Game Information; disabled|enabled" },
+       { "mame2000-sample_rate", "Audio Rate (Restart); 22050|11025|22050|32000|44100" },
+       { "mame2000-stereo", "Stereo (Restart); enabled|disabled" },
++	  { "mame2000-audio", "Sound (Restart); enabled|disabled" },
+       { NULL, NULL },
+    };
+    environ_cb = cb;
+     
+    cb(RETRO_ENVIRONMENT_SET_VARIABLES, (void*)vars);
++   
++#if defined(SF2000)
++   struct retro_log_callback log;
++   if (environ_cb(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &log))
++      log_cb = log.log;
++   else
++      log_cb = NULL;
++#endif
+ }
+ 
+ void retro_set_audio_sample(retro_audio_sample_t cb)
+@@ -348,14 +393,36 @@ void retro_reset(void)
+    machine_reset();
+ }
+ 
++#if defined(SF2000)
++void update_geometry()
++{
++	const bool rotated = ((Machine->orientation == ROT90) || (Machine->orientation == ROT270));
++	struct retro_system_av_info system_av_info;
++	system_av_info.geometry.base_width   = emulated_width;
++	system_av_info.geometry.base_height  = emulated_height;
++	system_av_info.geometry.aspect_ratio = (rotated) ? ( (float) 3 / (float) 4) : ( (float) 4/ (float) 3);
++	environ_cb(RETRO_ENVIRONMENT_SET_GEOMETRY, &system_av_info);
++}
++#endif
+ static void update_input(void)
+ {
++#if !defined(SF2000)
+ #define RK(port,key)     input_state_cb(port, RETRO_DEVICE_KEYBOARD, 0,RETROK_##key)
+ #define JS(port, button) joypad_bits & (1 << RETRO_DEVICE_ID_JOYPAD_##button)
++#else
++#define RK(port,key)     (input_state_cb(port, RETRO_DEVICE_KEYBOARD, 0,RETROK_##key))
++#define JS(port, button) (joypad_bits & (1 << RETRO_DEVICE_ID_JOYPAD_##button))
++#endif
+ 	int i, j, c = 0;
+ 	input_poll_cb();
+ 	
+ 	key[KEY_TAB] = 0;
++	key[KEY_TILDE] = 0;
++	key[KEY_P] = 0;
++	key[KEY_F3] = 0;
++	key[KEY_TAB] = 0;
++	key[KEY_ESC] = 0;
++	
+ 	for (i = 0; i < 4; i++)
+ 	{
+ 		key[KEY_1 + i] = 0;
+@@ -388,7 +455,15 @@ static void update_input(void)
+ 		joy_pressed[c++] = JS(i, L);
+ 		joy_pressed[c++] = JS(i, R);
+ 
++#if defined(SF2000)
++		key[KEY_TAB] |= (JS(i, L) > 0) && (JS(i, START) > 0);	// config menu: L + START
++		key[KEY_TILDE] |= (JS(i, R) > 0) && (JS(i, START) > 0);	//    OSD menu: R + START
++		key[KEY_P] |= (JS(i, R) > 0) && (JS(i, L) > 0);			//       pause: R + L
++		key[KEY_F3] |= (JS(i, R) > 0) && (JS(i, SELECT) > 0);	//  reset game: R + SELECT
++		key[KEY_ESC]  |= (JS(i, A) > 0);						// menu cancel: A
++#else
+ 		key[KEY_TAB] |= JS(i, R2);
++#endif
+ 	}
+ 
+ 	key[KEY_A] =RK(0, a);
+@@ -406,7 +481,7 @@ static void update_input(void)
+ 	key[KEY_M] =RK(0, m);
+ 	key[KEY_N] =RK(0, n);
+ 	key[KEY_O] =RK(0, o);
+-	key[KEY_P] =RK(0, p);
++	key[KEY_P] |=RK(0, p);
+ 	key[KEY_Q] =RK(0, q);
+ 	key[KEY_R] =RK(0, r);
+ 	key[KEY_S] =RK(0, s);
+@@ -439,7 +514,7 @@ static void update_input(void)
+ 	key[KEY_9_PAD] =RK(0, KP9);
+ 	key[KEY_F1] =RK(0, F1);
+ 	key[KEY_F2] =RK(0, F2);
+-	key[KEY_F3] =RK(0, F3);
++	key[KEY_F3] |=RK(0, F3);
+ 	key[KEY_F4] =RK(0, F4);
+ 	key[KEY_F5] =RK(0, F5);
+ 	key[KEY_F6] =RK(0, F6);
+@@ -449,8 +524,8 @@ static void update_input(void)
+ 	key[KEY_F10] =RK(0, F10);
+ 	key[KEY_F11] =RK(0, F11);
+ 	key[KEY_F12] =RK(0, F12);
+-	key[KEY_ESC] =RK(0, ESCAPE);
+-	key[KEY_TILDE] =RK(0, TILDE);
++	key[KEY_ESC] |=RK(0, ESCAPE);
++	key[KEY_TILDE] |=RK(0, TILDE);
+ 	key[KEY_MINUS] =RK(0, MINUS);
+ 	key[KEY_EQUALS] =RK(0, EQUALS);
+ 	key[KEY_BACKSPACE] =RK(0, BACKSPACE);
+@@ -515,8 +590,14 @@ void hook_video_done(void)
+ void run_thread_proc(void)
+ {
+    run_game(game_index);
++#if !defined(SF2000)
+    hook_audio_done();
+    hook_video_done();
++#else
++   // never exit a co-thread
++   while (true)
++      co_switch(main_thread);
++#endif
+ }
+ #else
+ static void hook_check(void)
+@@ -548,6 +629,7 @@ void hook_video_done(void)
+    slock_unlock(libretro_mutex);
+ }
+ 
++#if !defined(SF2000)
+ #ifdef WANT_LIBCO
+ void *run_thread_proc(void *v)
+ {
+@@ -569,6 +651,15 @@ void run_thread_proc(void *v)
+    hook_video_done();
+ }
+ #endif
++#else
++void run_thread_proc(void *v)
++{
++   run_game(game_index);
++   thread_done = 1;
++   hook_audio_done();
++   hook_video_done();
++}
++#endif
+ 
+ static void lock_mame(void)
+ {
+@@ -656,7 +747,6 @@ void retro_get_system_info(struct retro_system_info *info)
+ 
+ void retro_get_system_av_info(struct retro_system_av_info *info)
+ {
+-   
+    float aspect_ratio = Machine->orientation & ORIENTATION_SWAP_XY? ( (float) 3 / (float) 4) : ( (float) 4/ (float) 3);
+ #ifndef WANT_LIBCO
+    lock_mame();
+@@ -701,25 +791,28 @@ void retro_run(void)
+    else
+       video_cb(gp2x_screen15, gfx_width, gfx_height, gfx_width * 2);
+ 
+-   if (samples_per_frame)
++   if (audio_enabled)
+    {
+-      if (usestereo)
+-         audio_batch_cb(samples_buffer, samples_per_frame);
+-      else
++      if (samples_per_frame)
+       {
+-         for (i = 0, j = 0; i < samples_per_frame; i++)
++         if (usestereo)
++            audio_batch_cb(samples_buffer, samples_per_frame);
++         else
+          {
+-            conversion_buffer[j++] = samples_buffer[i];
+-            conversion_buffer[j++] = samples_buffer[i];
++            for (i = 0, j = 0; i < samples_per_frame; i++)
++            {
++               conversion_buffer[j++] = samples_buffer[i];
++               conversion_buffer[j++] = samples_buffer[i];
++            }
++            audio_batch_cb(conversion_buffer, samples_per_frame);
+          }
+-         audio_batch_cb(conversion_buffer, samples_per_frame);
+       }
+    }
+ 
++#ifndef WANT_LIBCO
+    audio_done = 0;
+    video_done = 0;
+ 
+-#ifndef WANT_LIBCO
+    unlock_mame();
+ #endif
+ 
+@@ -804,11 +897,18 @@ bool retro_load_game(const struct retro_game_info *info)
+    enum retro_pixel_format fmt = RETRO_PIXEL_FORMAT_RGB565;
+    if (!environ_cb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt))
+    {
++#if !defined(SF2000)
+       fprintf(stderr, "[libretro]: RGB565 is not supported.\n");
++#else
++      logerror("[libretro]: RGB565 is not supported.\n");
++#endif
+       return false;
+    }
+ 
++  free(retro_content_directory);
+   retro_content_directory = strdup(info->path);
++  if (!retro_content_directory)
++     return false;
+   path_basedir(retro_content_directory);
+ 
+   printf("CONTENT_DIRECTORY: %s\n", retro_content_directory);
+@@ -834,8 +934,14 @@ bool retro_load_game(const struct retro_game_info *info)
+   }
+    printf("SAVE_DIRECTORY: %s\n", retro_save_directory);
+ 
++#if !defined(SF2000)
+    sprintf(core_sys_directory,"%s%cmame2000\0",retro_system_directory,slash);
+    sprintf(core_save_directory,"%s%cmame2000\0",retro_save_directory,slash);
++#else
++   sprintf(core_sys_directory,"%s%cmame2000",retro_system_directory,slash);
++   sprintf(core_save_directory,"%s%cmame2000",retro_save_directory,slash);
++#endif
++
+    printf("MAME2000_SYS_DIRECTORY: %s\n", core_sys_directory);
+    printf("MAME2000_SAVE_DIRECTORY: %s\n", core_save_directory);
+ 
+@@ -857,6 +963,9 @@ bool retro_load_game(const struct retro_game_info *info)
+    strcat(IMAMESAMPLEPATH, "/samples");
+ 
+    /* do we have a driver for this? */
++#if defined(SF2000)
++   game_index = -1;
++#endif
+    for (i = 0; drivers[i] && (game_index == -1); i++)
+    {
+ 	   if (strcasecmp(baseName,drivers[i]->name) == 0)
+@@ -871,6 +980,9 @@ bool retro_load_game(const struct retro_game_info *info)
+ 	   printf("Game \"%s\" not supported\n", baseName);
+ 	   return false;
+    }
++#if defined(SF2000)
++   printf("game_index=%d driver_name=%s\n", game_index, drivers[game_index]->name);
++#endif
+ 
+    /* parse generic (os-independent) options */
+    //parse_cmdline (argc, argv, game_index);
+@@ -912,6 +1024,10 @@ bool retro_load_game(const struct retro_game_info *info)
+    options.samplerate = sample_rate;
+    usestereo = stereo_enabled;
+ 
++#if defined(SF2000)
++   printf("sample_rate=%d\n", sample_rate);
++#endif
++
+    /* This is needed so emulated YM3526/YM3812 chips are used instead on physical ones. */
+    options.use_emulated_ym3812 = 1;
+ 
+@@ -1037,13 +1153,23 @@ bool retro_load_game(const struct retro_game_info *info)
+ 
+    decompose_rom_sample_path(IMAMEBASEPATH, IMAMESAMPLEPATH);
+ 
++#if !defined(SF2000)
+    mame_sleep = 1;
++#endif
+ 
+ #ifdef WANT_LIBCO
+    main_thread = co_active();
+    core_thread = co_create(0x10000, run_thread_proc);
+    co_switch(core_thread);
++#if defined(SF2000)
++   extern int bailing;
++   if (bailing)
++       return false;
++#endif   
+ #else
++#if defined(SF2000)
++   mame_sleep = 1;
++#endif   
+    run_thread = sthread_create(run_thread_proc, NULL);
+ #endif
+ 
+@@ -1076,6 +1202,9 @@ else printf("esc pressed quit!\n");
+    run_thread      = NULL;
+    retro_hook_quit = 0;
+ #endif
++
++   free(retro_content_directory);
++   retro_content_directory = NULL;
+ }
+ 
+ unsigned retro_get_region(void)
+diff --git a/src/libretro/video.c b/src/libretro/video.c
+index bb42a8ea978ab2905924695bd3612ece16ad1dec..a277246f11a7607b16364e7b29c1a8040f577eee 100644
+--- a/src/libretro/video.c
++++ b/src/libretro/video.c
+@@ -72,6 +72,9 @@ float brightness_paused_adjust;
+ int gfx_width;
+ int gfx_height;
+ 
++#if defined(SF2000)
++unsigned int rotation_mode;
++#endif
+ static int viswidth;
+ static int visheight;
+ static int skiplinesmax;
+@@ -967,6 +970,17 @@ float osd_get_gamma(void)
+ 	return osd_gamma_correction;
+ }
+ 
++#if defined(SF2000)
++void osd_set_rotation_mode(unsigned int _rotation_mode)
++{
++	rotation_mode = _rotation_mode;
++}
++
++unsigned int osd_get_rotation_mode(void)
++{
++	return rotation_mode;
++}
++#endif
+ /* brightess = percentage 0-100% */
+ void osd_set_brightness(int _brightness)
+ {
+diff --git a/src/mame.c b/src/mame.c
+index 4d0cc3c4c041a414e84fb499b542eb8e3cdbe57f..70b5c02927b838031479161e721b9311d884a87f 100644
+--- a/src/mame.c
++++ b/src/mame.c
+@@ -37,6 +37,9 @@ int init_machine(void);
+ void shutdown_machine(void);
+ int run_machine(void);
+ 
++#if defined(SF2000)
++extern unsigned int original_machine_orientation;
++#endif
+ void overlay_free(void);
+ void backdrop_free(void);
+ void overlay_remap(void);
+@@ -250,6 +253,51 @@ int init_machine(void)
+ 	/* load input ports settings (keys, dip switches, and so on) */
+ 	settingsloaded = load_input_port_settings();
+ 
++#if defined(SF2000)
++   original_machine_orientation = Machine->orientation;
++
++   switch (osd_get_rotation_mode())
++   {
++   case 0: // no rotation
++      break;
++   case 90:
++      /* if only one of the components is inverted, switch them */
++      if ((Machine->orientation & ROT180) == ORIENTATION_FLIP_X ||
++         (Machine->orientation & ROT180) == ORIENTATION_FLIP_Y)
++            Machine->orientation ^= ROT180;
++
++      Machine->orientation ^= ROT90;
++
++      /* if only one of the components is inverted, switch them */
++      if ((Machine->ui_orientation & ROT180) == ORIENTATION_FLIP_X ||
++         (Machine->ui_orientation & ROT180) == ORIENTATION_FLIP_Y)
++            Machine->ui_orientation ^= ROT180;
++
++      Machine->ui_orientation ^= ROT90;
++      break;
++   case 180:
++      Machine->orientation ^= ROT180;
++      Machine->ui_orientation ^= ROT180;
++      break;
++   case 270:
++      /* if only one of the components is inverted, switch them */
++      if ((Machine->orientation & ROT180) == ORIENTATION_FLIP_X ||
++         (Machine->orientation & ROT180) == ORIENTATION_FLIP_Y)
++            Machine->orientation ^= ROT180;
++
++      Machine->orientation ^= ROT270;
++
++      /* if only one of the components is inverted, switch them */
++      if ((Machine->ui_orientation & ROT180) == ORIENTATION_FLIP_X ||
++         (Machine->ui_orientation & ROT180) == ORIENTATION_FLIP_Y)
++            Machine->ui_orientation ^= ROT180;
++
++      Machine->ui_orientation ^= ROT270;
++      break;
++   default: // no rotation
++      break;
++   }
++#endif
+ 	if( !memory_init() )
+ 		goto out_free;
+ 
+diff --git a/src/osdepend.h b/src/osdepend.h
+index 2de6c1e76da8925cf65aa68433dfb48f809c9642..61c6d8fbab6dddc54cf7fd1d8ba09b64bf6a920c 100644
+--- a/src/osdepend.h
++++ b/src/osdepend.h
+@@ -95,6 +95,10 @@ int osd_skip_this_frame(void);
+ void osd_update_video_and_audio(struct osd_bitmap *bitmap);
+ void osd_set_gamma(float _gamma);
+ float osd_get_gamma(void);
++#if defined(SF2000)
++void osd_set_rotation_mode(unsigned int rotation_mode);
++unsigned osd_get_rotation_mode(void);
++#endif
+ void osd_set_brightness(int brightness);
+ int osd_get_brightness(void);
+ void osd_save_snapshot(struct osd_bitmap *bitmap);
+diff --git a/src/sound/disc_mth.c b/src/sound/disc_mth.c
+index 9d5df694f4408811c75c5a7f3f43ec5649164ebb..43e2e431be013837609e021487a349f5ddbf476c 100644
+--- a/src/sound/disc_mth.c
++++ b/src/sound/disc_mth.c
+@@ -125,7 +125,7 @@ int dst_divide_step(struct node_description *node)
+ 	{
+ 		if(node->input2==0)
+ 		{
+-			node->output=2^31;	/* Max out but dont break */
++			node->output=2147483647.0;	/* Max out but dont break */
+ 
+ 		}
+ 		else
+diff --git a/src/sound/nes_apu.c b/src/sound/nes_apu.c
+index 1e19a911755d73bf48b8f939786af9f173e10b91..449969b32b686c0b1faf4bb68e4cc75a6a4e8563 100644
+--- a/src/sound/nes_apu.c
++++ b/src/sound/nes_apu.c
+@@ -719,15 +719,19 @@ WRITE_HANDLER( NESPSG_1_w ) {apu_write(1,offset,data);}
+ /* INITIALIZE APU SYSTEM */
+ int NESPSG_sh_start(const struct MachineSound *msound)
+ {
+-  struct NESinterface *intf = (struct NESinterface *)msound->sound_interface;
+-  int i;
+-
+-  /* Initialize global variables */
++  struct NESinterface *intf = (struct NESinterface *)msound->sound_interface;
++  int i;
++  int chip_count = intf->num;
++
++  if (chip_count <= 0 || chip_count > MAX_NESPSG)
++    return 1;
++
++  /* Initialize global variables */
+   samps_per_sync = Machine->sample_rate / Machine->drv->frames_per_second;
+   buffer_size = samps_per_sync;
+-  real_rate = samps_per_sync * Machine->drv->frames_per_second;
+-  chip_max = intf->num;
+-  apu_incsize = (float) (N2A03_DEFAULTCLOCK / (float) real_rate);
++  real_rate = samps_per_sync * Machine->drv->frames_per_second;
++  chip_max = chip_count;
++  apu_incsize = (float) (N2A03_DEFAULTCLOCK / (float) real_rate);
+ 
+   /* Use initializer calls */
+   create_noise(noise_lut, 13, NOISE_LONG);
+@@ -738,7 +742,7 @@ int NESPSG_sh_start(const struct MachineSound *msound)
+   buffer_size+=samps_per_sync;
+ 
+   /* Initialize individual chips */
+-  for (i = 0;i < chip_max;i++)
++  for (i = 0;i < chip_count;i++)
+   {
+      SETAPU(i);
+ 
+diff --git a/src/tilemap.c b/src/tilemap.c
+index 44cc0ce10f9443703f8ec75d74bb1ec6dfeeafa6..4ca927c12ad5211dab58def1c639c74a059fe262 100644
+--- a/src/tilemap.c
++++ b/src/tilemap.c
+@@ -474,6 +474,11 @@ struct tilemap *tilemap_create(
+ 			first_tilemap = tilemap;
+ 			return tilemap;
+ 		}
++#if defined(SF2000)
++		else
++			printf("error creating tilemap\n");
++
++#endif
+ 		tilemap_dispose( tilemap );
+ 	}
+ 	return 0;
+@@ -484,9 +489,17 @@ void tilemap_dispose( struct tilemap *tilemap ){
+ 		first_tilemap = tilemap->next;
+ 	}
+ 	else {
++#if !defined(SF2000)
+ 		struct tilemap *prev = first_tilemap;
+ 		while( prev->next != tilemap ) prev = prev->next;
+ 		prev->next =tilemap->next;
++#else
++		if (first_tilemap) {
++			struct tilemap *prev = first_tilemap;
++			while( prev->next != tilemap ) prev = prev->next;
++			prev->next =tilemap->next;
++		}
++#endif
+ 	}
+ 
+ 	free( tilemap->cached_tile_info );
+diff --git a/src/ui_text.c b/src/ui_text.c
+index 9c54dcf26d90725bb4e02435f6721b0b52900187..8373e1f19df1d623a9b093c1adb76fdf517fa0af 100644
+--- a/src/ui_text.c
++++ b/src/ui_text.c
+@@ -40,6 +40,9 @@ const char * default_text[] =
+ 	"CPU",
+ 	"Address",
+ 	"Value",
++#if defined(SF2000)
++	"Rotation",
++#endif
+ 	"Sound",
+ 	"sound",
+ 	"stereo",
+diff --git a/src/ui_text.h b/src/ui_text.h
+index 95863f818c821cbd55094af370d05291035b0022..29e45fdb3d0d43796fe0f56d11df854d8c7ae6d0 100644
+--- a/src/ui_text.h
++++ b/src/ui_text.h
+@@ -25,6 +25,9 @@ enum
+ 	UI_cpu,
+ 	UI_address,
+ 	UI_value,
++#if defined(SF2000)
++	UI_rotation_mode,
++#endif
+ 	UI_sound,
+ 	UI_sound_lc, /* lower-case version */
+ 	UI_stereo,
+diff --git a/src/usrintrf.c b/src/usrintrf.c
+index 147ee46f3c72c27404bd523b31d32e8feb34b68d..393e9c9c16660a7be5567ce8d46d6c7fd1a3b672 100644
+--- a/src/usrintrf.c
++++ b/src/usrintrf.c
+@@ -26,6 +26,13 @@ extern char build_version[];
+ extern unsigned int dispensed_tickets;
+ extern unsigned int coins[COIN_COUNTERS];
+ extern unsigned int coinlockedout[COIN_COUNTERS];
++#if defined(SF2000)
++#include <libretro.h>
++extern unsigned int original_machine_orientation;
++extern int emulated_width;
++extern int emulated_height;
++extern void update_geometry(void);
++#endif
+ 
+ /* MARTINEZ.F 990207 Memory Card */
+ #ifndef MESS
+@@ -3134,6 +3141,56 @@ static void onscrd_mixervol(struct osd_bitmap *bitmap,int increment,int arg)
+ 	displayosd(bitmap,buf,volume,mixer_get_default_mixing_level(arg));
+ }
+ 
++#if defined(SF2000)
++static void onscrd_rotation_mode(struct osd_bitmap *bitmap,int increment,int arg)
++{
++	char buf[20];
++	unsigned int rotation_mode;
++
++	if (increment)
++	{
++		rotation_mode = osd_get_rotation_mode();
++		rotation_mode += 90 * increment;
++		if (rotation_mode < 0) rotation_mode = 0;
++		else if (rotation_mode > 270) rotation_mode = 270;
++		else
++		{
++			Machine->orientation = original_machine_orientation;
++			switch (rotation_mode)
++			{
++				case 0:
++					break;
++				case 90:
++					/* if only one of the components is inverted, switch them */
++					if ((Machine->orientation & ROT180) == ORIENTATION_FLIP_X ||
++						(Machine->orientation & ROT180) == ORIENTATION_FLIP_Y)
++							Machine->orientation ^= ROT180;
++
++					Machine->orientation ^= ROT90;
++					break;
++				case 180:
++					Machine->orientation ^= ROT180;
++					break;
++				case 270:
++					/* if only one of the components is inverted, switch them */
++					if ((Machine->orientation & ROT180) == ORIENTATION_FLIP_X ||
++						(Machine->orientation & ROT180) == ORIENTATION_FLIP_Y)
++							Machine->orientation ^= ROT180;
++
++					Machine->orientation ^= ROT270;
++					break;
++			}
++			osd_set_rotation_mode(rotation_mode);
++			update_geometry();
++			cpu_set_reset_line(0,PULSE_LINE);
++		}
++	}
++	rotation_mode = osd_get_rotation_mode();
++
++	sprintf(buf,"%s %3d%%", ui_getstring (UI_rotation_mode), rotation_mode);
++	displayosd(bitmap,buf,100*rotation_mode/270,0);
++}
++#endif
+ static void onscrd_brightness(struct osd_bitmap *bitmap,int increment,int arg)
+ {
+ 	char buf[20];
+@@ -3240,6 +3297,11 @@ static void onscrd_init(void)
+ 
+ 
+ 	item = 0;
++#if defined(SF2000)
++	onscrd_fnc[item] = onscrd_rotation_mode;
++	onscrd_arg[item] = 0;
++	item++;
++#endif
+ 
+ 	onscrd_fnc[item] = onscrd_volume;
+ 	onscrd_arg[item] = 0;
+@@ -3448,11 +3510,14 @@ if (Machine->gamedrv->flags & GAME_COMPUTER)
+ 	/* This call is for the cheat, it must be called once a frame */
+ 	if (options.cheat) DoCheat(bitmap);
+ 
++#if !defined(SF2000)
++	// exiting the emulation like this on SF2000 causes a crash!
+ 	/* if the user pressed ESC, stop the emulation */
+ 	/* but don't quit if the setup menu is on screen */
+ 	if (setup_selected == 0 && input_ui_pressed(IPT_UI_CANCEL))
+ 		return 1;
+ 
++#endif
+ 	if (setup_selected == 0 && input_ui_pressed(IPT_UI_CONFIGURE))
+ 	{
+ 		setup_selected = -1;
+diff --git a/src/vidhrdw/btime.c b/src/vidhrdw/btime.c
+index 558fe1a7382398147ca709879672094803b35a63..3820489d935a7ac92a00a3c29bbd04411c31f7a8 100644
+--- a/src/vidhrdw/btime.c
++++ b/src/vidhrdw/btime.c
+@@ -527,7 +527,7 @@ static void decode_modified(unsigned char *sprite_ram, int interleave)
+         }
+     }
+ 
+-    for (i = 0; i < sizeof(char_dirty); i++)
++    for (i = 0; i < (int)(sizeof(char_dirty) / sizeof(char_dirty[0])); i++)
+     {
+         if (char_dirty[i] == 2)  char_dirty[i] = 0;
+     }
+diff --git a/src/vidhrdw/cheekyms.c b/src/vidhrdw/cheekyms.c
+index d3688f90dceb9a133eb0a8844974935f11b1d170..e40c6c93fac05d3d2ad01f312f605689d790d568 100644
+--- a/src/vidhrdw/cheekyms.c
++++ b/src/vidhrdw/cheekyms.c
+@@ -132,7 +132,7 @@ void cheekyms_vh_screenrefresh(struct osd_bitmap *bitmap,int full_refresh)
+ 
+ 	/* Draw the sprites first, because they're supposed to appear below
+ 	   the characters */
+-	for (offs = 0; offs < sizeof(sprites); offs += 4)
++	for (offs = 0; offs < (int)(sizeof(sprites) / sizeof(sprites[0])); offs += 4)
+ 	{
+ 		int v1, sx, sy, col, code;
+ 
+diff --git a/src/vidhrdw/sf1.c b/src/vidhrdw/sf1.c
+index ef08a8184a21d696e0f4cf0df7e0af7932d1d373..c8e15b6209eb893db990d78a9f8dacf5b38f1c74 100644
+--- a/src/vidhrdw/sf1.c
++++ b/src/vidhrdw/sf1.c
+@@ -7,6 +7,10 @@ int sf1_active = 0;
+ 
+ static struct tilemap *bgb_tilemap, *bgm_tilemap, *char_tilemap;
+ 
++#if defined(SF2000)
++static data16_t bgscroll, fgscroll;
++static int bgprev = 0, fgprev = 0;
++#endif
+ 
+ /***************************************************************************
+ 
+@@ -16,7 +20,11 @@ static struct tilemap *bgb_tilemap, *bgm_tilemap, *char_tilemap;
+ 
+ static void get_bgb_tile_info(int tile_index)
+ {
++#if !defined(SF2000)
+ 	unsigned char *base = memory_region(REGION_GFX5) + 2*tile_index;
++#else
++	unsigned char *base = memory_region(REGION_GFX5) + ((bgscroll >> 4) << 5) + 2*tile_index;
++#endif
+ 	int attr = base[0x10000];
+ 	int color = base[0];
+ 	int code = (base[0x10000+1]<<8) | base[1];
+@@ -26,7 +34,11 @@ static void get_bgb_tile_info(int tile_index)
+ 
+ static void get_bgm_tile_info(int tile_index)
+ {
++#if !defined(SF2000)
+ 	unsigned char *base = memory_region(REGION_GFX5) + 0x20000 + 2*tile_index;
++#else
++	unsigned char *base = memory_region(REGION_GFX5) + ((fgscroll >> 4) << 5) + 0x20000 + 2*tile_index;
++#endif
+ 	int attr = base[0x10000];
+ 	int color = base[0];
+ 	int code = (base[0x10000+1]<<8) | base[1];
+@@ -53,8 +65,13 @@ int sf1_vh_start(void)
+ {
+ 	int i;
+ 
++#if !defined(SF2000)
+ 	bgb_tilemap =  tilemap_create(get_bgb_tile_info, tilemap_scan_cols,TILEMAP_OPAQUE,     16,16,2048,16);
+ 	bgm_tilemap =  tilemap_create(get_bgm_tile_info, tilemap_scan_cols,TILEMAP_TRANSPARENT,16,16,2048,16);
++#else
++	bgb_tilemap =  tilemap_create(get_bgb_tile_info, tilemap_scan_cols,TILEMAP_OPAQUE,     16,16,(512/16)+1,16);
++	bgm_tilemap =  tilemap_create(get_bgm_tile_info, tilemap_scan_cols,TILEMAP_TRANSPARENT,16,16,(512/16)+1,16);
++#endif
+ 	char_tilemap = tilemap_create(get_char_tile_info,tilemap_scan_rows,TILEMAP_TRANSPARENT, 8, 8,  64,32);
+ 
+ 	if (!bgb_tilemap || !bgm_tilemap || !char_tilemap)
+@@ -90,12 +107,28 @@ WRITE_HANDLER( sf1_videoram_w )
+ 
+ WRITE_HANDLER( sf1_deltaxb_w )
+ {
++#if !defined(SF2000)
+ 	tilemap_set_scrollx(bgb_tilemap, 0, data);
++#else
++	bgscroll = COMBINE_WORD(bgscroll, data);
++	tilemap_set_scrollx(bgb_tilemap,0,bgscroll & 0x0f);
++
++	if ((bgscroll >> 4) != bgprev) tilemap_mark_all_tiles_dirty( bgb_tilemap );
++	bgprev = bgscroll >> 4;
++#endif
+ }
+ 
+ WRITE_HANDLER( sf1_deltaxm_w )
+ {
++#if !defined(SF2000)
+ 	tilemap_set_scrollx(bgm_tilemap, 0, data);
++#else
++	fgscroll = COMBINE_WORD(fgscroll, data);
++	tilemap_set_scrollx(bgm_tilemap,0,fgscroll & 0x0f);
++
++	if ((fgscroll >> 4) != fgprev) tilemap_mark_all_tiles_dirty( bgm_tilemap );
++	fgprev = fgscroll >> 4;
++#endif
+ }
+ 
+ void sf1_active_w(int data)
+
+base-commit: 905808fbcc3adf8c610c1c60f0e41ce4b35db1c5
+-- 
+2.54.0
+

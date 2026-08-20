@@ -1,0 +1,133 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog Maintainers <unifrog@example.invalid>
+Date: Mon, 22 Jun 2026 05:29:20 +0000
+Subject: [PATCH] Add the UniFrog SF2000 ProSystem port
+
+Device-specific changes are maintained as a focused patch over the original upstream pin. Vendored libretro-common and unrelated platform assets remain owned by upstream.
+---
+ Makefile                    | 15 ++++++++++++++-
+ Makefile.common             |  2 ++
+ bupboop/coretone/coretone.h |  8 ++++++++
+ core/Pokey.c                |  4 ++++
+ core/libretro.c             | 13 +++++++++++++
+ 5 files changed, 41 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index a2731661ea1ad4ff8e0a84108423234f229f641d..1cc5aef4261edf3d5efd27a16026331e21ea9b36 100644
+--- a/Makefile
++++ b/Makefile
+@@ -314,7 +314,20 @@ else ifeq ($(platform), retrofw)
+ 	CFLAGS += -fsigned-char
+ 	FLAGS += -fomit-frame-pointer -ffast-math -march=mips32 -mtune=mips32
+ 	fpic := -fPIC
+-	
++
++# SF2000
++else ifeq ($(platform), sf2000)
++    TARGET := $(TARGET_NAME)_libretro_$(platform).a
++    MIPS=/opt/mips32-mti-elf/2019.09-03-2/bin/mips-mti-elf-
++    CC = $(MIPS)gcc
++    CXX = $(MIPS)g++
++    AR = $(MIPS)ar
++    CFLAGS =-EL -march=mips32 -mtune=mips32 -msoft-float -ffast-math -fomit-frame-pointer
++    CFLAGS+=-G0 -mno-abicalls -fno-pic
++#	-ffreestanding
++    CFLAGS+=-DSF2000
++    STATIC_LINKING = 1
++
+ # MIYOO
+ else ifeq ($(platform), miyoo)
+ 	TARGET := $(TARGET_NAME)_libretro.so
+diff --git a/Makefile.common b/Makefile.common
+index 911f6a41de8b22a54e1cc4cd9e2534775a4cf441..dbb27b4a2663b51f5204a4275a666b117a463480 100644
+--- a/Makefile.common
++++ b/Makefile.common
+@@ -35,6 +35,7 @@ SOURCES_C += \
+ 	$(BUPBOOP_DIR)/coretone/music.c \
+ 	$(BUPBOOP_DIR)/coretone/sample.c
+ 
++ifneq ($(STATIC_LINKING), 1)
+ SOURCES_C += \
+ 	$(LIBRETRO_COMM_DIR)/compat/compat_posix_string.c \
+ 	$(LIBRETRO_COMM_DIR)/compat/compat_strcasestr.c \
+@@ -49,3 +50,4 @@ SOURCES_C += \
+ 	$(LIBRETRO_COMM_DIR)/string/stdstring.c \
+ 	$(LIBRETRO_COMM_DIR)/time/rtime.c \
+ 	$(LIBRETRO_COMM_DIR)/vfs/vfs_implementation.c
++endif
+diff --git a/bupboop/coretone/coretone.h b/bupboop/coretone/coretone.h
+index abf943af075ad45cf60e941425e6d9492cabe15a..a62ab7209bcac8122f3f2e8cb5d61a5b198055cd 100644
+--- a/bupboop/coretone/coretone.h
++++ b/bupboop/coretone/coretone.h
+@@ -59,11 +59,19 @@
+  * by CORETONE_DECODE_RATE.
+  */
+ #ifndef CORETONE_RENDER_RATE
++#if !defined(SF2000)
+ 	#define CORETONE_RENDER_RATE		48000
++#else
++	#define CORETONE_RENDER_RATE		32000	//11025?
++#endif
+ #endif
+ 
+ #ifndef CORETONE_DECODE_RATE
++#if !defined(SF2000)
+ 	#define CORETONE_DECODE_RATE		240
++#else
++	#define CORETONE_DECODE_RATE		200		//225?
++#endif
+ #endif
+ 
+ 
+diff --git a/core/Pokey.c b/core/Pokey.c
+index 0dc3af476dff8ab2a322917ce0ce354ae475a882..8d296adb64f34b6be21633943871a77fefc635d0 100644
+--- a/core/Pokey.c
++++ b/core/Pokey.c
+@@ -70,7 +70,11 @@ uint8_t pokey_buffer[POKEY_BUFFER_SIZE] = {0};
+ uint32_t pokey_size = 524;
+ 
+ static uint32_t pokey_frequency = 1787520;
++#if !defined(SF2000)
+ static uint32_t pokey_sampleRate = 31440;
++#else
++static uint32_t pokey_sampleRate = 32000;
++#endif
+ uint32_t pokey_soundCntr = 0;
+ uint8_t pokey_audf[4];
+ uint8_t pokey_audc[4];
+diff --git a/core/libretro.c b/core/libretro.c
+index 3e4dbdb61ca210b4be7ab81c1bf863d0dc604e30..55e979e1be74a421088d421994361aef993b7293 100644
+--- a/core/libretro.c
++++ b/core/libretro.c
+@@ -402,7 +402,13 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
+ {
+    memset(info, 0, sizeof(*info));
+    info->timing.fps            = (cartridge_region == REGION_NTSC) ? 60 : 50;
++#if !defined(SF2000)
+    info->timing.sample_rate    = (prosystem_frequency * prosystem_scanlines) << 1; /* 2 samples per scanline */
++#else
++   log_cb(RETRO_LOG_DEBUG, "sample_rate = %d\n",((prosystem_frequency * prosystem_scanlines) << 1));
++   log_cb(RETRO_LOG_DEBUG, "forcing sample_rate to 32000\n");
++   info->timing.sample_rate    = 32000;
++#endif
+    info->geometry.base_width   = videoWidth;
+    info->geometry.base_height  = (cartridge_region == REGION_NTSC) ? 223 : 272;
+    info->geometry.max_width    = 320;
+@@ -585,7 +591,14 @@ bool retro_load_game(const struct retro_game_info *info)
+       sprintf(biospath, "%s%c%s", system_directory_c, slash, "7800 BIOS (U).rom");
+    
+    if (bios_Load(biospath))
++#if !defined(SF2000)
+       bios_enabled = true;
++#else
++   {
++      bios_enabled = true;
++	  log_cb(RETRO_LOG_INFO, "[ProSystem]: using bios at %s\n", biospath);
++   }
++#endif
+ 
+    prosystem_Reset();
+ 
+-- 
+2.54.0
+

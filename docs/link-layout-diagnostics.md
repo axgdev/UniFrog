@@ -89,7 +89,7 @@ make check
 ```
 
 `layout-check` scans `output/sf2000.out`, external core module ELFs under
-`build/core_modules/*.out`, and native module ELFs under `build/native_modules`.
+`build/core_modules/*.out`, and runtime module ELFs under `build/runtime_modules`.
 It fails if any allocatable no-load section ends after `_ebss`. This catches the
 failure class early for JIT caches, DMA buffers, and future fixed reservations.
 It intentionally checks the ELF layout rather than a single symbol name, so new

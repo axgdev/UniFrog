@@ -113,6 +113,14 @@ logs prove it wins on the target SD path. A first-launch cache write adds a full
 ROM-sized SD write, and reading a cached GBA-sized ROM can be slower than
 streaming inflate on this device.
 
+## blueMSX system data
+
+blueMSX needs its `Machines/` and `Databases/` directories at the libretro
+system-directory root. The `sdcard-package` target copies these directories
+from the pinned core source into `output/sdcard/bios/`, alongside the BIOS
+package; installing only `bluemsx-prosty.bin` is not sufficient for
+`retro_load_game()` to initialize a machine.
+
 ## Exception screen
 
 The panic and exception screens poll raw local START plus wireless START and

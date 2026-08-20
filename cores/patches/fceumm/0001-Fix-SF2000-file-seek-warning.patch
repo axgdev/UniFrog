@@ -1,4 +1,4 @@
-From 4a896e1fa091e85f91934025f5ef01fc411499ea Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: UniFrog CI <ci@unifrog.local>
 Date: Thu, 7 May 2026 02:48:57 +0000
 Subject: [PATCH] Fix SF2000 file seek warning
@@ -9,7 +9,7 @@ Reject negative SEEK_SET offsets before comparing against the unsigned in-memory
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/file.c b/src/file.c
-index 3f6ba24..151bad3 100644
+index 3f6ba24e1e92854a1132ac51e2eb5635495ab757..151bad3a5978c99607755ef60ea61dd6afe1642b 100644
 --- a/src/file.c
 +++ b/src/file.c
 @@ -179,7 +179,7 @@ int FCEU_fseek(FCEUFILE *fp, long offset, int whence)
@@ -21,6 +21,8 @@ index 3f6ba24..151bad3 100644
              return -1;
  
           fp->fp->location = offset;
+
+base-commit: 3a84a6fd0ba20dd4877c06b1d58741172148395f
 -- 
 2.54.0
 

@@ -8,7 +8,7 @@ installed without deleting user data.
 - `bios/bisrv.asd`: fastboot image installed as the stock boot payload.
 - `unifrog/firmware/unifrog.bin`: active UniFrog firmware loaded by fastboot.
 - `unifrog/cores`: native core modules for the active build.
-- `unifrog/modules`: optional native modules for the active build.
+- `unifrog/modules`: optional runtime modules for the active build.
 - `unifrog/manifest.ini`: active build identity and dependency commits.
 - `unifrog_data`: user-owned state and extensions. This includes saves, logs,
   cache, scripts, custom themes, custom languages, update zips, installed
@@ -29,7 +29,7 @@ An update zip is the same root layout produced by `make sd-zip`:
 - optional `unifrog/modules/...`
 - optional empty `unifrog_data/...` directories for first-install discovery
 
-Users put update zips in `unifrog_data/updates`. The native frontend installs them
+Users put update zips in `unifrog_data/updates`. The frontend installs them
 into `unifrog_data/versions/<zip-name>/` first, then validates that the fastboot
 image, firmware image, and manifest exist. Installing a zip does not change the
 active system.
@@ -49,7 +49,7 @@ Activation is marker based:
 
 - `unifrog_data/pending-activation.ini`: written before live files are copied.
 - `unifrog_data/active-version.ini`: written after the live layout is updated.
-- `unifrog_data/boot-ok.ini`: written when the native frontend reaches the UI on
+- `unifrog_data/boot-ok.ini`: written when the frontend reaches the UI on
   the next boot.
 
 If the device crashes during activation, the pending marker remains. If an

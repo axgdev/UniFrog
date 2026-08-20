@@ -1,4 +1,4 @@
-From 6ac9164f3c0c0591a5e8d64419d1c6cdbbbe3718 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Wed, 6 May 2026 09:11:34 +0000
 Subject: [PATCH 4/4] Allow external PCE Fast CHD support
@@ -9,7 +9,7 @@ Add an EXTERNAL_CHD_MEDIA path for the SF2000 build so PCE Fast can compile CD/C
  1 file changed, 4 insertions(+)
 
 diff --git a/Makefile.common b/Makefile.common
-index 77cfda8..cffb4f3 100755
+index 77cfda8a9e867ab9b9ff74b688462f14cf34e087..cffb4f3707406206b08121aebe87645a9cb87032 100755
 --- a/Makefile.common
 +++ b/Makefile.common
 @@ -132,6 +132,8 @@ ifeq ($(HAVE_CHD), 1)
@@ -30,3 +30,6 @@ index 77cfda8..cffb4f3 100755
  	else
  		INCFLAGS  += $(ZLIB_INCFLAGS)
  		SOURCES_C += $(ZLIB_SOURCES_C)
+-- 
+2.54.0
+

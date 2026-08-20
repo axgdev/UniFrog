@@ -1,132 +1,96 @@
 # SF2000 Memory Model
 
-This document describes the SF2000 media-capable layout used by UniFrog. It is
-separate from the generic memory notes because the video decoder has stricter
-physical-memory requirements than libretro cores and optional scripts.
+This document describes the SF2000/GB300 memory layout used by UniFrog. The goal
+is to keep only the boot/runtime foundation fixed and make the rest of RAM
+available to whichever high-memory subsystem is currently active.
 
 ## Physical RAM Split
 
-The SF2000 DTS declares 128 MiB of physical RAM. UniFrog splits that RAM into
-owners with non-overlapping lifetimes:
-
-- `sysmem`: fixed HCRTOS, drivers, UniFrog runtime, heap, and services.
-- `appmem`: one reclaimable arena for the frontend, loaders, and native/core guests.
-- `mmz0`: physically contiguous media surfaces for viddec/vidsink.
-- `recovery_log_reserved`: retained crash and recovery log window.
-- `fastboot_reserved`: fixed handoff area at the top of RAM.
-
-Current 1080p media layout, from `board/hc15xx/common/dts/sf2000_min.dts`:
+The board DTS declares 128 MiB of physical RAM. UniFrog now gives that RAM these
+owners:
 
 | Owner | Start | Size | End | Purpose |
 | --- | ---: | ---: | ---: | --- |
-| `sysmem` | `0x00000000` | 48.00 MiB | `0x03000000` | HCRTOS and UniFrog runtime |
-| `appmem` | `0x03000000` | 43.98 MiB | `0x05bf9c60` | Reclaimable application arena |
-| `mmz0` | `0x05bf9c60` | 34.93 MiB | `0x07ee7000` | Decoder/display frame memory |
-| `recovery_log_reserved` | `0x07ee7000` | 1.00 MiB | `0x07fe7000` | Warm reboot diagnostics |
-| `fastboot_reserved` | `0x07fe7000` | 100 KiB | `0x08000000` | Fastboot handoff |
+| `sysmem` | `0x00000000` | 32.00 MiB | `0x02000000` | HCRTOS, drivers, filesystem, UI, logs, recovery paths |
+| `appmem` | `0x02000000` | 94.00 MiB | `0x07e00000` | Reclaimable arena for cores, JS2300, loaders, and transient media MMZ |
+| `mmz0` | `0x07e00000` | 0 bytes | `0x07e00000` | Placeholder node; id 0 is created dynamically for video |
+| `recovery_log_reserved` | `0x07e00000` | 1.875 MiB | `0x07fe0000` | Warm reboot diagnostics |
+| `fastboot_reserved` | `0x07fe0000` | 128 KiB | `0x08000000` | Fastboot handoff |
 
-`bootmem` is a subreservation inside `sysmem`, not a separate top-level owner.
+Cached addresses are the physical addresses plus the KSEG0 base:
+`sysmem` is `0x80000000..0x82000000`, `appmem` is
+`0x82000000..0x87e00000`, retained logs are
+`0x87e00000..0x87fe0000`, and fastboot is
+`0x87fe0000..0x88000000`. `bootmem` is a subreservation inside `sysmem`, not a
+separate top-level owner.
 
-## Media Heap Formula
+## Reclaimable Arena
 
-`mmz0` is sized with the same shape as upstream hc15xx HCRTOS boards that support
-1080p H.264 decode:
+`appmem` is reported through `unifrog_abi_application_memory_slot()` and
+`unifrog_abi_memory_layout()`. Callers must query the ABI instead of assuming a
+fixed address. Core modules are packaged for the current `0x82000000` slot and
+must be rebuilt when the firmware memory map moves.
 
-- maximum decoded width: `1920`
-- maximum decoded height: `1088`
-- reference frame slots: `7`
-- extra frame slots: `3`
-- dual-output video conversion buffer enabled
-- 4 KiB MMZ blocks with allocator metadata overhead
+The arena has mutually exclusive owners in normal use:
 
-The DTS keeps the formula instead of hardcoding a byte value so it remains
-traceable to the HCRTOS media model. With the current constants it resolves to
-`0x022ed3a0` bytes, or about 34.93 MiB.
+- libretro core modules and optional ROM content reservations
+- JS2300 script heaps
+- native media `mmz0` while hardware video is active
 
-## Why `mmz0` Is Reserved
+`unifrog_abi_application_memory_reserve_top()` can temporarily reserve the top of
+the arena. JS2300 uses that for its heap, and the ABI then reports only the
+remaining lower part to other callers. This keeps accidental overlap out of the
+common paths without introducing a complex allocator.
 
-The hardware decoder and display pipeline need physically contiguous surfaces.
-Normal heap allocations can be aligned, but they are not a reliable substitute
-for an MMZ pool because they can be fragmented and may not satisfy the media
-subsystems that allocate frame buffers internally during `VIDDEC_INIT`.
+## Dynamic Media MMZ
 
-The 0105 device logs showed the failure mode directly: with `mmz0` set to size
-zero, every H.264 test failed `VIDDEC_INIT` with `errno=1` before any compressed
-video packet was fed. The software-video fallback then repeatedly failed
-`VIDSINK_DISPLAY_FRAME`, so the visible artifacts were downstream symptoms of a
-missing media-memory owner.
+The hardware decoder and display pipeline still require physically contiguous
+decoded frame/display memory. Instead of reserving `mmz0` forever, UniFrog leaves
+the DTS `mmz0` size at zero and creates MMZ id 0 from `appmem` when native video
+starts:
 
-A nonzero `mmz0` is therefore not a playback leak. It is a deterministic owner
-for decoded frame/display memory. Individual viddec/vidsink allocations are made
-inside that pool during playback and released when the decoder and sink close;
-the pool itself stays reserved so the next playback session can get the same
-contiguous hardware memory without racing the general heap.
+1. Query the current reclaimable arena.
+2. Align it to a 4 KiB boundary.
+3. Call HCRTOS `mmz_create()` with the physical base.
+4. Open and run `/dev/viddec`/`/dev/vidsink`.
+5. Close playback and call `mmz_delete(0)`.
 
-## What Stays Dynamic
+The DTS keeps the upstream hc15xx 1080p media sizing properties for the media
+drivers, but they are not a fixed boot reservation. Device logs should show
+`unifrog media mmz lease` before native video opens and
+`unifrog media mmz release` after it closes.
 
-The compressed packet rings are a different kind of memory from decoded frame
-surfaces.
+HCRTOS KSHM remains separate from decoded frame memory. Because the DTS does not
+define a named `kshm` MMZ pool, compressed `viddec`/`auddec` packet rings still
+fall back to normal aligned heap allocations while playback is active.
 
-UniFrog does not define a named `kshm` MMZ pool in the DTS. In HCRTOS, KSHM first
-looks for that optional pool and otherwise falls back to normal aligned heap
-allocation. That means the `viddec.kshm_size` and `auddec.kshm_size` packet rings
-are created only while playback runs and are released on close.
+## Sysmem Consumers
 
-This preserves the useful part of the old behavior: playback does not reserve a
-large compressed-stream ring forever. The part that must be reserved is only the
-media hardware's decoded-surface pool.
+The packed firmware size undercounts fixed runtime memory. The linked image
+includes BSS and no-load sections through `_ebss`, and HCRTOS also needs heap
+space above that for services that must survive while guests run. The main
+fixed users are:
 
-Current native playback sizes are 8 MiB for the default video compressed ring
-and `0xa0000` bytes for the audio compressed ring. File IO buffering is separate
-from these driver rings. The video ring is intentionally bounded because MP4
-compressed packets do not need the full 16 MiB DTS value, and the saved normal
-heap leaves more room for high-resolution decoded surfaces and the post-probe
-SD cache.
+- firmware text/data/BSS/no-load sections
+- HCRTOS heap, threads, filesystems, and driver state
+- LVGL/theme assets and the UI needed to return from a guest
+- input, audio, display, storage, and recovery services
+- compressed media packet rings, SD read-ahead, and FFmpeg/parser allocations
+  while media playback is active
+- retained logging and temporary diagnostic buffers
 
-## Application Arena Contract
+The earlier 32 MiB sysmem experiment in `f7e3221` made the menu sluggish
+because the framebuffer DTS reserved about 10 MiB of extra system heap at boot.
+The current layout keeps sysmem at 32 MiB after reducing the framebuffer spare
+allocation to one 320x240 RGB565 layer and keeping large JS/core/media heaps in
+`appmem`.
 
-`appmem` is not hardcoded by callers. UniFrog reports it through
-`unifrog_abi_application_memory_slot()` and `unifrog_abi_memory_layout()`, so
-loaders and cores see the actual arena exposed by the DTS.
+## Invariants
 
-The current 1080p media layout leaves about 43.98 MiB of contiguous `appmem`.
-That is smaller than the zero-MMZ experiment, but it is stable: the decoder
-cannot steal from it, and app/core allocations cannot fragment the decoder's
-surface memory.
-
-## SD Read Buffering
-
-Media file IO has two separate buffers:
-
-- FFmpeg AVIO chunk: 64 KiB, with a 16 KiB fallback.
-- Post-probe video read-ahead cache: normally `16 x 512 KiB = 8 MiB`, with
-  smaller slot/count fallbacks if normal heap is tight after decoder init.
-- Post-probe audio/file read-ahead cache: normally one 2 MiB window, with a
-  512 KiB fallback.
-
-The AVIO chunk stays small because MP4 probing and seeking can over-read whatever
-chunk size the callback exposes. The larger read-ahead cache is enabled only
-after `avformat_open_input()` and `avformat_find_stream_info()` finish, so
-startup probing stays bounded while playback gets fewer, larger SD reads.
-
-During media sessions UniFrog also suspends normal log writes around explicit SD
-read windows. This avoids fighting the SD card with high-frequency read/write
-traffic while audio/video playback is trying to keep real-time.
-
-## Why This Is Not Frail
-
-The layout is solid because each subsystem has exactly one owner for each memory
-class:
-
-- HCRTOS and UniFrog runtime state live in `sysmem`.
-- Guests use the ABI-reported `appmem` arena and can be rejected if they do not fit.
-- The media decoder gets a fixed contiguous `mmz0` pool sized for the maximum
-  supported video plane.
-- Crash/recovery and fastboot areas are fixed at the top of RAM and never overlap
-  playback or guest memory.
-- FFmpeg buffering changes SD transaction shape without changing physical memory
-  ownership.
-
-The important invariant is that decoded-frame memory is never borrowed from the
-same heap that app/core code fragments over time. That removes the runtime race
-that made the zero-MMZ layout flaky on real hardware.
+- `sysmem` is the only fixed general-purpose runtime heap.
+- Crash/recovery and fastboot areas stay fixed at the top of RAM.
+- High-memory subsystems must release the arena when they exit.
+- Media can borrow the arena, but media state needed for recovery must stay in
+  `sysmem`.
+- Core modules are not relocatable yet, so the packaged cores must match the
+  firmware's appmem base.

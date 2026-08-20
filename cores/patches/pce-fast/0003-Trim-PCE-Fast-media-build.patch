@@ -1,4 +1,4 @@
-From 1ccdc01ebaa736b7bb9fd77a44b26f0a324cc7dc Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Wed, 6 May 2026 08:55:52 +0000
 Subject: [PATCH 3/4] Trim PCE Fast media build
@@ -11,7 +11,7 @@ Add a UniFrog build knob to skip CHD/libchdr/zstd/zlib sources while keeping the
  3 files changed, 5 insertions(+), 1 deletion(-)
 
 diff --git a/Makefile b/Makefile
-index 3e03b56..9243e3d 100644
+index 3e03b5603f4c64d846d1f7800e678d664258704a..9243e3d0f4894ff5534e9ad89d0bec5f024bc3c7 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -50,6 +50,7 @@ NEED_CRC32 = 1
@@ -23,7 +23,7 @@ index 3e03b56..9243e3d 100644
  prefix := /usr
  libdir := $(prefix)/lib
 diff --git a/Makefile.common b/Makefile.common
-index 55b8f8f..77cfda8 100755
+index 55b8f8febe73f2cb8ee912b99caafa3afa4e9f25..77cfda8a9e867ab9b9ff74b688462f14cf34e087 100755
 --- a/Makefile.common
 +++ b/Makefile.common
 @@ -125,6 +125,7 @@ ifneq ($(HAVE_GRIFFIN),1)
@@ -43,7 +43,7 @@ index 55b8f8f..77cfda8 100755
  ifeq ($(NEED_TREMOR), 1)
      SOURCES_C += $(sort $(filter-out %ivorbisfile_example.c, $(wildcard $(MEDNAFEN_DIR)/tremor/*.c)))
 diff --git a/mednafen/pce_fast/psg.cpp b/mednafen/pce_fast/psg.cpp
-index 68870ae..b02196e 100644
+index 68870ae93513e93b14fe08c611b469af40c221a0..b02196e5c85757ca4ae3d4480a67942196d99893 100644
 --- a/mednafen/pce_fast/psg.cpp
 +++ b/mednafen/pce_fast/psg.cpp
 @@ -405,11 +405,12 @@ void PCEFast_PSG::RunChannel(int chc, int32 timestamp)
@@ -60,3 +60,6 @@ index 68870ae..b02196e 100644
        {
           while(ch->noisecount <= 0)
           {
+-- 
+2.54.0
+

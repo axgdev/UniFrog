@@ -30,6 +30,19 @@ extern "C" {
 #define UNIFROG_CORE_MODULE_EXPORTS_LIBRETRO_SIZE \
    UNIFROG_ABI_MEMBER_END(struct unifrog_core_module_exports, retro_cheat_set)
 
+/* Keep permanent module validation failures separate from retryable SD I/O. */
+enum unifrog_core_module_load_error {
+   UNIFROG_CORE_MODULE_LOAD_OK = 0,
+   UNIFROG_CORE_MODULE_LOAD_ARGUMENT,
+   UNIFROG_CORE_MODULE_LOAD_NO_APP_MEMORY,
+   UNIFROG_CORE_MODULE_LOAD_IO,
+   UNIFROG_CORE_MODULE_LOAD_FORMAT,
+   UNIFROG_CORE_MODULE_LOAD_ABI,
+   UNIFROG_CORE_MODULE_LOAD_ID,
+   UNIFROG_CORE_MODULE_LOAD_RANGE,
+   UNIFROG_CORE_MODULE_LOAD_EXPORTS,
+};
+
 struct unifrog_media_video_options;
 
 struct unifrog_core_module_header {
@@ -56,6 +69,42 @@ struct unifrog_core_module_header {
    uint32_t exports_size;
    uint32_t reserved[4];
 };
+
+static inline int unifrog_core_module_header_layout_valid(
+   const struct unifrog_core_module_header *header)
+{
+   int id_terminated = 0;
+   int extensions_terminated = 0;
+
+   if (!header)
+      return 0;
+   for (size_t i = 0; i < sizeof(header->core_id); i++)
+      id_terminated |= header->core_id[i] == '\0';
+   for (size_t i = 0; i < sizeof(header->extensions); i++)
+      extensions_terminated |= header->extensions[i] == '\0';
+   return header->magic == UNIFROG_CORE_MODULE_MAGIC &&
+      header->header_size >= sizeof(*header) &&
+      header->format_version == UNIFROG_CORE_MODULE_FORMAT_VERSION &&
+      header->endian_mark == UNIFROG_CORE_MODULE_ENDIAN_MARK &&
+      (header->flags & UNIFROG_CORE_MODULE_FLAG_FIXED_ADDRESS) &&
+      header->core_id[0] && id_terminated && extensions_terminated &&
+      header->file_end_addr > header->load_addr &&
+      header->file_end_addr - header->load_addr >= sizeof(*header) &&
+      header->memory_end_addr >= header->file_end_addr &&
+      header->bss_addr >= header->file_end_addr &&
+      header->bss_end_addr >= header->bss_addr &&
+      header->bss_end_addr <= header->memory_end_addr &&
+      header->entry_addr >= header->load_addr &&
+      header->entry_addr < header->file_end_addr &&
+      (header->entry_addr & (sizeof(uint32_t) - 1u)) == 0 &&
+      header->file_end_addr - header->entry_addr >= sizeof(uint32_t) &&
+      /*
+       * $gp is the linker small-data anchor, not a segment end marker. GCC
+       * may place it just beyond the final BSS byte. The device loader bounds
+       * it by the complete application-memory slot once that slot is known.
+       */
+      header->gp_addr >= header->load_addr;
+}
 
 struct unifrog_core_module_exports {
    uint32_t magic;

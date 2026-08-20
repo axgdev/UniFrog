@@ -24,6 +24,10 @@ struct unifrog_audio {
    int muted;
    int output_gate_enabled;
    int output_gate_pending_signal;
+   /* Consecutive silent PCM frames observed while the gate stays open. */
+   unsigned output_gate_silence_frames;
+   /* First reopened buffer waits briefly for mute/GPIO/DAC to settle. */
+   unsigned output_gate_settle_pending;
 };
 
 int unifrog_audio_open(struct unifrog_audio *audio,

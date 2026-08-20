@@ -1,4 +1,4 @@
-From ea53bfd3275b162caf2fee0df3b241529d5d0827 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Tue, 5 May 2026 18:57:44 +0000
 Subject: [PATCH] Add SF2000 QuickNES alignment guards
@@ -10,7 +10,7 @@ Align the static video buffer and avoid unaligned field access patterns on SF200
  2 files changed, 6 insertions(+), 2 deletions(-)
 
 diff --git a/libretro/libretro.cpp b/libretro/libretro.cpp
-index b9afa9d..8cc47fd 100644
+index b9afa9dbff0356b14c79a26abe4cdedf5d66cf3a..8cc47fd9f2ea5fcaeb1b8acd77b5848983bcf2ca 100644
 --- a/libretro/libretro.cpp
 +++ b/libretro/libretro.cpp
 @@ -1330,7 +1330,11 @@ bool retro_load_game(const struct retro_game_info *info)
@@ -27,7 +27,7 @@ index b9afa9d..8cc47fd 100644
  #endif
  
 diff --git a/nes_emu/blargg_common.h b/nes_emu/blargg_common.h
-index 413fd6b..b07c196 100644
+index 413fd6b19b18bdda172844a34324174a44a9c69e..b07c196509edf5215b1d0f402cf29b2b7d8cbe0a 100644
 --- a/nes_emu/blargg_common.h
 +++ b/nes_emu/blargg_common.h
 @@ -52,7 +52,7 @@ arithmetic on smaller types. */
@@ -39,3 +39,8 @@ index 413fd6b..b07c196 100644
  __attribute ((packed))
  #endif
  {
+
+base-commit: 7848e1ac22b1c69d056ae4cb57710651ff1dd169
+-- 
+2.54.0
+

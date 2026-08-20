@@ -1,9 +1,8 @@
 # UniFrog Memory Layout
 
-UniFrog uses three memory ownership classes with different lifetimes:
-persistent runtime memory, a reclaimable application arena, and a deterministic
-media MMZ pool. The SF2000 media-specific split is documented in
-`docs/sf2000-memory-model.md`.
+UniFrog uses two long-lived memory ownership classes: persistent runtime memory
+and a reclaimable high-memory arena. The SF2000/GB300 board-specific split is
+documented in `docs/sf2000-memory-model.md`.
 
 Fixed runtime reservations such as JIT caches and DMA buffers are part of the
 same ownership story. See `docs/link-layout-diagnostics.md` for the linker
@@ -13,18 +12,20 @@ letting the HCRTOS heap overlap them.
 ## Persistent Runtime
 
 The base firmware, HCRTOS, drivers, filesystem state, input/audio/video
-services, log buffers, mquickjs host bindings, and enough UI state to return to
+services, JS2300 host bindings, and enough UI state to return to
 the menu must stay alive while a core runs. This memory comes from `sysmem`.
 
 External applications must not own this region directly. They can request
-services through the stable `unifrog/abi.h` table.
+services through the versioned `unifrog/abi.h` table.
 
-## Reclaimable Application Arena
+## Reclaimable High-Memory Arena
 
-The application arena is for one active high-level guest at a time:
+The high-memory arena is for one active high-level guest at a time, with small
+top reservations allowed when a loader needs a temporary buffer:
 
 - a libretro core image, BSS, and fixed work buffers
 - or a JavaScript/script runtime when no game core is running
+- or a transient `mmz0` pool while hardware video playback is running
 - or scratch buffers owned by a loader step
 
 On exit, UniFrog can wipe or reuse the whole arena. Nothing needed to redraw the
@@ -38,20 +39,22 @@ assuming a fixed address.
 On the current SF2000/GB300 DTS the arena is backed by
 `/hcrtos/memory-mapping/appmem`. The default policy is:
 
-- keep 48 MiB of `sysmem` for UniFrog/HCRTOS
-- keep a fixed `mmz0` media pool sized for 1080p H.264 decode/display surfaces
-- give the remaining middle RAM to one reclaimable application arena
+- keep 32 MiB of `sysmem` for UniFrog/HCRTOS
+- reserve only the retained recovery log and fastboot handoff at the top of RAM
+- give the remaining middle RAM to one reclaimable arena
 
-This currently targets about 44 MiB of contiguous application arena on the
-128 MiB media-capable layout. Devices with less RAM can expose a smaller arena
-or no arena; loaders must reject cores that do not fit.
+This currently exposes 94 MiB of contiguous arena space on the 128 MiB layout:
+cached `0x82000000..0x87e00000`, physical
+`0x02000000..0x07e00000`. Devices with less RAM can expose a smaller arena or
+no arena; loaders must reject cores that do not fit.
 
 ## Media Memory
 
-The SF2000 DTS reserves `mmz0` for hardware decoded frame/display surfaces.
-HCRTOS media drivers allocate those surfaces internally during `VIDDEC_INIT`,
-so this pool must be physically contiguous and must not depend on ordinary heap
-fragmentation. The current 1080p pool is about 34.93 MiB.
+The SF2000 DTS declares a zero-size `mmz0` node so HCRTOS leaves MMZ id 0 free at
+boot. Native video creates `mmz0` from the reclaimable arena immediately before
+opening `/dev/viddec` and deletes it after playback closes. Hardware video still
+gets physically contiguous decoded frame/display memory, but that memory is not
+kept away from cores or scripts while no media session is active.
 
 HCRTOS KSHM is separate from decoded frame memory. Because the DTS does not
 define a named `kshm` MMZ pool, KSHM falls back to normal aligned heap
@@ -74,7 +77,5 @@ over-read tens of MiB before playback starts.
 ## Compatibility Rule
 
 External binaries do not link against raw UniFrog addresses. UniFrog passes a
-semantic-versioned ABI table. If the table grows, new callbacks are appended and
-old fields keep their meaning after v1.0. While the ABI is still v0.x, breaking
-changes are allowed when they remove experimental interfaces or make the design
-cleaner.
+semantic-versioned ABI table. Before a stable release, breaking ABI changes are
+allowed when they remove experimental interfaces or make the design clearer.

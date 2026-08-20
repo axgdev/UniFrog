@@ -6,6 +6,9 @@
 #ifndef UNIFROG_SD_CLOCK_FREQUENCY
 #define UNIFROG_SD_CLOCK_FREQUENCY 198000000
 #endif
+#ifndef UNIFROG_SD_MAX_FREQUENCY
+#define UNIFROG_SD_MAX_FREQUENCY UNIFROG_SD_CLOCK_FREQUENCY
+#endif
 #ifndef UNIFROG_SD_CAP_HIGHSPEED
 #define UNIFROG_SD_CAP_HIGHSPEED 1
 #endif
@@ -56,9 +59,10 @@
 #define MAX_REF_FB_NUM (7)		//if usb wired cast:MIN NUM:5
 #define MAX_TOTAL_FB_NUM (MAX_REF_FB_NUM + MAX_EXTRA_FB_NUM)
 /*
- * The native media stack feeds /dev/viddec directly. Keep mmz0 large enough
- * for the upstream hc15xx 1080p H.264 surface model while leaving the upper
- * retained-log and fastboot handoff regions untouched.
+ * The native media stack feeds /dev/viddec directly. Keep the upstream hc15xx
+ * 1080p H.264 surface model documented here, but do not reserve it at boot:
+ * UniFrog lends the shared application arena to mmz0 only while video playback
+ * is active.
  */
 #define MAX_WIDTH (1920)
 #define MAX_HEIGHT (1088)
@@ -83,39 +87,34 @@
 	(CONFIG_AVC_MB_NEI_SIZE + CONFIG_AVC_CMD_QUEUE_SIZE +                  \
 	 CONFIG_AVC_VBV_SIZE + CONFIG_AVC_MEM_SIZE)
 
-#define __HCRTOS_MMZ0_SIZE                                                     \
-	(CONFIG_AVC_TOTAL_SIZE +                                               \
-	 (CONFIG_DUAL_OUTPUT_SUPPORT * CONFIG_MM_VC_FB_SIZE) +               \
-	 ((CONFIG_VIDEO_IN_SUPPORT && (!CONFIG_VIDEO_IN_SHARE_WITH_VDEC)) * CONFIG_MM_VIN_FB_SIZE))
-
-#define UNIFROG_SYSMEM_MIN_SIZE (0x03000000)
-#define UNIFROG_FASTBOOT_RESERVED_SIZE (0x00019000)
-#define UNIFROG_RECOVERY_LOG_SIZE (0x00100000)
+#define UNIFROG_SYSMEM_SIZE (0x02000000)
+#define UNIFROG_RECOVERY_LOG_OFFSET (0x07e00000)
+#define UNIFROG_FASTBOOT_RESERVED_OFFSET (0x07fe0000)
+#define UNIFROG_RECOVERY_LOG_SIZE                                              \
+	(UNIFROG_FASTBOOT_RESERVED_OFFSET - UNIFROG_RECOVERY_LOG_OFFSET)
+#define UNIFROG_FASTBOOT_RESERVED_SIZE                                         \
+	(CONFIG_MEMORY_SIZE - UNIFROG_FASTBOOT_RESERVED_OFFSET)
 #define HCRTOS_MMZ_BLOCKLOG (12)
 /*
- * Keep decoded video/display surfaces deterministic instead of depending on
- * runtime heap contiguity. The compressed viddec/auddec KSHM packet rings are
- * still allocated dynamically because this DTS does not define a named "kshm"
- * MMZ pool, but the decoder's internal frame/display allocations require mmz0.
+ * sysmem is fixed at 0x80000000..0x82000000 for firmware, drivers,
+ * filesystems, UI, logs, and recovery. The middle of RAM is a single
+ * reclaimable arena at 0x82000000..0x87e00000 for mutually-exclusive guests:
+ * libretro cores, JS2300, loaders, and transient media MMZ. Keep a zero-size
+ * mmz0 node so HCRTOS leaves id 0 free at boot; native video creates id 0 from
+ * appmem just before opening viddec. The top of RAM is retained diagnostics
+ * at 0x87e00000..0x87fe0000 and fastboot handoff at
+ * 0x87fe0000..0x88000000.
  */
-#define HCRTOS_MMZ0_SIZE                                                       \
-	(__HCRTOS_MMZ0_SIZE +                                                  \
-	 (16 * (__HCRTOS_MMZ0_SIZE >> HCRTOS_MMZ_BLOCKLOG)) +                  \
-	 (16 << HCRTOS_MMZ_BLOCKLOG))
+#define HCRTOS_MMZ0_SIZE (0)
+#define UNIFROG_GUESTMEM_END (UNIFROG_RECOVERY_LOG_OFFSET)
 #define HCRTOS_MMZ0_OFFSET                                                     \
-	(CONFIG_MEMORY_SIZE - UNIFROG_FASTBOOT_RESERVED_SIZE -                 \
-	 UNIFROG_RECOVERY_LOG_SIZE - HCRTOS_MMZ0_SIZE)
+	(UNIFROG_GUESTMEM_END)
 #define UNIFROG_APPMEM_SIZE                                                    \
-	(HCRTOS_MMZ0_OFFSET > UNIFROG_SYSMEM_MIN_SIZE ?                       \
-	 (HCRTOS_MMZ0_OFFSET - UNIFROG_SYSMEM_MIN_SIZE) : 0)
-#define UNIFROG_APPMEM_OFFSET (UNIFROG_SYSMEM_MIN_SIZE)
-#define UNIFROG_RECOVERY_LOG_OFFSET                                            \
-	(CONFIG_MEMORY_SIZE - UNIFROG_FASTBOOT_RESERVED_SIZE -                 \
-	 UNIFROG_RECOVERY_LOG_SIZE)
-#define UNIFROG_FASTBOOT_RESERVED_OFFSET                                       \
-	(CONFIG_MEMORY_SIZE - UNIFROG_FASTBOOT_RESERVED_SIZE)
+	(UNIFROG_GUESTMEM_END > UNIFROG_SYSMEM_SIZE ?                         \
+	 (UNIFROG_GUESTMEM_END - UNIFROG_SYSMEM_SIZE) : 0)
+#define UNIFROG_APPMEM_OFFSET (UNIFROG_SYSMEM_SIZE)
 
-#define HCRTOS_SYSMEM_SIZE (UNIFROG_SYSMEM_MIN_SIZE)
+#define HCRTOS_SYSMEM_SIZE (UNIFROG_SYSMEM_SIZE)
 #define HCRTOS_SYSMEM_OFFSET (0)
 
 #define HCRTOS_BOOTMEM_SIZE (0x1000000)
@@ -515,6 +514,7 @@ hcrtos {
 		reg = <0x1884C000 0x2000>;
 		card-detect-delay = <200>;
 		clock-frequency = <UNIFROG_SD_CLOCK_FREQUENCY>;
+		max-frequency = <UNIFROG_SD_MAX_FREQUENCY>;
 		interrupts = <10>;
 		pinmux-active = <PINPAD_L16 4 PINPAD_L17 4 PINPAD_L18 4 PINPAD_L19 4 PINPAD_L20 4 PINPAD_L21 4 PINPAD_L22 0>;
 		bus-width = <UNIFROG_SD_BUS_WIDTH>;
@@ -617,7 +617,13 @@ hcrtos {
 		 * default is system if the property is missing
 		 */
 		buffer-source = "system";
-		extra-buffer-size = <0x9CA000>;//<0x4a9800>;
+		/*
+		 * One spare 320x240 RGB565 layer is enough for the frontend's
+		 * double-buffer request. The old 0x9ca000 value reserved roughly
+		 * 10 MiB from sysmem before the UI started, which made a 32 MiB
+		 * sysmem split too fragile.
+		 */
+		extra-buffer-size = <0x25800>;
 		status = "okay";
 	};
 

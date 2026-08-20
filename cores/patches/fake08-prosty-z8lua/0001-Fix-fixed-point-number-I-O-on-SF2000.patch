@@ -1,0 +1,83 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Axel Garcia K." <git@axelgk.com>
+Date: Mon, 22 Jun 2026 06:26:13 +0000
+Subject: [PATCH] Fix fixed-point number I/O on SF2000
+
+Convert Lua fixed-point values through typed integer temporaries before variadic stdio calls. This removes undefined varargs and scanf behavior and preserves PICO-8 raw-value formatting on the 32-bit target.
+---
+ liolib.c    | 12 +++++++++++-
+ lpico8lib.c |  9 +++++----
+ 2 files changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/liolib.c b/liolib.c
+index 921182ba47307524e215c67b74c7a4ca63d9a115..a00084301825dda3a2cb7403e22e59118912ff13 100644
+--- a/liolib.c
++++ b/liolib.c
+@@ -348,9 +348,15 @@ static int io_lines (lua_State *L) {
+ 
+ 
+ static int read_number (lua_State *L, FILE *f) {
++#if defined(SF2000)
++  int value;
++  if (fscanf(f, "%d", &value) == 1) {
++    lua_pushnumber(L, lua_Number(value));
++#else
+   lua_Number d;
+   if (fscanf(f, LUA_NUMBER_SCAN, &d) == 1) {
+     lua_pushnumber(L, d);
++#endif
+     return 1;
+   }
+   else {
+@@ -517,8 +523,13 @@ static int g_write (lua_State *L, FILE *f, int arg) {
+   for (; nargs--; arg++) {
+     if (lua_type(L, arg) == LUA_TNUMBER) {
+       /* optimization: could be done exactly as for strings */
++#if defined(SF2000)
++      status = status &&
++          fprintf(f, "%d", int(lua_tonumber(L, arg))) > 0;
++#else
+       status = status &&
+           fprintf(f, LUA_NUMBER_FMT, lua_tonumber(L, arg)) > 0;
++#endif
+     }
+     else {
+       size_t l;
+@@ -663,4 +674,3 @@ LUAMOD_API int luaopen_io (lua_State *L) {
+   createstdfile(L, stderr, NULL, "stderr");
+   return 1;
+ }
+-
+diff --git a/lpico8lib.c b/lpico8lib.c
+index 8aadee573ffca1e1d770cfb7ac88706f3e9e6646..8712b4e06ac072bcfb8157534e9121ff1f0e94d2 100644
+--- a/lpico8lib.c
++++ b/lpico8lib.c
+@@ -163,13 +163,15 @@ static int pico8_tostr(lua_State *l) {
+             if (flags) {
+                 uint32_t b = (uint32_t)x.bits();
+                 if ((flags & 0x3) == 0x3) {
+-                    sprintf(buffer, "0x%04x%04x", (b >> 16) & 0xffff, b & 0xffff);
++                    sprintf(buffer, "0x%08lx", (unsigned long)b);
+                 }
+                 else if ((flags & 0x2) == 0x2) {
+-                    sprintf(buffer, "%d", b);
++                    sprintf(buffer, "%ld", (long)(int32_t)b);
+                 }
+                 else {
+-                    sprintf(buffer, "0x%04x.%04x", (b >> 16) & 0xffff, b & 0xffff);
++                    sprintf(buffer, "0x%04lx.%04lx",
++                        (unsigned long)((b >> 16) & 0xffffu),
++                        (unsigned long)(b & 0xffffu));
+                 }
+             } else {
+                 lua_number2str(buffer, x);
+@@ -414,4 +416,3 @@ LUAMOD_API int luaopen_pico8 (lua_State *L) {
+   luaL_setfuncs(L, pico8lib, 0);
+   return 1;
+ }
+-
+
+base-commit: f0eb8df934c5ad588b12ce40bf1ebf1c2d63edf6
+-- 
+2.54.0
+

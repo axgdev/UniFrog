@@ -26,6 +26,11 @@ struct unifrog_presenter {
    int last_dst_y;
    int last_dst_w;
    int last_dst_h;
+   unsigned last_src_w;
+   unsigned last_src_h;
+   unsigned last_fb_w;
+   unsigned last_fb_h;
+   unsigned last_flags;
    unsigned cleared_buffer_mask;
    unsigned present_count;
    uint64_t present_total_count;
@@ -36,7 +41,11 @@ struct unifrog_presenter {
    unsigned blit_count;
    unsigned stretch_count;
    unsigned present_max_count;
+   unsigned last_present_count;
+   unsigned last_ge_count;
+   unsigned last_sync_count;
    unsigned last_vsync_count;
+   unsigned last_pan_count;
 };
 
 struct unifrog_presenter_stats {

@@ -19,7 +19,7 @@ If you copy or remove files in those locations, Unifrog updates with them.
 
 - Browse game folders directly from the SD card.
 - Launch content from a simple, configurable library layout.
-- Set the content root in `unifrog_data/settings.ini` with `rom_root`.
+- Set the content root in `unifrog_data/unifrog.ini` with `rom_root`.
 - Use system folders and file names to keep content organized.
 
 ### History and favorites

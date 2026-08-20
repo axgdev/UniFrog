@@ -9,7 +9,7 @@ PROVIDE(software_init_hook = 0);
 
 SECTIONS
 {
-   . = DEFINED(__UNIFROG_MODULE_BASE) ? __UNIFROG_MODULE_BASE : 0x83000000;
+   . = DEFINED(__UNIFROG_MODULE_BASE) ? __UNIFROG_MODULE_BASE : 0x82000000;
    __unifrog_module_start = .;
 
    .unifrog_module_header : {

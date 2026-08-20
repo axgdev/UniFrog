@@ -62,6 +62,8 @@ void unifrog_ui_text(struct unifrog_ui *ui, int x, int y, const char *text,
    uint16_t color, int scale);
 void unifrog_ui_text_clipped(struct unifrog_ui *ui, int x, int y, int max_chars,
    const char *text, uint16_t color, int scale);
+int unifrog_ui_text_marquee(struct unifrog_ui *ui, int x, int y, int max_chars,
+   const char *text, uint16_t color, int scale, uint32_t elapsed_ms);
 void unifrog_ui_header(struct unifrog_ui *ui,
    const struct unifrog_ui_theme *theme, const char *title,
    const char *detail);

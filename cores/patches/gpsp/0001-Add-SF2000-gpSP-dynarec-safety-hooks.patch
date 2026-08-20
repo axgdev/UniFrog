@@ -1,4 +1,4 @@
-From 07b47b5e31f21f52769fc1d0c2a2c5758e30472a Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Tue, 5 May 2026 18:57:43 +0000
 Subject: [PATCH 1/2] Add SF2000 gpSP dynarec safety hooks
@@ -15,7 +15,7 @@ Guard dynarec memory-handler callsite patching so only aligned instructions insi
  7 files changed, 145 insertions(+), 22 deletions(-)
 
 diff --git a/common.h b/common.h
-index ea0854b..0d70d00 100644
+index ea0854b9c0edaa97f866fb987111be3446eff612..0d70d00309da009031233a831580a1a19fafac55 100644
 --- a/common.h
 +++ b/common.h
 @@ -78,6 +78,16 @@
@@ -36,7 +36,7 @@ index ea0854b..0d70d00 100644
    #define convert_palette(value)  \
      (value & 0x7FFF)
 diff --git a/cpu_threaded.c b/cpu_threaded.c
-index f491670..cdeac92 100644
+index f4916709008623e164225548adda33a38f82ea00..cdeac92ba10ab5c6446b6199611f8990fcde5f9a 100644
 --- a/cpu_threaded.c
 +++ b/cpu_threaded.c
 @@ -2653,12 +2653,15 @@ u8 function_cc *block_lookup_address_arm(u32 pc)
@@ -73,7 +73,7 @@ index f491670..cdeac92 100644
    fflush(stdout);
    return NULL;
 diff --git a/gba_memory.c b/gba_memory.c
-index 68c3831..00f8004 100644
+index 68c3831bdbc916a932eac8e5fe6ceecb70b87507..00f80044b427292d724f26233c518b9004009d5f 100644
 --- a/gba_memory.c
 +++ b/gba_memory.c
 @@ -2512,12 +2512,14 @@ static s32 load_gamepak_raw(const char *name)
@@ -184,7 +184,7 @@ index 68c3831..00f8004 100644
  }
  
 diff --git a/libretro/libretro.c b/libretro/libretro.c
-index 8069103..cffc807 100644
+index 8069103ce44d259653b414f0f067eb24e357dbf8..cffc80747fd094f65bf3dc9f5d51c04c14e2c52b 100644
 --- a/libretro/libretro.c
 +++ b/libretro/libretro.c
 @@ -533,7 +533,11 @@ void retro_get_system_info(struct retro_system_info* info)
@@ -244,7 +244,7 @@ index 8069103..cffc807 100644
  }
  
 diff --git a/main.c b/main.c
-index 55401d7..720bae2 100644
+index 55401d70b7aed2517993dd13911d70fcbeff7893..720bae24d9bbd59a365c0ce008f7d8933368a35f 100644
 --- a/main.c
 +++ b/main.c
 @@ -301,10 +301,15 @@ u32 function_cc update_gba(int remaining_cycles)
@@ -264,7 +264,7 @@ index 55401d7..720bae2 100644
  
  #ifdef TRACE_REGISTERS
 diff --git a/mips/mips_emit.h b/mips/mips_emit.h
-index 2ce520d..dc22de3 100644
+index 2ce520d960d66fe83f90613c9c1578d6430d1a5c..dc22de3efa91b9d7104d03a64e972f8804b8bc40 100644
 --- a/mips/mips_emit.h
 +++ b/mips/mips_emit.h
 @@ -2653,13 +2653,16 @@ static void emit_phand(
@@ -304,7 +304,7 @@ index 2ce520d..dc22de3 100644
  
  #endif
 diff --git a/mips/mips_stub.S b/mips/mips_stub.S
-index 34b0446..9b6bb77 100644
+index 34b0446670691d67f51e6674ada72d39986a564b..9b6bb77e29bd17166569ade62e135d35b8fd8ae2 100644
 --- a/mips/mips_stub.S
 +++ b/mips/mips_stub.S
 @@ -18,17 +18,24 @@
@@ -423,3 +423,8 @@ index 34b0446..9b6bb77 100644
  
  .bss
  .align 6
+
+base-commit: eca3bee1e2d2043d42f0480012c1e7ec85498f88
+-- 
+2.54.0
+

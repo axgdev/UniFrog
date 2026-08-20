@@ -1,53 +1,21 @@
-# JS2300
+# UniFrog JS2300 integration
 
-`js2300/` is UniFrog's MQuickJS embedding layer. It owns VM setup, native
-binding registration, bytecode execution, and the `JS2300.*` API used by
-optional scripts and diagnostics.
+The JS2300 engine is maintained in the standalone
+[`frog2k-javascript`](https://github.com/axgdev/frog2k-javascript/tree/main_unifrog)
+repository and is fetched by the root Makefile from its `main_unifrog` branch. This directory contains only
+UniFrog's consumer-owned host adapter, the JS-backed libretro core, and the
+scripts shipped on the SD card. Keeping the OS bindings here preserves the
+separation between a portable engine and HCRTOS policy.
 
-## Layout
-
-```text
-include/js2300/      Public C interface for embedding JS2300
-src/                 Runtime and binding implementation
-Makefile             Static-library build and syntax check entry point
-```
-
-The root build links `js2300/output/libjs2300.a` into the firmware. The direct
-JS2300 default is `../.deps/mquickjs`, which is the same checkout the root
-Makefile fetches as `.deps/mquickjs`.
-
-## Commands
+The root build pins the engine by commit and links its
+`output/libjs2300.a`; there is no second MQuickJS checkout in UniFrog.
 
 ```sh
-make -C js2300 help
-make -C js2300 print-config
-make -C js2300
-make -C js2300 check
-make -C js2300 MQUICKJS_DIR=/path/to/mquickjs check
+make deps-js2300
+make js2300-check
 ```
 
-`make check` builds the runtime and verifies that the embedded JavaScript
-standard-library source compiles with the configured MQuickJS checkout.
-The global `load("relative/path.js")` helper evaluates scripts relative to the
-current script root.
-
-When a packaged `.js.mqbc` file and `bytecode-manifest.txt` are present,
-JS2300 verifies source and bytecode fingerprints before executing bytecode.
-This avoids relying on FAT timestamps and falls back to source if a file was
-edited without rebuilding bytecode or if the VM rejects bytecode for the current
-atom-table state.
-To keep `load("...")` fast and reliable, JS2300 preloads manifest-matched
-entry scripts and literal `load()` dependencies before attaching the `JS2300.*`
-API. The JS2300-owned MQuickJS build raises the ROM atom-table limit for these
-preloaded bytecode files.
-Verified raw bytecode bytes are kept in a small per-boot memory cache. Source
-bytes are still read and hashed against the manifest before bytecode is
-executed.
-
-## Contract
-
-- Keep hot paths in C and expose batched JavaScript APIs.
-- Avoid exposing HCRTOS details directly to JavaScript.
-- Keep optional scripts in SD-card files, not firmware rebuilds.
-- Keep bindings versioned while UniFrog is pre-1.0.
-- Match script syntax to the MQuickJS parser used on device.
+The host adapter owns HCRTOS display, input, storage, battery, filesystem,
+and launch actions. The standalone engine owns bytecode validation, script
+loading, and the public `JS2300.*` bindings. Scripts can inspect
+`JS2300.mode()` when the adapter supplies an execution context.

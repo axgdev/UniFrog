@@ -1,4 +1,4 @@
-From 806a016999ed53f375b48035ad58742157f7d556 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: "Axel Garcia K." <git@axelgk.com>
 Date: Wed, 6 May 2026 08:29:07 +0000
 Subject: [PATCH 2/4] Skip PicoDrive CHD media build
@@ -11,7 +11,7 @@ The UniFrog PicoDrive module currently advertises cartridge-style extensions onl
  1 file changed, 3 insertions(+)
 
 diff --git a/Makefile b/Makefile
-index 601fd90e..82a74058 100644
+index 601fd90e3182298837048925e09d3d9a816eb179..82a740582528844ce030cbe0ea008b544a047423 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -86,6 +86,7 @@ endif
@@ -38,3 +38,6 @@ index 601fd90e..82a74058 100644
  
  ifeq "$(PLATFORM_ZLIB)" "1"
  # zlib
+-- 
+2.54.0
+
