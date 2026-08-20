@@ -879,11 +879,11 @@ endif
 deps: deps-sdk deps-js2300 deps-lvgl deps-cores deps-ffmpeg ffmpeg
 
 deps-alpine:
-	apk add git make dtc tcc tcc-libs-static gcc musl-dev zlib-dev ccache curl tar xz zip \
+	apk add git make dtc tcc tcc-libs-static gcc perl musl-dev zlib-dev ccache curl tar xz zip \
 		pkgconf libxcb-dev
 
 deps-ubuntu:
-	@echo "sudo apt-get update && sudo apt-get install -y git make gcc device-tree-compiler tcc zlib1g-dev ccache curl xz-utils zip"
+	@echo "sudo apt-get update && sudo apt-get install -y git make gcc perl device-tree-compiler tcc zlib1g-dev ccache curl xz-utils zip"
 
 deps-sdk:
 	git config --global --add safe.directory "$(abspath .)" 2>/dev/null || true
