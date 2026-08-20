@@ -62,6 +62,10 @@ PCE_FAST_DIR := $(CORE_SOURCE_ROOT)/beetle-pce-fast-libretro
 PCE_FAST_LIB := $(PCE_FAST_DIR)/pce_fast_libretro_sf2000.a
 QPSX_DIR := $(CORE_SOURCE_ROOT)/sf2000-qpsx-playstation-emulator
 QPSX_LIB := $(QPSX_DIR)/pcsx4all_libretro_sf2000.a
+QPSX_PLATFORM ?= unifrog
+ifneq ($(filter unifrog linux,$(QPSX_PLATFORM)),$(QPSX_PLATFORM))
+$(error QPSX_PLATFORM must be unifrog or linux (got $(QPSX_PLATFORM)))
+endif
 FROGUI_DIR := $(CORE_SOURCE_ROOT)/FrogUI
 FROGUI_LIB := $(OUT)/frogui_libretro_sf2000.a
 LIBRETRO_COMMON := $(OUT)/libretro-common-sf2000.a
@@ -1087,6 +1091,7 @@ pce-fast: doctor $(CHD_SUPPORT_LIB) | $(OUT)
 qpsx: doctor | $(OUT)
 	CFLAGS="$(QPSX_CFLAGS)" CXXFLAGS="$(QPSX_CXXFLAGS)" \
 	$(MAKE) -C $(QPSX_DIR) -f Makefile.libretro platform=sf2000 \
+		QPSX_PLATFORM=$(QPSX_PLATFORM) \
 		MIPS=$(CROSS_COMPILE) CC="$(CC)" CXX="$(CXX)" AR=$(AR) \
 		STATIC_LINKING=1 TARGET=pcsx4all_libretro_sf2000.a
 	$(call copy_core_lib,$(QPSX_LIB))
