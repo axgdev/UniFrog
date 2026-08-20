@@ -1588,8 +1588,12 @@ static void host_audio_configure_write_policy(void)
 
 unsigned host_audio_output_rate(unsigned input_rate)
 {
-   if (input_rate >= LIBRETRO_AUDIO_MIN_OUTPUT_RATE &&
-       input_rate <= LIBRETRO_AUDIO_MAX_OUTPUT_RATE)
+   /* HCRTOS does not accept every integer in the libretro 8-48 kHz range.
+    * In particular, Snes9x 2005 reports 32040 Hz, which makes the SND
+    * device reject the whole audio stream.  Keep the input rate for the
+    * rates exercised by the hardware and resample unusual core rates to
+    * the known-good default. */
+   if (input_rate == 22050u || input_rate == 32000u || input_rate == 44100u)
       return input_rate;
    return DEFAULT_SAMPLE_RATE;
 }

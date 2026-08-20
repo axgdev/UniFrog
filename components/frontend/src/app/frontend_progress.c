@@ -14,6 +14,8 @@ void frontend_loading_show(struct frontend_state *fe, const char *title,
 
    if (!fe)
       return;
+   title = tr(fe, title ? title : "LOADING");
+   stage = tr(fe, stage ? stage : "");
    if (percent > 100u)
       percent = 100u;
    frontend_invalidate_draw(fe);

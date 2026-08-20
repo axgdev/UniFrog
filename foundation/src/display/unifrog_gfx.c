@@ -23,7 +23,7 @@
 #define TTF_CHAR_COUNT 95
 #define TTF_BITMAP_W 512
 #define TTF_BITMAP_H 256
-#define TTF_PIXEL_HEIGHT 10.0f
+#define TTF_PIXEL_HEIGHT 12.0f
 #define TTF_MAX_BYTES (4u * 1024u * 1024u)
 #define TTF_UNICODE_CACHE 128u
 

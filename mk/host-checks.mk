@@ -33,6 +33,7 @@ HOST_MEDIA_POLICY_TEST := $(BUILD)/host-media-policy-test
 HOST_DIAGNOSTIC_POLICY_TEST := $(BUILD)/host-diagnostic-policy-test
 HOST_CONFIG_TEST := $(BUILD)/host-config-test
 HOST_ASSOCIATIONS_TEST := $(BUILD)/host-associations-test
+LANGUAGE_CHECK := $(BUILD)/language-check
 FROGUI_HOST_TEST := $(BUILD)/frogui-host-test
 FROGUI_HOST_SD := $(abspath $(BUILD)/frogui-host-sd)
 FRONTEND_MODEL_VIEWER_SOURCES := \
@@ -106,6 +107,7 @@ LINUX_XCB_FRONTEND_SOURCES := \
 	frontend-rom-roots-host-check \
 	libretro-policy-host-check media-policy-host-check \
 	diagnostic-policy-host-check config-host-check associations-host-check \
+	language-check \
 	frogui-host-check \
 	linux-runner-check linux-runner linux-run \
 	linux-cores linux-xcb linux-xcb-check linux-xcb-run
@@ -119,6 +121,7 @@ host-quick-check: architecture-check frontend-structure-check foundation-host-ch
 		frontend-rom-roots-host-check \
 		config-host-check \
 		associations-host-check \
+		language-check \
 		frogui-host-check \
 		libretro-policy-host-check \
 		media-policy-host-check diagnostic-policy-host-check \
@@ -175,6 +178,11 @@ config-host-check: $(HOST_CONFIG_TEST)
 associations-host-check: $(HOST_ASSOCIATIONS_TEST)
 	$(LOG_ECHO) "  CHECK   file association behavior"
 	$(Q)$(HOST_ASSOCIATIONS_TEST)
+
+language-check: $(LANGUAGE_FILES) tools/language-check.sh
+	$(LOG_ECHO) "  CHECK   language catalogs"
+	$(Q)BUILD="$(BUILD)" LANGUAGE_FILES="$(LANGUAGE_FILES)" \
+		sh tools/language-check.sh
 
 frogui-host-check: $(FROGUI_HOST_TEST)
 	$(LOG_ECHO) "  CHECK   FrogUI frontend integration"

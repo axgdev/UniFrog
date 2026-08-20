@@ -20,6 +20,12 @@ require_common_package() {
 	require_file "$FRONTEND_MANIFEST"
 	require_file "$FRONTEND_PACKAGE/LICENSE.txt"
 	require_file "$FRONTEND_PACKAGE/THIRD_PARTY.md"
+	require_file "$FRONTEND_PACKAGE/unifrog.ini"
+	grep -q '^extension.gba.handlers=.*gpsp-gbac-prosty' \
+		"$FRONTEND_PACKAGE/unifrog.ini" || {
+		echo "missing gpsp-gbac-prosty GBA association in packaged config" >&2
+		exit 1
+	}
 	require_bins "${LIBRETRO_CORE_BINS:-}"
 	require_bins "${HCRTOS_MEDIA_MODULE_BINS:-}"
 	if [ -n "${BLUEMSX_SYSTEM_PACKAGE:-}" ]; then

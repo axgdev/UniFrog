@@ -39,6 +39,9 @@ void frontend_set_status(struct frontend_state *fe, const char *fmt, ...)
 {
    va_list ap;
 
+   if (!fe)
+      return;
+   fmt = tr(fe, fmt ? fmt : "");
    va_start(ap, fmt);
    vsnprintf(fe->status, sizeof(fe->status), fmt, ap);
    va_end(ap);

@@ -161,15 +161,22 @@ static int association_config_entry(void *userdata, const char *section,
    return 0;
 }
 
-static void associations_load_file(struct frontend_state *fe,
+static int associations_load_file(struct frontend_state *fe,
    const char *path)
 {
    unsigned errors = 0;
+   int ret;
 
-   if (unifrog_config_read(path, association_config_entry, fe, &errors) == 0 &&
-       errors)
+   ret = unifrog_config_read(path, association_config_entry, fe, &errors);
+   if (ret != 0) {
+      unifrog_log("frontend associations open_failed path=%s ret=%d errno=%d\n",
+         path ? path : "", ret, errno);
+      return ret;
+   }
+   if (errors)
       unifrog_log("frontend associations parse_errors=%u path=%s\n", errors,
          path);
+   return 0;
 }
 
 void frontend_associations_load(struct frontend_state *fe)
@@ -178,8 +185,8 @@ void frontend_associations_load(struct frontend_state *fe)
       return;
    memset(fe->associations, 0, sizeof(fe->associations));
    fe->association_count = 0;
-   associations_load_file(fe, UNIFROG_DEFAULT_CONFIG_PATH);
-   associations_load_file(fe, UNIFROG_CONFIG_PATH);
+   (void)associations_load_file(fe, UNIFROG_DEFAULT_CONFIG_PATH);
+   (void)associations_load_file(fe, UNIFROG_CONFIG_PATH);
    unifrog_log("frontend associations count=%u\n", fe->association_count);
 }
 
