@@ -28,10 +28,10 @@ jobs:
       - name: Configure Git
         run: |
           set -eu
+          export GIT_CONFIG_GLOBAL="$RUNNER_TEMP/unifrog-gitconfig"
           git config --global --add safe.directory "$PWD"
           git config --global user.name "UniFrog CI"
           git config --global user.email "ci@unifrog.local"
-          export GIT_CONFIG_GLOBAL="$RUNNER_TEMP/unifrog-gitconfig"
           git config --global \
             url."https://github.com/axgdev/frog2k-qpsx.git".insteadOf \
             "git@github.com:axgdev/frog2k-qpsx.git"
