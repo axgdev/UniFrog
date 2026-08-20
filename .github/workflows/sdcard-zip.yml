@@ -16,7 +16,7 @@ jobs:
       image: alpine:latest
     steps:
       - name: Install packages
-        run: apk add git make dtc tcc tcc-libs-static musl-dev zlib-dev ccache curl tar xz zip patch
+        run: apk add git make dtc tcc tcc-libs-static gcc musl-dev zlib-dev ccache curl tar xz zip patch
 
       - name: Check out UniFrog
         uses: actions/checkout@v4
@@ -84,7 +84,7 @@ jobs:
           archive="Unifrog-sdcard-${GITHUB_REF_NAME}.zip"
           make ci-sd-zip \
             JOBS="$jobs" \
-            HOSTCC=tcc \
+            HOSTCC=gcc \
             CCACHE=ccache \
             TOOLCHAIN="$PWD/toolchain" \
             CI_SDZIP="$PWD/$archive"
