@@ -268,6 +268,29 @@ void frontend_launch_last_game(struct frontend_state *fe)
    frontend_launch_game(fe, &last);
 }
 
+void frontend_launch_test_target(struct frontend_state *fe)
+{
+   struct frontend_item item;
+   unsigned saved_max_frames;
+
+   if (!fe || !fe->test_launch_path[0])
+      return;
+   unifrog_log("frontend test launch path=%s core=%s frames=%u\n",
+      fe->test_launch_path, fe->test_launch_core,
+      fe->test_launch_frames);
+   memset(&item, 0, sizeof(item));
+   unifrog_text_copy(item.name, sizeof(item.name),
+      frontend_basename(fe->test_launch_path));
+   unifrog_text_copy(item.path, sizeof(item.path), fe->test_launch_path);
+   unifrog_text_copy(item.core, sizeof(item.core), fe->test_launch_core);
+   item.kind = FRONTEND_ITEM_GAME;
+   saved_max_frames = fe->run_options.max_frames;
+   if (fe->test_launch_frames)
+      fe->run_options.max_frames = fe->test_launch_frames;
+   frontend_launch_game(fe, &item);
+   fe->run_options.max_frames = saved_max_frames;
+}
+
 void frontend_launch_audio_diagnostics(struct frontend_state *fe)
 {
    char summary[96];

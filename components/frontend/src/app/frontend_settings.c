@@ -519,6 +519,15 @@ static int load_settings_entry(void *userdata, const char *section,
       unifrog_text_copy(fe->last_path, sizeof(fe->last_path), value);
    } else if (strcmp(key, "last_core") == 0) {
       unifrog_text_copy(fe->last_core, sizeof(fe->last_core), value);
+   } else if (strcmp(key, "test_launch_path") == 0) {
+      unifrog_text_copy(fe->test_launch_path, sizeof(fe->test_launch_path),
+         value);
+   } else if (strcmp(key, "test_launch_core") == 0) {
+      unifrog_text_copy(fe->test_launch_core, sizeof(fe->test_launch_core),
+         value);
+   } else if (strcmp(key, "test_launch_frames") == 0) {
+      fe->test_launch_frames =
+         frontend_parse_unsigned_setting(value, 0);
    }
    return 0;
 }

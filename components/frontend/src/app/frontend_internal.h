@@ -209,6 +209,9 @@ struct frontend_state {
    char current_dir[FRONTEND_MAX_PATH];
    char last_path[FRONTEND_MAX_PATH];
    char last_core[24];
+   char test_launch_path[FRONTEND_MAX_PATH];
+   char test_launch_core[48];
+   unsigned test_launch_frames;
    struct frontend_item pending_open_item;
    char pending_open_dir[FRONTEND_MAX_PATH];
    int pending_open_valid;
@@ -469,6 +472,7 @@ void frontend_launch_script(struct frontend_state *fe,
 void frontend_launch_with_handler(struct frontend_state *fe,
    struct frontend_item *item, const char *handler);
 void frontend_launch_last_game(struct frontend_state *fe);
+void frontend_launch_test_target(struct frontend_state *fe);
 void frontend_launch_audio_diagnostics(struct frontend_state *fe);
 void frontend_show_open_with(struct frontend_state *fe,
    const struct frontend_item *item);
