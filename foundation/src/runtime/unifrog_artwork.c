@@ -13,6 +13,90 @@ struct artwork_tokens {
    char filename[128];
 };
 
+/*
+ * muOS artwork packs (e.g. github.com/antiKk/muOS-Artwork) file box art under
+ * catalogue folders named after full system names. ROM folders are usually
+ * short names, so map the common ones and try both spellings.
+ */
+struct system_alias {
+   const char *short_name;
+   const char *catalogue;
+};
+
+static const struct system_alias system_aliases[] = {
+   { "ARCADE", "Arcade (FB/MAME)" },
+   { "FBA", "Arcade (FB/MAME)" },
+   { "MAME", "Arcade (FB/MAME)" },
+   { "CPS1", "Arcade (FB/MAME)" },
+   { "CPS2", "Arcade (FB/MAME)" },
+   { "CPS3", "Arcade (FB/MAME)" },
+   { "NEOGEO", "SNK Neo Geo" },
+   { "NGP", "SNK Neo Geo Pocket - Color" },
+   { "NGPC", "SNK Neo Geo Pocket - Color" },
+   { "A2600", "Atari 2600" },
+   { "ATARI2600", "Atari 2600" },
+   { "A5200", "Atari 5200" },
+   { "ATARI5200", "Atari 5200" },
+   { "A7800", "Atari 7800" },
+   { "ATARI7800", "Atari 7800" },
+   { "LYNX", "Atari Lynx" },
+   { "JAGUAR", "Atari Jaguar" },
+   { "COLECO", "ColecoVision" },
+   { "COLECOVISION", "ColecoVision" },
+   { "AMIGA", "Commodore Amiga" },
+   { "C64", "Commodore C64" },
+   { "VIC20", "Commodore VIC-20" },
+   { "ZXSPECTRUM", "Sinclair ZX Spectrum" },
+   { "ZX81", "Sinclair ZX 81" },
+   { "X68000", "Sharp X68000" },
+   { "MSX", "Microsoft - MSX" },
+   { "GB", "Nintendo Game Boy" },
+   { "GAMEBOY", "Nintendo Game Boy" },
+   { "GBC", "Nintendo Game Boy Color" },
+   { "GBA", "Nintendo Game Boy Advance" },
+   { "NDS", "Nintendo DS" },
+   { "N64", "Nintendo 64" },
+   { "NES", "Nintendo NES-Famicom" },
+   { "FC", "Nintendo NES-Famicom" },
+   { "FAMICOM", "Nintendo NES-Famicom" },
+   { "FDS", "Nintendo FDS" },
+   { "SNES", "Nintendo SNES-SFC" },
+   { "SFC", "Nintendo SNES-SFC" },
+   { "VIRTUALBOY", "Nintendo Virtual Boy" },
+   { "32X", "Sega 32X" },
+   { "SEGAMD", "Sega Mega Drive - Genesis" },
+   { "GENESIS", "Sega Mega Drive - Genesis" },
+   { "MD", "Sega Mega Drive - Genesis" },
+   { "MEGACD", "Sega Mega CD - Sega CD" },
+   { "SEGACD", "Sega Mega CD - Sega CD" },
+   { "GAMEGEAR", "Sega Game Gear" },
+   { "GG", "Sega Game Gear" },
+   { "SMS", "Sega Master System" },
+   { "MASTERSYSTEM", "Sega Master System" },
+   { "SATURN", "Sega Saturn" },
+   { "DREAMCAST", "Sega Dreamcast" },
+   { "SG1000", "Sega SG-1000" },
+   { "PCE", "NEC PC Engine" },
+   { "PCENGINE", "NEC PC Engine" },
+   { "TG16", "NEC PC Engine" },
+   { "TURBOGRAFX-16", "NEC PC Engine" },
+   { "PCECD", "NEC PC Engine CD" },
+   { "PCENGINECD", "NEC PC Engine CD" },
+   { "SUPERGRAFX", "NEC PC Engine SuperGrafx" },
+   { "PSX", "Sony PlayStation" },
+   { "PS1", "Sony PlayStation" },
+   { "PS", "Sony PlayStation" },
+   { "WONDERSWAN", "Bandai WonderSwan-Color" },
+   { "WS", "Bandai WonderSwan-Color" },
+   { "WSC", "Bandai WonderSwan-Color" },
+   { "SUPERVISION", "Watara Supervision" },
+   { "MEGADUCK", "Mega Duck / Cougar Boy" },
+   { "VECTREX", "GCE Vectrex" },
+   { "CHANNELF", "Fairchild ChanelF" },
+   { "ODYSSEY", "Magnavox Odyssey - VideoPac" },
+   { "INTELLIVISION", "Mattel Intellivision" }
+};
+
 static int append_text(char *out, size_t size, size_t *used, const char *text)
 {
    size_t len = strlen(text);
@@ -104,18 +188,58 @@ static int prepare_tokens(const char *rom_path, const char *system,
    return 0;
 }
 
+static const char *system_catalogue_alias(const char *system)
+{
+   if (!system || !system[0])
+      return NULL;
+   for (unsigned i = 0; i < sizeof(system_aliases) /
+       sizeof(system_aliases[0]); i++) {
+      if (strcmp(system_aliases[i].short_name, system) == 0)
+         return system_aliases[i].catalogue;
+   }
+   return NULL;
+}
+
+static void resolve_one(const char *format,
+   const struct artwork_tokens *tokens, const char *system_override,
+   char *out, size_t size)
+{
+   char expanded[UNIFROG_ARTWORK_PATH_MAX];
+   char absolute[UNIFROG_ARTWORK_PATH_MAX];
+   struct artwork_tokens scoped;
+   const char *candidate;
+
+   out[0] = '\0';
+   if (system_override) {
+      scoped = *tokens;
+      copy_part(scoped.system, sizeof(scoped.system), system_override,
+         strlen(system_override));
+      tokens = &scoped;
+   }
+   if (expand_template(format, tokens, expanded, sizeof(expanded)) != 0)
+      return;
+   candidate = expanded;
+   if (expanded[0] != '/') {
+      if (snprintf(absolute, sizeof(absolute), "%s/%s", UNIFROG_SD_ROOT,
+          expanded) < (int)sizeof(absolute))
+         candidate = absolute;
+      else
+         candidate = NULL;
+   }
+   if (candidate && access(candidate, R_OK) == 0)
+      snprintf(out, size, "%s", candidate);
+}
+
 static void resolve_list(const char *templates,
-   const struct artwork_tokens *tokens, char *out, size_t size)
+   struct artwork_tokens *tokens, char *out, size_t size)
 {
    const char *part = templates;
 
    out[0] = '\0';
-   while (part && *part) {
+   while (part && *part && !out[0]) {
       const char *end = strchr(part, '|');
       size_t len = end ? (size_t)(end - part) : strlen(part);
       char format[UNIFROG_ARTWORK_PATH_MAX];
-      char expanded[UNIFROG_ARTWORK_PATH_MAX];
-      char absolute[UNIFROG_ARTWORK_PATH_MAX];
 
       while (len && (*part == ' ' || *part == '\t')) {
          part++;
@@ -124,21 +248,13 @@ static void resolve_list(const char *templates,
       while (len && (part[len - 1u] == ' ' || part[len - 1u] == '\t'))
          len--;
       copy_part(format, sizeof(format), part, len);
-      if (format[0] && expand_template(format, tokens, expanded,
-          sizeof(expanded)) == 0) {
-         const char *candidate = expanded;
+      if (format[0]) {
+         const char *alias = strstr(format, "{system}") ?
+            system_catalogue_alias(tokens->system) : NULL;
 
-         if (expanded[0] != '/') {
-            if (snprintf(absolute, sizeof(absolute), "%s/%s", UNIFROG_SD_ROOT,
-                expanded) < (int)sizeof(absolute))
-               candidate = absolute;
-            else
-               candidate = NULL;
-         }
-         if (candidate && access(candidate, R_OK) == 0) {
-            snprintf(out, size, "%s", candidate);
-            return;
-         }
+         resolve_one(format, tokens, NULL, out, size);
+         if (!out[0] && alias)
+            resolve_one(format, tokens, alias, out, size);
       }
       part = end ? end + 1 : NULL;
    }
