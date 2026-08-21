@@ -601,7 +601,6 @@ static void draw_row(struct unifrog_ui *ui,
    char row_text[176];
    const char *row_label;
    int font_h = unifrog_gfx_font_height();
-   int font_adv = unifrog_gfx_font_advance();
    int text_y;
 
    if (x < 0)
@@ -618,8 +617,6 @@ static void draw_row(struct unifrog_ui *ui,
       font_h = 7;
    if (font_h > h)
       font_h = h;
-   if (font_adv < 5)
-      font_adv = 5;
    text_y = y + (h - font_h) / 2;
    if (!text_alpha && label && label[0])
       text_alpha = 255u;
@@ -662,7 +659,7 @@ static void draw_row(struct unifrog_ui *ui,
       row_label = row_text;
    }
    if (text_alpha) {
-      int chars = (w - label_x - 4) / font_adv;
+      int chars = unifrog_gfx_text_width_limit(row_label, w - label_x - 4);
 
       if (chars < 1)
          chars = 1;
