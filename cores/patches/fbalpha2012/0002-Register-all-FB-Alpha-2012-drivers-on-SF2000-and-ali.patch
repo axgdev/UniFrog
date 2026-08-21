@@ -1,0 +1,285 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog CI <ci@unifrog.local>
+Date: Sat, 22 Aug 2026 17:59:31 +0100
+Subject: [PATCH 2/2] Register all FB Alpha 2012 drivers on SF2000 and align
+ typed memory arrays
+
+Generate the SF2000 driverlist from every burn/drv directory instead of
+pre90s only, so capcom, neogeo, konami, sega, taito and the other sets
+resolve through BurnDrvGetIndexByName again; the driver objects were
+already compiled and linked, only the registration table was truncated.
+
+Pad Next to 4-byte alignment before every UINT16/UINT32 array in the
+MemIndex layouts that followed an odd-sized member (23 pointers across
+17 drivers). MIPS32r1 faults on unaligned word stores with AdES; Toki
+hit this through its palette handler after soundlatch left Palette at
+an odd offset.
+---
+ svn-current/trunk/makefile.libretro                    | 8 ++++----
+ svn-current/trunk/src/burn/drv/dataeast/d_cbuster.cpp  | 1 +
+ svn-current/trunk/src/burn/drv/dataeast/d_dassault.cpp | 1 +
+ svn-current/trunk/src/burn/drv/dataeast/d_lemmings.cpp | 1 +
+ svn-current/trunk/src/burn/drv/dataeast/d_vaportra.cpp | 2 ++
+ svn-current/trunk/src/burn/drv/konami/d_twin16.cpp     | 2 ++
+ svn-current/trunk/src/burn/drv/pre90s/d_armedf.cpp     | 2 ++
+ svn-current/trunk/src/burn/drv/pre90s/d_aztarac.cpp    | 1 +
+ svn-current/trunk/src/burn/drv/pre90s/d_blockout.cpp   | 1 +
+ svn-current/trunk/src/burn/drv/pre90s/d_pacland.cpp    | 1 +
+ svn-current/trunk/src/burn/drv/pre90s/d_skykid.cpp     | 1 +
+ svn-current/trunk/src/burn/drv/pre90s/d_toki.cpp       | 1 +
+ svn-current/trunk/src/burn/drv/pst90s/d_drgnmst.cpp    | 1 +
+ svn-current/trunk/src/burn/drv/pst90s/d_fuukifg3.cpp   | 2 ++
+ svn-current/trunk/src/burn/drv/pst90s/d_gaelco.cpp     | 1 +
+ svn-current/trunk/src/burn/drv/pst90s/d_welltris.cpp   | 1 +
+ svn-current/trunk/src/burn/drv/taito/d_ashnojoe.cpp    | 2 ++
+ svn-current/trunk/src/burn/drv/taito/d_retofinv.cpp    | 2 ++
+ 18 files changed, 27 insertions(+), 4 deletions(-)
+
+diff --git a/svn-current/trunk/makefile.libretro b/svn-current/trunk/makefile.libretro
+index 713eba4bbdd84c06b33a10646bdbd3d5db6ed720..433f9869e60af80d87c1bfbcedd24263f1f8d5fe 100644
+--- a/svn-current/trunk/makefile.libretro
++++ b/svn-current/trunk/makefile.libretro
+@@ -774,8 +774,8 @@ ifneq ($(platform), sf2000)
+ 	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_DRIVERLIST_DIR)/driverlist.h -l gamelist.txt $(FBA_BURN_DRIVERS_DIR)/capcom $(FBA_BURN_DRIVERS_DIR)/cave $(FBA_BURN_DRIVERS_DIR)/cps3 $(FBA_BURN_DRIVERS_DIR)/dataeast $(FBA_BURN_DRIVERS_DIR)/galaxian $(FBA_BURN_DRIVERS_DIR)/irem $(FBA_BURN_DRIVERS_DIR)/konami $(FBA_BURN_DRIVERS_DIR)/megadrive $(FBA_BURN_DRIVERS_DIR)/neogeo $(FBA_BURN_DRIVERS_DIR)/pce $(FBA_BURN_DRIVERS_DIR)/pgm $(FBA_BURN_DRIVERS_DIR)/pre90s $(FBA_BURN_DRIVERS_DIR)/psikyo $(FBA_BURN_DRIVERS_DIR)/pst90s $(FBA_BURN_DRIVERS_DIR)/sega $(FBA_BURN_DRIVERS_DIR)/snes $(FBA_BURN_DRIVERS_DIR)/taito $(FBA_BURN_DRIVERS_DIR)/toaplan
+ 	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_DRIVERLIST_DIR)/driverlist-gx.h -l gamelist-gx.txt $(FBA_BURN_DRIVERS_DIR)/cave $(FBA_BURN_DRIVERS_DIR)/cps3 $(FBA_BURN_DRIVERS_DIR)/dataeast $(FBA_BURN_DRIVERS_DIR)/galaxian $(FBA_BURN_DRIVERS_DIR)/irem $(FBA_BURN_DRIVERS_DIR)/konami $(FBA_BURN_DRIVERS_DIR)/pgm $(FBA_BURN_DRIVERS_DIR)/pre90s $(FBA_BURN_DRIVERS_DIR)/psikyo $(FBA_BURN_DRIVERS_DIR)/pst90s $(FBA_BURN_DRIVERS_DIR)/sega $(FBA_BURN_DRIVERS_DIR)/snes $(FBA_BURN_DRIVERS_DIR)/taito $(FBA_BURN_DRIVERS_DIR)/toaplan
+ else
+-	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_DRIVERLIST_DIR)/driverlist.h $(FBA_BURN_DRIVERS_DIR)/pre90s
+-	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_DRIVERLIST_DIR)/driverlist-gx.h $(FBA_BURN_DRIVERS_DIR)/pre90s
++	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_DRIVERLIST_DIR)/driverlist.h $(FBA_BURN_DRIVERS_DIR)/capcom $(FBA_BURN_DRIVERS_DIR)/cave $(FBA_BURN_DRIVERS_DIR)/cps3 $(FBA_BURN_DRIVERS_DIR)/dataeast $(FBA_BURN_DRIVERS_DIR)/galaxian $(FBA_BURN_DRIVERS_DIR)/irem $(FBA_BURN_DRIVERS_DIR)/konami $(FBA_BURN_DRIVERS_DIR)/megadrive $(FBA_BURN_DRIVERS_DIR)/neogeo $(FBA_BURN_DRIVERS_DIR)/pce $(FBA_BURN_DRIVERS_DIR)/pgm $(FBA_BURN_DRIVERS_DIR)/pre90s $(FBA_BURN_DRIVERS_DIR)/psikyo $(FBA_BURN_DRIVERS_DIR)/pst90s $(FBA_BURN_DRIVERS_DIR)/sega $(FBA_BURN_DRIVERS_DIR)/snes $(FBA_BURN_DRIVERS_DIR)/taito $(FBA_BURN_DRIVERS_DIR)/toaplan
++	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_DRIVERLIST_DIR)/driverlist-gx.h $(FBA_BURN_DRIVERS_DIR)/cave $(FBA_BURN_DRIVERS_DIR)/cps3 $(FBA_BURN_DRIVERS_DIR)/dataeast $(FBA_BURN_DRIVERS_DIR)/galaxian $(FBA_BURN_DRIVERS_DIR)/irem $(FBA_BURN_DRIVERS_DIR)/konami $(FBA_BURN_DRIVERS_DIR)/pgm $(FBA_BURN_DRIVERS_DIR)/pre90s $(FBA_BURN_DRIVERS_DIR)/psikyo $(FBA_BURN_DRIVERS_DIR)/pst90s $(FBA_BURN_DRIVERS_DIR)/sega $(FBA_BURN_DRIVERS_DIR)/snes $(FBA_BURN_DRIVERS_DIR)/taito $(FBA_BURN_DRIVERS_DIR)/toaplan
+ endif
+ 	@touch $@
+ 
+@@ -797,8 +797,8 @@ ifneq ($(platform), sf2000)
+ 	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_GENERATED_DIR)/driverlist.h -l gamelist.txt $(FBA_BURN_DRIVERS_DIR)/capcom $(FBA_BURN_DRIVERS_DIR)/cave $(FBA_BURN_DRIVERS_DIR)/cps3 $(FBA_BURN_DRIVERS_DIR)/dataeast $(FBA_BURN_DRIVERS_DIR)/galaxian $(FBA_BURN_DRIVERS_DIR)/irem $(FBA_BURN_DRIVERS_DIR)/konami $(FBA_BURN_DRIVERS_DIR)/megadrive $(FBA_BURN_DRIVERS_DIR)/neogeo $(FBA_BURN_DRIVERS_DIR)/pce $(FBA_BURN_DRIVERS_DIR)/pgm $(FBA_BURN_DRIVERS_DIR)/pre90s $(FBA_BURN_DRIVERS_DIR)/psikyo $(FBA_BURN_DRIVERS_DIR)/pst90s $(FBA_BURN_DRIVERS_DIR)/sega $(FBA_BURN_DRIVERS_DIR)/snes $(FBA_BURN_DRIVERS_DIR)/taito $(FBA_BURN_DRIVERS_DIR)/toaplan
+ 	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_GENERATED_DIR)/driverlist-gx.h -l gamelist-gx.txt $(FBA_BURN_DRIVERS_DIR)/cave $(FBA_BURN_DRIVERS_DIR)/cps3 $(FBA_BURN_DRIVERS_DIR)/dataeast $(FBA_BURN_DRIVERS_DIR)/galaxian $(FBA_BURN_DRIVERS_DIR)/irem $(FBA_BURN_DRIVERS_DIR)/konami $(FBA_BURN_DRIVERS_DIR)/pgm $(FBA_BURN_DRIVERS_DIR)/pre90s $(FBA_BURN_DRIVERS_DIR)/psikyo $(FBA_BURN_DRIVERS_DIR)/pst90s $(FBA_BURN_DRIVERS_DIR)/sega $(FBA_BURN_DRIVERS_DIR)/snes $(FBA_BURN_DRIVERS_DIR)/taito $(FBA_BURN_DRIVERS_DIR)/toaplan
+ else
+-	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_GENERATED_DIR)/driverlist.h -l gamelist.txt $(FBA_BURN_DRIVERS_DIR)/pre90s
+-	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_GENERATED_DIR)/driverlist-gx.h -l gamelist-gx.txt $(FBA_BURN_DRIVERS_DIR)/pre90s
++	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_GENERATED_DIR)/driverlist.h $(FBA_BURN_DRIVERS_DIR)/capcom $(FBA_BURN_DRIVERS_DIR)/cave $(FBA_BURN_DRIVERS_DIR)/cps3 $(FBA_BURN_DRIVERS_DIR)/dataeast $(FBA_BURN_DRIVERS_DIR)/galaxian $(FBA_BURN_DRIVERS_DIR)/irem $(FBA_BURN_DRIVERS_DIR)/konami $(FBA_BURN_DRIVERS_DIR)/megadrive $(FBA_BURN_DRIVERS_DIR)/neogeo $(FBA_BURN_DRIVERS_DIR)/pce $(FBA_BURN_DRIVERS_DIR)/pgm $(FBA_BURN_DRIVERS_DIR)/pre90s $(FBA_BURN_DRIVERS_DIR)/psikyo $(FBA_BURN_DRIVERS_DIR)/pst90s $(FBA_BURN_DRIVERS_DIR)/sega $(FBA_BURN_DRIVERS_DIR)/snes $(FBA_BURN_DRIVERS_DIR)/taito $(FBA_BURN_DRIVERS_DIR)/toaplan
++	$(PERL) $(FBA_SCRIPTS_DIR)/gamelist.pl -o $(FBA_GENERATED_DIR)/driverlist-gx.h $(FBA_BURN_DRIVERS_DIR)/cave $(FBA_BURN_DRIVERS_DIR)/cps3 $(FBA_BURN_DRIVERS_DIR)/dataeast $(FBA_BURN_DRIVERS_DIR)/galaxian $(FBA_BURN_DRIVERS_DIR)/irem $(FBA_BURN_DRIVERS_DIR)/konami $(FBA_BURN_DRIVERS_DIR)/pgm $(FBA_BURN_DRIVERS_DIR)/pre90s $(FBA_BURN_DRIVERS_DIR)/psikyo $(FBA_BURN_DRIVERS_DIR)/pst90s $(FBA_BURN_DRIVERS_DIR)/sega $(FBA_BURN_DRIVERS_DIR)/snes $(FBA_BURN_DRIVERS_DIR)/taito $(FBA_BURN_DRIVERS_DIR)/toaplan
+ endif
+ 	@echo ""
+ 	@echo "Generating $(FBA_GENERATED_DIR)/neo_sprite_func.h..."
+diff --git a/svn-current/trunk/src/burn/drv/dataeast/d_cbuster.cpp b/svn-current/trunk/src/burn/drv/dataeast/d_cbuster.cpp
+index c2ffa0614fc80a90e3fe6b88a89ab2a399df3878..feb602fa0da96f4e2511988b6eae44e33c0cae5d 100644
+--- a/svn-current/trunk/src/burn/drv/dataeast/d_cbuster.cpp
++++ b/svn-current/trunk/src/burn/drv/dataeast/d_cbuster.cpp
+@@ -304,6 +304,7 @@ static INT32 MemIndex()
+ 
+ 	RamEnd		= Next;
+ 	
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	SoundBuffer = (INT16*)Next; Next += nBurnSoundLen * 2 * sizeof(INT16);
+ 
+ 	MemEnd		= Next;
+diff --git a/svn-current/trunk/src/burn/drv/dataeast/d_dassault.cpp b/svn-current/trunk/src/burn/drv/dataeast/d_dassault.cpp
+index de57320f9e58fcabfd1fd7b449e8b3cc725a237d..6b41dcaf24d633b87ccbb6b827d0ff8c98c5cec2 100644
+--- a/svn-current/trunk/src/burn/drv/dataeast/d_dassault.cpp
++++ b/svn-current/trunk/src/burn/drv/dataeast/d_dassault.cpp
+@@ -548,6 +548,7 @@ static INT32 MemIndex()
+ 
+ 	RamEnd		= Next;
+ 	
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	SoundBuffer = (INT16*)Next; Next += nBurnSoundLen * 2 * sizeof(INT16);
+ 
+ 	MemEnd		= Next;
+diff --git a/svn-current/trunk/src/burn/drv/dataeast/d_lemmings.cpp b/svn-current/trunk/src/burn/drv/dataeast/d_lemmings.cpp
+index 2918c1588aa94c9292c2055da9dc9fece5d91b9f..96c8f1ddc5215016dbcba890441e9f24bc7e8ac1 100644
+--- a/svn-current/trunk/src/burn/drv/dataeast/d_lemmings.cpp
++++ b/svn-current/trunk/src/burn/drv/dataeast/d_lemmings.cpp
+@@ -364,6 +364,7 @@ static INT32 MemIndex()
+ 
+ 	DrvGfxROM2	= Next; Next += 0x020000; // expanded char tiles
+ 
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	pTempDraw	= (UINT16*)Next; Next += 0x800 * 0x200 * sizeof(INT16);
+ 
+ 	RamEnd		= Next;
+diff --git a/svn-current/trunk/src/burn/drv/dataeast/d_vaportra.cpp b/svn-current/trunk/src/burn/drv/dataeast/d_vaportra.cpp
+index 36014423f87a716a870c88c60cdc9ebcf81089bd..02cbb47154d114f969d2d34cc58d17d9043914fb 100644
+--- a/svn-current/trunk/src/burn/drv/dataeast/d_vaportra.cpp
++++ b/svn-current/trunk/src/burn/drv/dataeast/d_vaportra.cpp
+@@ -283,10 +283,12 @@ static INT32 MemIndex()
+ 	DrvPalRAM1	= Next; Next += 0x000a00;
+ 
+ 	flipscreen	= Next; Next += 0x000001;
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	priority	= (UINT16*)Next; Next += 0x000002 * sizeof(UINT16);
+ 
+ 	RamEnd		= Next;
+ 	
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	SoundBuffer = (INT16*)Next; Next += nBurnSoundLen * 2 * sizeof(INT16);
+ 
+ 	MemEnd		= Next;
+diff --git a/svn-current/trunk/src/burn/drv/konami/d_twin16.cpp b/svn-current/trunk/src/burn/drv/konami/d_twin16.cpp
+index 4795dc4fed6593d0d895eb6728d8d087009ebbc3..16633ee4206e705aff587cd8b2f99afb865ca2c9 100644
+--- a/svn-current/trunk/src/burn/drv/konami/d_twin16.cpp
++++ b/svn-current/trunk/src/burn/drv/konami/d_twin16.cpp
+@@ -904,7 +904,9 @@ static INT32 MemIndex()
+ 
+ 	DrvNvRAMBank	= Next; Next += 0x000001;
+ 
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	scrollx		= (UINT16*)Next; Next += 0x00004 * sizeof(UINT16);
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	scrolly		= (UINT16*)Next; Next += 0x00004 * sizeof(UINT16);
+ 
+ 	soundlatch	= Next; Next += 0x000001;
+diff --git a/svn-current/trunk/src/burn/drv/pre90s/d_armedf.cpp b/svn-current/trunk/src/burn/drv/pre90s/d_armedf.cpp
+index 640b6f9f84c7c42e70c2291dad29b8096cd4621b..faeda80bcd41a88a6ce3d5afe348955087543598 100644
+--- a/svn-current/trunk/src/burn/drv/pre90s/d_armedf.cpp
++++ b/svn-current/trunk/src/burn/drv/pre90s/d_armedf.cpp
+@@ -730,7 +730,9 @@ static INT32 MemIndex()
+ 	flipscreen	= Next; Next += 0x000001;
+ 	soundlatch	= Next; Next += 0x000001;
+ 	DrvVidRegs	= Next; Next += 0x000001;
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	DrvScroll	= (UINT16*)Next; Next += 0x000004 * sizeof(UINT16);
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	DrvMcuCmd	= (UINT16*)Next; Next += 0x000020 * sizeof(UINT16); 
+ 
+ 	DrvZ80RAM	= Next; Next += 0x004000;
+diff --git a/svn-current/trunk/src/burn/drv/pre90s/d_aztarac.cpp b/svn-current/trunk/src/burn/drv/pre90s/d_aztarac.cpp
+index 6f1b576df476996caa85b3d6f46aa30cfd0eaff7..0d389c95126cccb9c9e03511963b5fbdcbbe28f0 100644
+--- a/svn-current/trunk/src/burn/drv/pre90s/d_aztarac.cpp
++++ b/svn-current/trunk/src/burn/drv/pre90s/d_aztarac.cpp
+@@ -317,6 +317,7 @@ static INT32 MemIndex()
+ 
+ 	RamEnd			= Next;
+ 
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	DrvPalette		= (UINT32*)Next; Next += 0x0040 * 256 * sizeof(UINT32);
+ 
+ 	MemEnd			= Next;
+diff --git a/svn-current/trunk/src/burn/drv/pre90s/d_blockout.cpp b/svn-current/trunk/src/burn/drv/pre90s/d_blockout.cpp
+index 8b0ea765319c43c97ee4babe09c7339990599400..cbe3efdb8e6338e29fd334fc05a81c89bf151c10 100644
+--- a/svn-current/trunk/src/burn/drv/pre90s/d_blockout.cpp
++++ b/svn-current/trunk/src/burn/drv/pre90s/d_blockout.cpp
+@@ -399,6 +399,7 @@ static INT32 MemIndex()
+ 
+ 	soundlatch	= Next; Next += 0x000001;
+ 
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	DrvTmpBmp	= (UINT16*)Next; Next += (320 * 240) * sizeof(UINT16);
+ 
+ 	RamEnd		= Next;
+diff --git a/svn-current/trunk/src/burn/drv/pre90s/d_pacland.cpp b/svn-current/trunk/src/burn/drv/pre90s/d_pacland.cpp
+index a30b0cd79a96c34e19715b955616d73a6960f00d..ecaf38ff1441ce1294140b5d12cbe381525980fa 100644
+--- a/svn-current/trunk/src/burn/drv/pre90s/d_pacland.cpp
++++ b/svn-current/trunk/src/burn/drv/pre90s/d_pacland.cpp
+@@ -329,6 +329,7 @@ static INT32 MemIndex()
+ 	DrvMCUIRAM		= Next; Next += 0x000080;
+ 
+ 	flipscreen		= Next; Next += 0x000001;
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	scroll			= (UINT16*)Next; Next += 0x000002 * sizeof(UINT16);
+ 	interrupt_enable	= Next; Next += 0x000001;
+ 	coin_lockout		= Next; Next += 0x000001;
+diff --git a/svn-current/trunk/src/burn/drv/pre90s/d_skykid.cpp b/svn-current/trunk/src/burn/drv/pre90s/d_skykid.cpp
+index 18db423ee496ee90a65e9d125e497b4bfff09c0d..e7bbe7805857e32bb395ebbbf73fe7fb1e483f0b 100644
+--- a/svn-current/trunk/src/burn/drv/pre90s/d_skykid.cpp
++++ b/svn-current/trunk/src/burn/drv/pre90s/d_skykid.cpp
+@@ -557,6 +557,7 @@ static INT32 MemIndex()
+ 	coin_lockout		= Next; Next += 0x000001;
+ 	ip_select		= Next; Next += 0x000001;
+ 
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	scroll			= (UINT16*)Next; Next += 0x0002 * sizeof(UINT16);
+ 
+ 	RamEnd			= Next;
+diff --git a/svn-current/trunk/src/burn/drv/pre90s/d_toki.cpp b/svn-current/trunk/src/burn/drv/pre90s/d_toki.cpp
+index 5e0f69572e19be5c5624bff216a06d4bf9f6e81b..39cbe9cee46a51089e68a2f84d9144da2de5a46b 100644
+--- a/svn-current/trunk/src/burn/drv/pre90s/d_toki.cpp
++++ b/svn-current/trunk/src/burn/drv/pre90s/d_toki.cpp
+@@ -881,6 +881,7 @@ static INT32 MemIndex()
+ 
+ 	soundlatch	= Next; Next += 0x000001;
+ 
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	Palette		= (UINT32*)Next; Next += 0x400 * sizeof(UINT32);
+ 
+ 	RamEnd		= Next;
+diff --git a/svn-current/trunk/src/burn/drv/pst90s/d_drgnmst.cpp b/svn-current/trunk/src/burn/drv/pst90s/d_drgnmst.cpp
+index 0a2d06cb782db2e45df797714232971eaa70fc8f..2420fc9f1f896d9ff6ac0975cca9f34d8b4d78d3 100644
+--- a/svn-current/trunk/src/burn/drv/pst90s/d_drgnmst.cpp
++++ b/svn-current/trunk/src/burn/drv/pst90s/d_drgnmst.cpp
+@@ -526,6 +526,7 @@ static INT32 MemIndex()
+ 
+ 	coin_lockout	= Next; Next += 0x000001;
+ 
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	Palette		= (UINT32*)Next; Next += 0x2000 * sizeof(UINT32);
+ 
+ 	RamEnd		= Next;
+diff --git a/svn-current/trunk/src/burn/drv/pst90s/d_fuukifg3.cpp b/svn-current/trunk/src/burn/drv/pst90s/d_fuukifg3.cpp
+index 2f4f1957a9bbeb3740dd7e8dc4c367508a725d60..09065a3db28a64a11bba653eb8160710689610bd 100644
+--- a/svn-current/trunk/src/burn/drv/pst90s/d_fuukifg3.cpp
++++ b/svn-current/trunk/src/burn/drv/pst90s/d_fuukifg3.cpp
+@@ -382,7 +382,9 @@ static INT32 MemIndex()
+ 
+ 	priority	= Next; Next += 0x000001;
+ 
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	tilebank	= (UINT16*)Next; Next += 0x0001 * sizeof(UINT16);
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	tilebank_buf	= (UINT16*)Next; Next += 0x0002 * sizeof(UINT16);
+ 
+ 	nDrvZ80Bank	= Next; Next += 0x000001;
+diff --git a/svn-current/trunk/src/burn/drv/pst90s/d_gaelco.cpp b/svn-current/trunk/src/burn/drv/pst90s/d_gaelco.cpp
+index 99c97641e760e87c1f8d2d169e51a901dd225fca..958fb88947a8d2d920d1f3057ebd35c7ef31a3a8 100644
+--- a/svn-current/trunk/src/burn/drv/pst90s/d_gaelco.cpp
++++ b/svn-current/trunk/src/burn/drv/pst90s/d_gaelco.cpp
+@@ -778,6 +778,7 @@ static INT32 MemIndex()
+ 
+ 	RamEnd		= Next;
+ 
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	DrvPalette	= (UINT32*)Next; Next += 0x0400 * sizeof(UINT32);
+ 
+ 	DrvPrioBitmap	= Next; Next += 320 * 240;
+diff --git a/svn-current/trunk/src/burn/drv/pst90s/d_welltris.cpp b/svn-current/trunk/src/burn/drv/pst90s/d_welltris.cpp
+index b80b27334db44cfa9dbd8a33027e07be108fb09d..340d70be6c5b74ad321ada47c86f39b7fa825431 100644
+--- a/svn-current/trunk/src/burn/drv/pst90s/d_welltris.cpp
++++ b/svn-current/trunk/src/burn/drv/pst90s/d_welltris.cpp
+@@ -488,6 +488,7 @@ static INT32 MemIndex()
+ 	spritepalbank	= Next; Next += 0x000001;
+ 	pixelpalbank	= Next; Next += 0x000001;
+ 
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	scroll		= (UINT16*)Next; Next += 0x000002 * sizeof(UINT16);
+ 
+ 	RamEnd		= Next;
+diff --git a/svn-current/trunk/src/burn/drv/taito/d_ashnojoe.cpp b/svn-current/trunk/src/burn/drv/taito/d_ashnojoe.cpp
+index bac96d888147c108d394e4b1db5b3e0255ae60c2..b0e746b101c4779157d3bd3e3eb10b434a31b970 100644
+--- a/svn-current/trunk/src/burn/drv/taito/d_ashnojoe.cpp
++++ b/svn-current/trunk/src/burn/drv/taito/d_ashnojoe.cpp
+@@ -311,7 +311,9 @@ static INT32 MemIndex()
+ 
+ 	tilemap_reg		= Next; Next += 0x000001;
+ 
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	scrollx			= (UINT16*)Next; Next += 0x000008 * sizeof(UINT16);
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	scrolly			= (UINT16*)Next; Next += 0x000008 * sizeof(UINT16);
+ 
+ 	RamEnd			= Next;
+diff --git a/svn-current/trunk/src/burn/drv/taito/d_retofinv.cpp b/svn-current/trunk/src/burn/drv/taito/d_retofinv.cpp
+index cbdea5504c708e8da2d9fe89b3f34f625455415e..b63242a8b42e1a6550034e7ff5861098f64f16c0 100644
+--- a/svn-current/trunk/src/burn/drv/taito/d_retofinv.cpp
++++ b/svn-current/trunk/src/burn/drv/taito/d_retofinv.cpp
+@@ -385,7 +385,9 @@ static INT32 MemIndex()
+ 	RamEnd			= Next;
+ 
+ 	DrvColTable		= Next; Next += 0x000a00;
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	Palette			= (UINT32*)Next; Next += 0x0a00 * sizeof(UINT32);
++	Next = (UINT8*)(((UINT32)Next + 3u) & ~3u);
+ 	DrvPalette		= (UINT32*)Next; Next += 0x0a00 * sizeof(UINT32);
+ 
+ 	DrvTileOfst		= (UINT16*)Next; Next += 0x0400 * sizeof(UINT16);
+-- 
+2.43.0
+
