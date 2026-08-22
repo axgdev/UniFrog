@@ -58,6 +58,9 @@ Focused checks:
   make boot-logo-check host-frontend-check host-visual-check config-check
   make fastboot-only-check layout-check asdcheck fastboot-check
   make qemu-smoke       Boot the freshly built ASD in frog2k-qemu
+  make qemu-launch-test TEST_CORE=<id> TEST_ROM=<zip> [TEST_FRAMES=n]
+                        Auto-launch a ROM through a core in frog2k-qemu and
+                        verify a clean session from the device log
 
 Host frontend:
   make linux-runner-check  Build and script the Linux runner
