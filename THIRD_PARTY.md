@@ -84,6 +84,13 @@ of Noto Sans JP for the languages supported by the frontend and common Japanese
 filenames. It is distributed under the SIL Open Font License 1.1; the complete
 license is installed beside the font as `/unifrog_data/fonts/OFL.txt`.
 
+The Polish Latin Extended-A glyphs (Aogonek through zdotaccent) that Noto Sans
+JP lacks were transplanted as decomposed outlines from DejaVu Sans
+(Bitstream Vera derivative, free license with an embedded-font exemption; see
+`https://dejavu-fonts.github.io`). Their inclusion keeps the whole font
+redistributable under the SIL Open Font License 1.1 alongside the existing
+notice.
+
 FrogUI packages GamePocket (SIL Open Font License 1.1) and Monogram (CC0) in
 `/unifrog_data/frogui/fonts`; their complete notices are installed beside them.
 
