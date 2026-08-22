@@ -883,6 +883,7 @@ int unifrog_frontend_app_init(void)
    show_launch(fe);
    fe->running = 1;
    frontend_app_initialized = 1;
+   frontend_launch_test_target(fe);
    return 0;
 }
 
