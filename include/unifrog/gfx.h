@@ -33,6 +33,7 @@ void unifrog_gfx_draw_text_bitmap(const struct unifrog_surface *surface,
    int x, int y, const char *text, uint16_t color, int scale);
 int unifrog_gfx_font_height(void);
 int unifrog_gfx_font_advance(void);
+int unifrog_gfx_text_width_limit(const char *text, int max_px);
 int unifrog_gfx_load_font5x7_file(const char *path);
 void unifrog_gfx_reset_font5x7(void);
 
