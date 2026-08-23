@@ -1524,8 +1524,16 @@ void unifrog_libretro_input_poll_cb(void)
       host.local_buttons = unifrog_input_local_buttons();
       host.buttons = unifrog_input_buttons();
       for (unsigned port = 0; port < UNIFROG_INPUT_MAX_PORTS; port++) {
-         host.port_buttons[port] = host.local_buttons |
-            unifrog_input_wireless_buttons(port);
+         /*
+          * The physical controls drive port 0 only. Mirroring them into the
+          * other ports makes arcade cores such as MAME 2000 and FB Alpha 2012
+          * move every player together with player one.
+          */
+         uint32_t buttons = unifrog_input_wireless_buttons(port);
+
+         if (port == 0)
+            buttons |= host.local_buttons;
+         host.port_buttons[port] = buttons;
          /*
           * Most cores query every libretro button separately. Convert the
           * platform mask once per poll so each callback is only a bit test.

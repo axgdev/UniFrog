@@ -81,7 +81,7 @@
 #define FRONTEND_ROM_ROOT_LABEL_MAX 48u
 #define FRONTEND_ROM_ROOT_MAX 8u
 #define FRONTEND_ROM_SYSTEM_MAP_MAX 48u
-#define FRONTEND_I18N_MAX 192u
+#define FRONTEND_I18N_MAX 256u
 #define FRONTEND_SCHEME_MAX 96u
 #define FRONTEND_ASSOCIATION_MAX 112u
 #define FRONTEND_ASSOCIATION_HANDLER_MAX 8u
@@ -209,6 +209,9 @@ struct frontend_state {
    char current_dir[FRONTEND_MAX_PATH];
    char last_path[FRONTEND_MAX_PATH];
    char last_core[24];
+   char test_launch_path[FRONTEND_MAX_PATH];
+   char test_launch_core[48];
+   unsigned test_launch_frames;
    struct frontend_item pending_open_item;
    char pending_open_dir[FRONTEND_MAX_PATH];
    int pending_open_valid;
@@ -264,7 +267,7 @@ struct frontend_state {
    char artwork_cache_text[192];
    char scheme_name[FRONTEND_SCHEME_MAX][32];
    unsigned scheme_count;
-   char i18n_key[FRONTEND_I18N_MAX][40];
+   char i18n_key[FRONTEND_I18N_MAX][64];
    char i18n_value[FRONTEND_I18N_MAX][128];
    unsigned i18n_count;
    char storage_profile[16];
@@ -469,6 +472,7 @@ void frontend_launch_script(struct frontend_state *fe,
 void frontend_launch_with_handler(struct frontend_state *fe,
    struct frontend_item *item, const char *handler);
 void frontend_launch_last_game(struct frontend_state *fe);
+void frontend_launch_test_target(struct frontend_state *fe);
 void frontend_launch_audio_diagnostics(struct frontend_state *fe);
 void frontend_show_open_with(struct frontend_state *fe,
    const struct frontend_item *item);

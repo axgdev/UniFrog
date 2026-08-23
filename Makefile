@@ -797,7 +797,7 @@ $(BUILD_IDENTITY_OBJECTS): $(BUILD_IDENTITY_STAMP)
 	quick-core-check core-smoke-check sdk dtb lib fastboot fastboot-only size component-sizes \
 	ci-deps ci-smoke-deps \
 	ci-toolchain ci-commit-smoke ci-commit-check ci-sd-zip print-config mmc-host-vendor-extract \
-	qemu-build qemu-smoke
+	qemu-build qemu-smoke qemu-launch-test
 
 all: $(ASD) sdcard-package
 
@@ -837,6 +837,25 @@ qemu-smoke: qemu-build $(ASD)
 		cat "$(QEMU_TRACE_LOG)" >&2; exit 1; \
 	}
 	$(LOG_ECHO) "  OK      QEMU boot trace"
+
+# End-to-end core launch test: builds a small SD image, auto-launches a ROM
+# through the requested core, and checks the device log for a clean session.
+# usage: make qemu-launch-test TEST_CORE=fbalpha2012 TEST_ROM=path/to.zip \
+#           [TEST_FRAMES=240]
+TEST_CORE ?= fbalpha2012
+TEST_ROM ?=
+TEST_FRAMES ?= 240
+qemu-launch-test: qemu-build $(ASD)
+	$(LOG_ECHO) "  QEMU    launch test core=$(TEST_CORE)"
+	$(Q)test -n "$(TEST_ROM)" || { \
+		echo "set TEST_ROM=<zip> for qemu-launch-test" >&2; exit 2; }
+	$(Q)test -s "$(CORE_PACKAGE)/$(TEST_CORE).bin" || { \
+		echo "missing core module; run: make -C cores $(call core_id_to_target,$(TEST_CORE))" >&2; exit 2; }
+	$(Q)QEMU_BIN="$(QEMU_BIN)" QEMU_DIR="$(QEMU_DIR)" \
+		QEMU_WORK="$(QEMU_WORK)" QEMU_VERSION="$(QEMU_VERSION)" \
+		sh tools/qemu_launch_test.sh \
+		CORE="$(TEST_CORE)" ROM="$(TEST_ROM)" \
+		FRAMES="$(TEST_FRAMES)"
 setup: deps ci-toolchain
 setup-min: deps-sdk deps-js2300 deps-lvgl deps-ffmpeg ffmpeg deps-support ci-toolchain
 setup-cores: deps-sdk deps-js2300 deps-lvgl deps-ffmpeg ffmpeg deps-cores ci-toolchain

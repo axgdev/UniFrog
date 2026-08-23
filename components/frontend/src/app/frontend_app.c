@@ -761,6 +761,11 @@ static int frontend_app_initialized;
 static const struct unifrog_frontend_launch_services
    *frontend_app_launch_services;
 
+static const char *frontend_app_translate(const char *key)
+{
+   return tr(&frontend_app, key);
+}
+
 void unifrog_frontend_app_set_launch_services(
    const struct unifrog_frontend_launch_services *services)
 {
@@ -778,6 +783,7 @@ int unifrog_frontend_app_init(void)
    if (frontend_app_initialized)
       return 0;
    memset(fe, 0, sizeof(*fe));
+   unifrog_frontend_lvgl_set_label_translator(frontend_app_translate);
    fe->launch_services = frontend_app_launch_services ?
       frontend_app_launch_services : unifrog_frontend_launch_services_default();
    fe->theme = &frontend_theme;
@@ -883,6 +889,7 @@ int unifrog_frontend_app_init(void)
    show_launch(fe);
    fe->running = 1;
    frontend_app_initialized = 1;
+   frontend_launch_test_target(fe);
    return 0;
 }
 

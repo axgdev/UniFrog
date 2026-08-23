@@ -1,0 +1,83 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog CI <ci@unifrog.local>
+Date: Sun, 23 Aug 2026 02:32:51 +0100
+Subject: [PATCH 3/3] Allow even-aligned long access in the 68000 interface
+
+The 68000 enforces even alignment only, so long reads and writes at
+addresses congruent to 2 mod 4 are legal and real games issue them
+(MOVEM with PC-relative data, JSR pushing to an offset stack). The
+ReadLong, FetchLong and WriteLong fast paths dereferenced native 32-bit
+pointers there: ReadLong and WriteLong only diverted odd addresses to
+byte access, FetchLong had no guard at all. On x86 hosts the native
+misaligned load works; on MIPS32r1 it raises AdEL/AdES.
+
+Run402 captured exactly this from dino.zip under fbalpha2012:
+epc=M68KFetchLong badv=...75e during MOVEM pcdi, and epc=M68KWriteLong
+badv=...ec2 from a JSR return push. Compose longs from two word accesses
+when the address is not 4-aligned; word paths already handle their own
+alignment.
+---
+ svn-current/trunk/src/cpu/m68000_intf.cpp | 31 +++++++++++++----------
+ 1 file changed, 18 insertions(+), 13 deletions(-)
+
+diff --git a/svn-current/trunk/src/cpu/m68000_intf.cpp b/svn-current/trunk/src/cpu/m68000_intf.cpp
+index cc542ca301512a685e64af649a2e7dd28fa6fd39..6d28a93cf797d0ec6829d310c7227eff6d50ce35 100644
+--- a/svn-current/trunk/src/cpu/m68000_intf.cpp
++++ b/svn-current/trunk/src/cpu/m68000_intf.cpp
+@@ -366,12 +366,13 @@ inline static UINT32 ReadLong(UINT32 a)
+ 	{
+ 		UINT32 r = 0;
+ 
+-		if (a & 1)
++		if (a & 3)
+ 		{
+-			r  = ReadByte((a + 0)) * 0x1000000;
+-			r += ReadByte((a + 1)) * 0x10000;
+-			r += ReadByte((a + 2)) * 0x100;
+-			r += ReadByte((a + 3));
++			// The 68000 enforces even alignment only: long access at an
++			// address of 2 mod 4 is legal, so compose from words instead
++			// of performing a native misaligned 32-bit load.
++			r  = ReadWord(a + 0) * 0x10000;
++			r += ReadWord(a + 2);
+ 
+ 			return r;
+ 		}
+@@ -397,7 +398,14 @@ inline static UINT32 FetchLong(UINT32 a)
+ 
+ 	pr = FIND_F(a);
+ 	if ((uintptr_t)pr >= SEK_MAXHANDLER) {
+-		UINT32 r = *((UINT32*)(pr + (a & SEK_PAGEM)));
++		UINT32 r;
++
++		if (a & 3) {
++			// Even alignment only: compose the long from two fetches.
++			r = FetchWord(a);
++			return (r << 16) | FetchWord(a + 2);
++		}
++		r = *((UINT32*)(pr + (a & SEK_PAGEM)));
+ 		r = (r >> 16) | (r << 16);
+ 		return BURN_ENDIAN_SWAP_INT32(r);
+ 	}
+@@ -415,14 +423,11 @@ inline static void WriteLong(UINT32 a, UINT32 d)
+ 	pr = FIND_W(a);
+ 	if ((uintptr_t)pr >= SEK_MAXHANDLER)
+ 	{
+-		if (a & 1)
++		if (a & 3)
+ 		{
+-		//	bprintf(PRINT_NORMAL, _T("write32 0x%08X 0x%8.8x\n"), a,d);
+-
+-			WriteByte((a + 0), d / 0x1000000);
+-			WriteByte((a + 1), d / 0x10000);
+-			WriteByte((a + 2), d / 0x100);
+-			WriteByte((a + 3), d);
++			// Even alignment only: split the long into two word stores.
++			WriteWord((a + 0), d / 0x10000);
++			WriteWord((a + 2), d);
+ 
+ 			return;
+ 		}
+-- 
+2.43.0
+
