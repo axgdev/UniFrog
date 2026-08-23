@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: UniFrog CI <ci@unifrog.local>
+Date: Sun, 23 Aug 2026 22:38:27 +0100
+Subject: [PATCH 4/4] Look for board archives in the frontend system directory
+
+open_archive() only searched the ROM's own folder, so Neo Geo games (mslug) failed with ret=-1 when neogeo.zip lived in the frontend system dir (/bios), which is where stock SF2000 cards keep it. Fall back to g_system_dir when the archive is missing next to the game, matching modern FBNeo behavior.
+---
+ .../trunk/src/burner/libretro/libretro.cpp    | 26 ++++++++++++++++---
+ 1 file changed, 23 insertions(+), 3 deletions(-)
+
+diff --git a/svn-current/trunk/src/burner/libretro/libretro.cpp b/svn-current/trunk/src/burner/libretro/libretro.cpp
+index 8c7a8a90c08509a7d1f8171f16c1524a48731477..f645687b60bafbe1a528f5fd70985e575cd4387b 100644
+--- a/svn-current/trunk/src/burner/libretro/libretro.cpp
++++ b/svn-current/trunk/src/burner/libretro/libretro.cpp
+@@ -623,10 +623,30 @@ static bool open_archive()
+ #endif
+ 
+ 		if (ZipOpen(path) != 0)
+-			log_cb(RETRO_LOG_ERROR, "[FBA] Failed to find archive: %s, let's continue with other archives...\n", path);
+-		else
+-			g_find_list_path.push_back(path);
++		{
++			ZipClose();
++
++			// Not next to the game; BIOS/board archives may live in the
++			// frontend system directory (e.g. /bios/neogeo.zip).
++			if (g_system_dir[0] && strcmp(g_system_dir, g_rom_dir) != 0)
++			{
++				snprintf(path, sizeof(path), "%s/%s", g_system_dir, rom_name);
++				log_cb(RETRO_LOG_INFO, "[FBA] Archive: %s\n", path);
++				if (ZipOpen(path) != 0)
++				{
++					log_cb(RETRO_LOG_ERROR, "[FBA] Failed to find archive: %s, let's continue with other archives...\n", path);
++					ZipClose();
++					continue;
++				}
++			}
++			else
++			{
++				log_cb(RETRO_LOG_ERROR, "[FBA] Failed to find archive: %s, let's continue with other archives...\n", path);
++				continue;
++			}
++		}
+ 
++		g_find_list_path.push_back(path);
+ 		ZipClose();
+ 	}
+ 
+-- 
+2.43.0
+
