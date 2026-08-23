@@ -8,10 +8,12 @@
 
 #include <unifrog/exception_record.h>
 #include <unifrog/gfx.h>
+#include <unifrog/image.h>
 #include <unifrog/log.h>
 #include <unifrog/paths.h>
 #include <unifrog/perf.h>
 #include <unifrog/png.h>
+#include <unifrog/surface_alloc.h>
 #include <unifrog/text.h>
 #include <unifrog/ui.h>
 
@@ -301,6 +303,8 @@ static void draw_header_battery(struct unifrog_ui *ui,
    unifrog_gfx_fill_rect(&surface, 308, 11, 2, 5, color);
 }
 
+#define FRONTEND_LVGL_IMAGE_MAX_SIDE 320u
+
 static struct unifrog_png_image *cached_image(const char *path)
 {
    if (!path || !path[0])
@@ -310,6 +314,54 @@ static struct unifrog_png_image *cached_image(const char *path)
          return &frontend_lvgl.cache[i].image;
    }
    return NULL;
+}
+
+/* Cap decoded artwork size so per-frame scaled blits stay cheap on MIPS. */
+static void shrink_oversized_image(struct unifrog_png_image *image)
+{
+   struct unifrog_png_image out;
+   unsigned long factor;
+   uint16_t *pixels;
+   uint8_t *alpha;
+
+   if (!image->pixels || (image->width <= FRONTEND_LVGL_IMAGE_MAX_SIDE &&
+                          image->height <= FRONTEND_LVGL_IMAGE_MAX_SIDE))
+      return;
+   factor = image->width > image->height ?
+      (image->width + FRONTEND_LVGL_IMAGE_MAX_SIDE - 1u) /
+      FRONTEND_LVGL_IMAGE_MAX_SIDE :
+      (image->height + FRONTEND_LVGL_IMAGE_MAX_SIDE - 1u) /
+      FRONTEND_LVGL_IMAGE_MAX_SIDE;
+   if (factor < 2ul)
+      return;
+   memset(&out, 0, sizeof(out));
+   out.width = image->width / (unsigned)factor;
+   out.height = image->height / (unsigned)factor;
+   if (!out.width || !out.height)
+      return;
+   out.pixels = unifrog_surface_memalign(32u,
+      (size_t)out.width * (size_t)out.height * sizeof(uint16_t));
+   out.alpha = malloc((size_t)out.width * (size_t)out.height);
+   if (!out.pixels || !out.alpha) {
+      unifrog_surface_free(out.pixels);
+      free(out.alpha);
+      return;
+   }
+   for (unsigned y = 0; y < out.height; y++) {
+      const unsigned src_y = y * (unsigned)factor;
+
+      for (unsigned x = 0; x < out.width; x++) {
+         const unsigned src_x = x * (unsigned)factor;
+         const size_t src = (size_t)src_y * image->width + src_x;
+
+         out.pixels[(size_t)y * out.width + x] = image->pixels[src];
+         out.alpha[(size_t)y * out.width + x] = image->alpha[src];
+      }
+   }
+   unifrog_log("frontend lvgl image shrunk %ux%u -> %ux%u\n",
+      image->width, image->height, out.width, out.height);
+   unifrog_png_free(image);
+   *image = out;
 }
 
 static struct unifrog_png_image *load_cached_image(const char *path)
@@ -342,12 +394,13 @@ static struct unifrog_png_image *load_cached_image(const char *path)
    }
    next = &frontend_lvgl.cache[frontend_lvgl.cache_count];
    memset(next, 0, sizeof(*next));
-   if (unifrog_png_load_file(path, &next->image) != 0) {
+   if (unifrog_image_load_file(path, &next->image) != 0) {
       unifrog_text_copy(frontend_lvgl.failed_image,
          sizeof(frontend_lvgl.failed_image), path);
       unifrog_log("frontend lvgl image load failed path=%s\n", path);
       return NULL;
    }
+   shrink_oversized_image(&next->image);
    unifrog_text_copy(next->path, sizeof(next->path), path);
    frontend_lvgl.cache_count++;
    unifrog_log("frontend lvgl image cached slot=%u path=%s size=%ux%u alpha=%u opaque=%d\n",
@@ -369,8 +422,9 @@ static struct unifrog_png_image *load_transient_image(unsigned slot,
       return &image->image;
    unifrog_png_free(&image->image);
    image->path[0] = '\0';
-   if (unifrog_png_load_file(path, &image->image) != 0)
+   if (unifrog_image_load_file(path, &image->image) != 0)
       return NULL;
+   shrink_oversized_image(&image->image);
    unifrog_text_copy(image->path, sizeof(image->path), path);
    return &image->image;
 }
@@ -531,17 +585,11 @@ static void draw_row(struct unifrog_ui *ui,
    uint16_t bg = focused ? style->list_focus_background :
       style->list_background;
    uint16_t fg = focused ? style->list_focus_text : style->list_text;
-   uint16_t muted = focused ? style->list_focus_indicator :
-      style->list_indicator;
    uint8_t bg_alpha = focused ? theme_alpha(style->list_focus_alpha) :
       theme_alpha(style->list_alpha);
-   uint8_t text_alpha = focused ? theme_alpha(style->list_focus_text_alpha) :
+   uint8_t text_alpha = focused ?
+      theme_alpha(style->list_focus_text_alpha) :
       theme_alpha(style->list_text_alpha);
-   uint8_t indicator_alpha = focused ?
-      theme_alpha(style->list_focus_indicator_alpha) :
-      theme_alpha(style->list_indicator_alpha);
-   uint16_t value_fg = muted;
-   uint8_t value_alpha = indicator_alpha;
    uint16_t contrast_bg = bg;
    uint8_t contrast_alpha = bg_alpha;
    uint16_t draw_bg = bg;
@@ -550,9 +598,8 @@ static void draw_row(struct unifrog_ui *ui,
    int glyph_h = style->list_glyph_h > 0 ? style->list_glyph_h : 16;
    int glyph_x = style->list_glyph_x >= 0 ? style->list_glyph_x : 5;
    int label_x = style->label_x > 0 ? style->label_x : 28;
-   int label_w = style->label_w > 0 ? style->label_w : 126;
-   int value_w = style->value_w > 0 ? style->value_w : 142;
-   int value_x;
+   char row_text[176];
+   const char *row_label;
    int font_h = unifrog_gfx_font_height();
    int font_adv = unifrog_gfx_font_advance();
    int text_y;
@@ -567,15 +614,6 @@ static void draw_row(struct unifrog_ui *ui,
       h = FRONTEND_LVGL_H;
    if (label_x >= w)
       label_x = glyph && glyph[0] ? glyph_w + glyph_x + 4 : 4;
-   if (label_w > w - label_x - 8)
-      label_w = w - label_x - 8;
-   if (label_w < 0)
-      label_w = 0;
-   if (value_w > w - label_x - label_w - 6)
-      value_w = w - label_x - label_w - 6;
-   if (value_w < 0)
-      value_w = 0;
-   value_x = x + w - value_w - 2;
    if (font_h < 7)
       font_h = 7;
    if (font_h > h)
@@ -611,39 +649,30 @@ static void draw_row(struct unifrog_ui *ui,
        (focused ? style->list_focus_glyph_alpha : style->list_glyph_alpha))
       draw_image_path(&surface, glyph, x + glyph_x, y + (h - glyph_h) / 2,
          glyph_w, glyph_h);
-   if (!value_alpha && text_alpha) {
-      value_alpha = text_alpha;
-      value_fg = fg;
-   }
    if (contrast_alpha < 64u) {
       contrast_bg = style->background;
       contrast_alpha = 255u;
    }
    fg = contrast_text(fg, contrast_bg, contrast_alpha);
-   value_fg = contrast_text(value_fg, contrast_bg, contrast_alpha);
    fg = readable_text_on_pixel(&surface, fg, x + label_x, text_y);
-   value_fg = readable_text_on_pixel(&surface, value_fg,
-      value_x, text_y);
-   if (text_alpha) {
-      int chars = label_w / font_adv;
-
-      if (focused)
-         frontend_lvgl.animation_active |= unifrog_ui_text_marquee(ui,
-            x + label_x, text_y, chars, label, fg, 1,
-            unifrog_perf_time_ms() - frontend_lvgl.marquee_start_ms);
-      else
-         unifrog_ui_text_clipped(ui, x + label_x, text_y, chars, label, fg, 1);
+   row_label = label;
+   if (value && value[0]) {
+      snprintf(row_text, sizeof(row_text), "%s: %s",
+         label ? label : "", value);
+      row_label = row_text;
    }
-   if (value_alpha && value && value[0]) {
-      int chars = (value_w - 2) / font_adv;
+   if (text_alpha) {
+      int chars = (w - label_x - 4) / font_adv;
 
+      if (chars < 1)
+         chars = 1;
       if (focused)
          frontend_lvgl.animation_active |= unifrog_ui_text_marquee(ui,
-            value_x, text_y, chars, value, value_fg, 1,
+            x + label_x, text_y, chars, row_label, fg, 1,
             unifrog_perf_time_ms() - frontend_lvgl.marquee_start_ms);
       else
-         unifrog_ui_text_clipped(ui, value_x, text_y, chars, value,
-            value_fg, 1);
+         unifrog_ui_text_clipped(ui, x + label_x, text_y, chars,
+            row_label, fg, 1);
    }
 }
 
@@ -698,79 +727,6 @@ static void draw_list_window(struct unifrog_ui *ui,
       draw_row(ui, style, i, labels && labels[idx] ? labels[idx] : "",
          values && values[idx] ? values[idx] : "",
          glyphs && glyphs[idx] ? glyphs[idx] : "", idx == selected);
-   }
-}
-
-static int launcher_uses_list(const struct unifrog_frontend_lvgl_style *style)
-{
-   if (!style)
-      return 0;
-   if (!style->grid_enabled)
-      return 1;
-   return 0;
-}
-
-static void draw_launcher_grid(struct unifrog_ui *ui,
-   const struct unifrog_frontend_lvgl_style *style, unsigned selected)
-{
-   struct unifrog_surface surface = unifrog_ui_surface(ui);
-   int cols = style->grid_column_count > 0 ? style->grid_column_count :
-      (style->launch_cols > 0 ? style->launch_cols : 4);
-   int tile_w = style->launch_tile_w > 0 ? style->launch_tile_w : 68;
-   int tile_h = style->launch_tile_h > 0 ? style->launch_tile_h : 58;
-   int gap_x = style->launch_gap_x >= 0 ? style->launch_gap_x : 8;
-   int gap_y = style->launch_gap_y >= 0 ? style->launch_gap_y : 14;
-   int start_x = style->launch_x >= 0 ? style->launch_x : 12;
-   int start_y = style->launch_y >= 0 ? style->launch_y :
-      (style->header_height >= 0 ? style->header_height : 36) + 18;
-   int icon_w = style->launch_icon_w > 0 ? style->launch_icon_w : tile_w - 8;
-   int icon_h = style->launch_icon_h > 0 ? style->launch_icon_h : 26;
-
-   if (cols < 1)
-      cols = 1;
-   for (unsigned i = 0; i < FRONTEND_LVGL_LAUNCH_COUNT; i++) {
-      int col = (int)i % cols;
-      int row = (int)i / cols;
-      int x = start_x + col * (tile_w + gap_x);
-      int y = start_y + row * (tile_h + gap_y);
-      int focused = i == selected;
-      uint16_t bg = focused ? style->list_focus_background :
-         style->list_background;
-      uint16_t fg = focused ? style->list_focus_text : style->list_text;
-      uint8_t bg_alpha = focused ? theme_alpha(style->list_focus_alpha) :
-         theme_alpha(style->list_alpha);
-      uint8_t text_alpha = focused ?
-         theme_alpha(style->list_focus_text_alpha) :
-         theme_alpha(style->list_text_alpha);
-      int text_x = x + 5;
-      int text_y = y + tile_h - 18;
-      uint16_t text_fg;
-
-      if (style->launch_wallpaper[i][0])
-         draw_image_path(&surface, style->launch_wallpaper[i], x, y,
-            tile_w, tile_h);
-      else if (!style->theme_chrome || !style->launch_wallpaper[selected][0])
-         fill_rect_alpha(&surface, x, y, tile_w, tile_h, bg, bg_alpha);
-      if (style->launch_icon[i][0])
-         draw_image_path(&surface, style->launch_icon[i],
-            x + (tile_w - icon_w) / 2, y + 4, icon_w, icon_h);
-      else {
-         char glyph[2] = { launch_labels[i][0], '\0' };
-
-         fill_rect_alpha(&surface, x + 4, y + 4, tile_w - 8, icon_h,
-            focused ? style->list_focus_indicator : style->list_indicator,
-            220);
-         unifrog_gfx_draw_text(&surface, x + tile_w / 2 - 3,
-            y + 4 + icon_h / 2 - 4, glyph, style->background, 1);
-      }
-      if (!text_alpha)
-         text_alpha = 255u;
-      text_fg = readable_text_on_pixel(&surface,
-         contrast_text(fg, bg, bg_alpha), text_x, text_y);
-      if (text_alpha)
-         unifrog_ui_text_clipped(ui, text_x, text_y,
-            (tile_w - 10) / 6, tr_label(launch_labels[i]),
-            text_fg, 1);
    }
 }
 
@@ -921,11 +877,8 @@ int unifrog_frontend_lvgl_draw_launcher(struct unifrog_ui *ui,
    draw_shell(ui, style, "UniFrog", detail,
       status ? status : tr_label("A open  L/R page"));
    if (!fullscreen_launch_wallpaper) {
-      if (launcher_uses_list(style))
-         draw_list_window(ui, style, selected, labels, values, glyphs,
-            FRONTEND_LVGL_LAUNCH_COUNT);
-      else
-         draw_launcher_grid(ui, style, selected);
+      draw_list_window(ui, style, selected, labels, values, glyphs,
+         FRONTEND_LVGL_LAUNCH_COUNT);
    }
    frontend_lvgl.frame_seq++;
    {
