@@ -83,6 +83,8 @@ struct unifrog_frontend_lvgl_style {
 
 void unifrog_frontend_lvgl_style_default(struct unifrog_frontend_lvgl_style *style,
    const struct unifrog_ui_theme *theme);
+void unifrog_frontend_lvgl_set_label_translator(
+   const char *(*translate)(const char *key));
 void unifrog_frontend_lvgl_set_style(
    const struct unifrog_frontend_lvgl_style *style);
 void unifrog_frontend_lvgl_clear_resource_cache(void);

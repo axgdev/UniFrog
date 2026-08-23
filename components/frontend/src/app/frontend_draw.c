@@ -189,7 +189,7 @@ void frontend_draw(struct frontend_state *fe)
          frontend_screen_style(fe, UNIFROG_FRONTEND_LVGL_LAUNCH));
       if (unifrog_frontend_lvgl_draw_launcher(&fe->ui, fe->theme, fe->selected,
             detail, fe->status[0] ? fe->status :
-            (fe->last_path[0] ? "A open  SELECT+A resume" : NULL)) == 0)
+            (fe->last_path[0] ? tr(fe, "A open  SELECT+A resume") : NULL)) == 0)
          return;
 
       unifrog_ui_begin(&fe->ui, fe->theme->background);
@@ -235,8 +235,9 @@ void frontend_draw(struct frontend_state *fe)
       }
       unifrog_ui_footer(&fe->ui, fe->theme,
          fe->status[0] ? fe->status :
-         (fe->last_path[0] ? "A open  SELECT+A resume" : "A open  L/R page"),
-         "B back");
+         (fe->last_path[0] ? tr(fe, "A open  SELECT+A resume") :
+            tr(fe, "A open  L/R page")),
+         tr(fe, "B back"));
       unifrog_ui_present(&fe->ui);
       return;
    }
@@ -288,7 +289,7 @@ void frontend_draw(struct frontend_state *fe)
          fe->item_glyph_path, fe->item_glyph);
       if (unifrog_frontend_lvgl_draw_menu(&fe->ui, fe->theme, screen, fe->title,
             fe->selected, detail,
-            fe->status[0] ? fe->status : "A select  B back", labels, values,
+            fe->status[0] ? fe->status : tr(fe, "A select  B back"), labels, values,
             fe->item_glyph, fe->item_count) == 0)
          return;
    }
@@ -329,14 +330,15 @@ void frontend_draw(struct frontend_state *fe)
           (description && description[0])) {
          if (unifrog_frontend_lvgl_draw_list_preview(&fe->ui, fe->theme,
                fe->title, fe->selected, detail,
-               fe->status[0] ? fe->status : "A select  X open with  Y favorite",
+               fe->status[0] ? fe->status :
+               tr(fe, "A select  X open with  Y favorite"),
                labels, values, fe->item_glyph, fe->item_count, box, preview,
                description) == 0)
             return;
       }
       if (unifrog_frontend_lvgl_draw_list(&fe->ui, fe->theme, fe->title,
             fe->selected, detail,
-            fe->status[0] ? fe->status : "A select  L/R page  Y jump",
+            fe->status[0] ? fe->status : tr(fe, "A select  L/R page  Y jump"),
             labels, values, fe->item_glyph, fe->item_count) == 0)
          return;
    }
@@ -362,7 +364,7 @@ void frontend_draw(struct frontend_state *fe)
    if (fe->item_count == 0)
       unifrog_ui_text(&fe->ui, 20, 72, "No entries", fe->theme->muted, 1);
    unifrog_ui_footer(&fe->ui, fe->theme,
-      fe->status[0] ? fe->status : "A launch  L/R page  Y jump",
-      "B back");
+      fe->status[0] ? fe->status : tr(fe, "A launch  L/R page  Y jump"),
+      tr(fe, "B back"));
    unifrog_ui_present(&fe->ui);
 }

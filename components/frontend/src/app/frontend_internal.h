@@ -81,7 +81,7 @@
 #define FRONTEND_ROM_ROOT_LABEL_MAX 48u
 #define FRONTEND_ROM_ROOT_MAX 8u
 #define FRONTEND_ROM_SYSTEM_MAP_MAX 48u
-#define FRONTEND_I18N_MAX 192u
+#define FRONTEND_I18N_MAX 256u
 #define FRONTEND_SCHEME_MAX 96u
 #define FRONTEND_ASSOCIATION_MAX 112u
 #define FRONTEND_ASSOCIATION_HANDLER_MAX 8u
@@ -267,7 +267,7 @@ struct frontend_state {
    char artwork_cache_text[192];
    char scheme_name[FRONTEND_SCHEME_MAX][32];
    unsigned scheme_count;
-   char i18n_key[FRONTEND_I18N_MAX][40];
+   char i18n_key[FRONTEND_I18N_MAX][64];
    char i18n_value[FRONTEND_I18N_MAX][128];
    unsigned i18n_count;
    char storage_profile[16];

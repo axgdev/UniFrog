@@ -17,7 +17,7 @@ test "$#" -gt 0 || {
 reference="$tmp/reference"
 awk -F= '/^[^#;][^=]*=/{print $1}' "$1" | sort -u >"$reference"
 reference_count=$(wc -l <"$reference")
-test "$reference_count" -le 192 || {
+test "$reference_count" -le 256 || {
 	echo "language key count exceeds frontend limit: $reference_count" >&2
 	exit 1
 }

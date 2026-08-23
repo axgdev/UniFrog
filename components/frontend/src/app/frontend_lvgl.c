@@ -48,6 +48,26 @@ struct frontend_lvgl_runtime {
 
 static struct frontend_lvgl_runtime frontend_lvgl;
 
+/*
+ * The launcher tile labels live in this component while translations need
+ * the frontend state, so the app layer registers a lookup callback during
+ * startup and every drawn label goes through it.
+ */
+static const char *(*frontend_lvgl_label_translate)(const char *key);
+
+void unifrog_frontend_lvgl_set_label_translator(
+   const char *(*translate)(const char *key))
+{
+   frontend_lvgl_label_translate = translate;
+}
+
+static const char *tr_label(const char *key)
+{
+   if (!frontend_lvgl_label_translate || !key)
+      return key;
+   return frontend_lvgl_label_translate(key);
+}
+
 static const char *const launch_labels[FRONTEND_LVGL_LAUNCH_COUNT] = {
    "Explore",
    "Collection",
@@ -749,7 +769,7 @@ static void draw_launcher_grid(struct unifrog_ui *ui,
          contrast_text(fg, bg, bg_alpha), text_x, text_y);
       if (text_alpha)
          unifrog_ui_text_clipped(ui, text_x, text_y,
-            (tile_w - 10) / 6, launch_labels[i],
+            (tile_w - 10) / 6, tr_label(launch_labels[i]),
             text_fg, 1);
    }
 }
@@ -887,7 +907,7 @@ int unifrog_frontend_lvgl_draw_launcher(struct unifrog_ui *ui,
    fullscreen_launch_wallpaper = style->theme_chrome &&
       style->launch_wallpaper[selected][0];
    for (unsigned i = 0; i < FRONTEND_LVGL_LAUNCH_COUNT; i++) {
-      labels[i] = launch_labels[i];
+      labels[i] = tr_label(launch_labels[i]);
       values[i] = "";
       glyphs[i] = style->launch_icon[i];
    }
@@ -899,7 +919,7 @@ int unifrog_frontend_lvgl_draw_launcher(struct unifrog_ui *ui,
          FRONTEND_LVGL_W, FRONTEND_LVGL_H);
    }
    draw_shell(ui, style, "UniFrog", detail,
-      status ? status : "A open  L/R page");
+      status ? status : tr_label("A open  L/R page"));
    if (!fullscreen_launch_wallpaper) {
       if (launcher_uses_list(style))
          draw_list_window(ui, style, selected, labels, values, glyphs,
@@ -932,7 +952,7 @@ int unifrog_frontend_lvgl_draw_menu(struct unifrog_ui *ui,
       selected = count - 1u;
    begin_frame(ui, style);
    draw_shell(ui, style, title ? title : "UniFrog", detail,
-      status ? status : "A select  B back");
+      status ? status : tr_label("A select  B back"));
    draw_list_window(ui, style, selected, labels, values, glyphs, count);
    frontend_lvgl.frame_seq++;
    {
@@ -1012,7 +1032,7 @@ int unifrog_frontend_lvgl_draw_list_preview(struct unifrog_ui *ui,
    if (description && description[0])
       draw_preview_text(ui, description, style.list_text);
    draw_shell(ui, &style, title ? title : "UniFrog", detail,
-      status ? status : "A select  B back");
+      status ? status : tr_label("A select  B back"));
    draw_list_window(ui, &style, selected, labels, values, glyphs, count);
    frontend_lvgl.frame_seq++;
    write_screenshot_if_requested(&surface, "preview");
