@@ -82,6 +82,9 @@ Common options:
   V=1                         Show compiler/linker commands
   BUILD_PROGRESS=1            Show progress labels without command echo
   CORE_IDS="gpsp gambatte"    Limit fetched, built, and packaged cores
+  FAST_BUILD=0                Build every core including the slow ones
+                              (fbalpha2012, mame2000, gpsp, gpsp-gbac-prosty,
+                              picodrive, qpsx); sd-zip does this implicitly
   QUICK_CORE=quicknes         Core built by make dev-check and quick-core-check
   LINUX_CORE_IDS="gambatte"   Limit native cores built for Linux runners
   DEP_CHECKOUT=full           Keep full dependency source trees

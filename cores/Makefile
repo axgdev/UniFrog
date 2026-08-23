@@ -346,7 +346,10 @@ MAINTAIN_TARGETS := support-init core-init init smoke-init doctor smoke-doctor p
 	dep-status dep-update dep-edit dep-refresh dep-finalize dep-log dep-diff \
 	dep-patches-check dev-core smoke-check check clean help print-config
 core_id_to_target = $(if $(filter gpsp-gbac-prosty,$(1)),gpsp_multicore,$(1))
-CORE_IDS_EFFECTIVE := $(strip $(if $(CORE_IDS),$(CORE_IDS),$(if $(filter $(CORE_TARGETS),$(MAKECMDGOALS)),$(filter $(CORE_TARGETS),$(MAKECMDGOALS)),$(DEFAULT_CORE_IDS))))
+# FAST_BUILD=1 (default) keeps slow cores (see SLOW_CORE_IDS in manifest.mk)
+# out of `all`; pass FAST_BUILD=0 for release/full builds.
+FAST_BUILD ?= 1
+CORE_IDS_EFFECTIVE := $(strip $(if $(CORE_IDS),$(CORE_IDS),$(if $(filter $(CORE_TARGETS),$(MAKECMDGOALS)),$(filter $(CORE_TARGETS),$(MAKECMDGOALS)),$(if $(filter 1,$(FAST_BUILD)),$(FAST_CORE_IDS),$(DEFAULT_CORE_IDS)))))
 REQUESTED_CORE_TARGETS := $(foreach id,$(CORE_IDS_EFFECTIVE),$(call core_id_to_target,$(id)))
 UNKNOWN_CORE_IDS := $(strip $(filter-out $(CORE_TARGETS),$(REQUESTED_CORE_TARGETS)))
 ifneq ($(UNKNOWN_CORE_IDS),)
