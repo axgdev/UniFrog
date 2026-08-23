@@ -132,6 +132,15 @@ DEFAULT_CORE_IDS := gambatte gpsp gpsp-gbac-prosty picodrive snes9x2005 \
 	gambatte-prosty quicknes-prosty frodo-prosty fake08-prosty \
 	bluemsx-prosty fceumm-prosty
 
+# Clean rebuilds of these cores cost far more than the rest combined
+# (benchmarked with a warm ccache, -j9: fbalpha2012 and mame2000 run for
+# many minutes; gpsp 15s, gpsp-gbac-prosty 17s, picodrive 14s, qpsx 12s;
+# everything else lands under 5s). Quick iterations skip them; release
+# packaging (make sd-zip) and explicit CORE_IDS=... or `make -C cores
+# <target>` still build them.
+SLOW_CORE_IDS := fbalpha2012 mame2000 gpsp gpsp-gbac-prosty picodrive qpsx
+FAST_CORE_IDS := $(filter-out $(SLOW_CORE_IDS),$(DEFAULT_CORE_IDS))
+
 SMOKE_SUPPORT_SPECS := \
 	'zlib|$(CORE_SUPPORT_ROOT)/zlib|https://github.com/madler/zlib.git|tag|v1.3.2|da607da739fa6047df13e66a2af6b8bec7c2a498|-|:root-files'
 
