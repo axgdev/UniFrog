@@ -23,7 +23,7 @@
 #define TTF_CHAR_COUNT 95
 #define TTF_BITMAP_W 512
 #define TTF_BITMAP_H 256
-#define TTF_PIXEL_HEIGHT 12.0f
+#define TTF_PIXEL_HEIGHT 13.0f
 #define TTF_MAX_BYTES (4u * 1024u * 1024u)
 #define TTF_UNICODE_CACHE 128u
 
@@ -229,6 +229,13 @@ static void lvgl_font_clear(void)
 #endif
 }
 
+/* Boost midtone coverage so small TTF glyphs read as crisp strokes. */
+static unsigned ttf_sharpen(unsigned alpha)
+{
+   alpha = alpha + (alpha >> 1);
+   return alpha > 255u ? 255u : alpha;
+}
+
 static uint16_t blend_rgb565(uint16_t dst, uint16_t src, unsigned alpha)
 {
    unsigned inv = 255u - alpha;
@@ -328,7 +335,7 @@ static void ttf_draw_text(const struct unifrog_surface *surface,
 
             if (dx < 0 || dx >= (int)surface->width)
                continue;
-            alpha = src_row[xx];
+            alpha = ttf_sharpen(src_row[xx]);
             if (alpha)
                dst_row[dx] = blend_rgb565(dst_row[dx], color, alpha);
          }
@@ -353,7 +360,7 @@ static void ttf_draw_text(const struct unifrog_surface *surface,
 
                if (dx < 0 || dx >= (int)surface->width)
                   continue;
-               alpha = unicode->bitmap[yy * unicode->width + xx];
+               alpha = ttf_sharpen(unicode->bitmap[yy * unicode->width + xx]);
                if (alpha) {
                   uint16_t *dst = &surface->pixels[(unsigned)dy *
                      surface->stride + (unsigned)dx];
