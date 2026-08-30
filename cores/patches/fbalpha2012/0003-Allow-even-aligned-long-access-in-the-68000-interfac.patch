@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: UniFrog CI <ci@unifrog.local>
 Date: Sun, 23 Aug 2026 02:32:51 +0100
-Subject: [PATCH 3/3] Allow even-aligned long access in the 68000 interface
+Subject: [PATCH 3/4] Allow even-aligned long access in the 68000 interface
 
 The 68000 enforces even alignment only, so long reads and writes at
 addresses congruent to 2 mod 4 are legal and real games issue them

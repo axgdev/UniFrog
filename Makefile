@@ -461,6 +461,11 @@ INTERNAL_CORE_PACKAGE_SPECS := \
 	js2300:JS2300:js2300:js2300:js2300:js\|mjs\|ch8\|chip8:-:-
 ALL_CORE_PACKAGE_SPECS := $(CORE_PACKAGE_SPECS) $(INTERNAL_CORE_PACKAGE_SPECS)
 CORE_BUILD_DEPS = $(CORES)/Makefile $(CORES)/manifest.mk $(CORE_REV_STAMP) $(TOOLCHAIN_STAMP)
+# Release packaging ships every core; plain iteration builds skip the slow
+# ones (SLOW_CORE_IDS in cores/manifest.mk). Defined before CORE_MAKE_ARGS
+# because that variable is simply expanded.
+RELEASE_CORE_GOALS := sdcard-package sd-zip install refresh-sd refresh-sd-clean
+CORE_BATCH_FAST := $(if $(filter $(RELEASE_CORE_GOALS),$(MAKECMDGOALS)),0,1)
 CORE_MAKE_ARGS := \
 	TOOLCHAIN=$(TOOLCHAIN) \
 	CROSS_COMPILE=$(CROSS_COMPILE) \
@@ -469,6 +474,7 @@ CORE_MAKE_ARGS := \
 	DEP_DEPTH=$(DEP_DEPTH) \
 	DEP_GIT_ENV="$(DEP_GIT_ENV)" \
 	CORE_IDS="$(strip $(if $(CORE_IDS),$(CORE_IDS),$(CORE)))" \
+	FAST_BUILD=$(CORE_BATCH_FAST) \
 	CORE_SOURCE_ROOT=$(abspath $(CORE_SOURCE_ROOT)) \
 	CORE_SUPPORT_ROOT=$(abspath $(CORE_SUPPORT_ROOT)) \
 	CCACHE=$(CCACHE) \
@@ -503,7 +509,7 @@ LIBRETRO_CORE_IDS := $(foreach var,$(LIBRETRO_CORE_VARS),$($(var)_CORE_ID))
 JS2300_CORE_LIB := $(BUILD)/core_modules/js2300_libretro_core.a
 JS2300_CORE_SUPPORT_LIBS := $(LIBJS2300)
 JS2300_CORE_OBJECTS := $(BUILD)/core_modules/js2300_libretro_core.o
-EFFECTIVE_CORE_IDS := $(strip $(if $(CORE_IDS),$(CORE_IDS),$(LIBRETRO_CORE_IDS)))
+EFFECTIVE_CORE_IDS := $(strip $(if $(CORE_IDS),$(CORE_IDS),$(if $(filter 1,$(CORE_BATCH_FAST)),$(FAST_CORE_IDS),$(LIBRETRO_CORE_IDS))))
 SELECTED_CORE_LICENSE_SPECS := $(foreach spec,$(CORE_LICENSE_SPECS),$(if $(filter $(word 1,$(subst |, ,$(spec))),$(EFFECTIVE_CORE_IDS)),$(spec)))
 SELECTED_CORE_LICENSE_FILES := $(foreach spec,$(SELECTED_CORE_LICENSE_SPECS),$(word 2,$(subst |, ,$(spec))))
 UNKNOWN_CORE_IDS := $(strip $(foreach id,$(EFFECTIVE_CORE_IDS),$(if $(CORE_VAR_$(id)),,$(id))))

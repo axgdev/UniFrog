@@ -582,6 +582,53 @@ void unifrog_gfx_draw_text_bitmap(const struct unifrog_surface *surface,
    }
 }
 
+int unifrog_gfx_text_width_limit(const char *text, int max_px)
+{
+   int width = 0;
+   int chars = 0;
+
+   if (!text || max_px <= 0)
+      return 0;
+   while (*text) {
+      uint32_t ch = utf8_next(&text);
+      int adv = 0;
+
+#ifndef UNIFROG_GFX_NO_LVGL
+      if (lvgl_font) {
+         lv_font_glyph_dsc_t dsc;
+         const char *peek = text;
+
+         memset(&dsc, 0, sizeof(dsc));
+         if (!lvgl_font->get_glyph_dsc(lvgl_font, &dsc, ch,
+             utf8_next(&peek)))
+            continue;
+         adv = ((int)dsc.adv_w + lvgl_font_div - 1) /
+            (lvgl_font_div > 0 ? lvgl_font_div : 1);
+      } else
+#endif
+      if (ttf_active) {
+         if (ch >= TTF_FIRST_CHAR && ch < TTF_FIRST_CHAR + TTF_CHAR_COUNT)
+            adv = (int)(ttf_chars[ch - TTF_FIRST_CHAR].xadvance + 0.5f);
+         else {
+            struct ttf_unicode_glyph *glyph = ttf_unicode_glyph(ch);
+
+            if (!glyph)
+               glyph = ttf_unicode_glyph('?');
+            if (!glyph)
+               continue;
+            adv = glyph->advance;
+         }
+      } else {
+         adv = 6;
+      }
+      if (width + adv > max_px)
+         break;
+      width += adv;
+      chars++;
+   }
+   return chars;
+}
+
 int unifrog_gfx_font_height(void)
 {
 #ifndef UNIFROG_GFX_NO_LVGL

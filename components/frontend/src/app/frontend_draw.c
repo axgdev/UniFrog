@@ -241,107 +241,130 @@ void frontend_draw(struct frontend_state *fe)
       unifrog_ui_present(&fe->ui);
       return;
    }
-   if (fe->view == FRONTEND_VIEW_CONFIG || fe->view == FRONTEND_VIEW_INFO ||
-       fe->view == FRONTEND_VIEW_POWER || fe->view == FRONTEND_VIEW_SYSINFO ||
-       fe->view == FRONTEND_VIEW_CONNECT || fe->view == FRONTEND_VIEW_CUSTOM ||
-       fe->view == FRONTEND_VIEW_VISUAL || fe->view == FRONTEND_VIEW_STORAGE ||
-       fe->view == FRONTEND_VIEW_UPDATES || fe->view == FRONTEND_VIEW_CORES ||
-       fe->view == FRONTEND_VIEW_CORE_INFO ||
-       fe->view == FRONTEND_VIEW_PACKAGE_CHECK ||
-       fe->view == FRONTEND_VIEW_CLOCK) {
-      enum unifrog_frontend_lvgl_screen screen = UNIFROG_FRONTEND_LVGL_CONFIG;
-      const struct unifrog_frontend_lvgl_style *style;
-      const char *labels[FRONTEND_MAX_ITEMS];
-      const char *values[FRONTEND_MAX_ITEMS];
-      unsigned glyph_start;
-      unsigned glyph_stop;
+    if (fe->view == FRONTEND_VIEW_CONFIG || fe->view == FRONTEND_VIEW_INFO ||
+        fe->view == FRONTEND_VIEW_POWER || fe->view == FRONTEND_VIEW_SYSINFO ||
+        fe->view == FRONTEND_VIEW_CONNECT || fe->view == FRONTEND_VIEW_CUSTOM ||
+        fe->view == FRONTEND_VIEW_VISUAL || fe->view == FRONTEND_VIEW_STORAGE ||
+        fe->view == FRONTEND_VIEW_UPDATES || fe->view == FRONTEND_VIEW_CORES ||
+        fe->view == FRONTEND_VIEW_CORE_INFO ||
+        fe->view == FRONTEND_VIEW_PACKAGE_CHECK ||
+        fe->view == FRONTEND_VIEW_CLOCK) {
+       enum unifrog_frontend_lvgl_screen screen = UNIFROG_FRONTEND_LVGL_CONFIG;
+       const struct unifrog_frontend_lvgl_style *style;
+       const char **labels = NULL;
+       const char **values = NULL;
+       unsigned glyph_start;
+       unsigned glyph_stop;
+       int drawn = 0;
 
-      if (fe->view == FRONTEND_VIEW_CONNECT)
-         screen = UNIFROG_FRONTEND_LVGL_CONNECT;
-      else if (fe->view == FRONTEND_VIEW_CUSTOM)
-         screen = UNIFROG_FRONTEND_LVGL_CUSTOM;
-      else if (fe->view == FRONTEND_VIEW_INFO)
-         screen = UNIFROG_FRONTEND_LVGL_INFO;
-      else if (fe->view == FRONTEND_VIEW_POWER)
-         screen = UNIFROG_FRONTEND_LVGL_POWER;
-      else if (fe->view == FRONTEND_VIEW_STORAGE)
-         screen = UNIFROG_FRONTEND_LVGL_STORAGE;
-      else if (fe->view == FRONTEND_VIEW_UPDATES)
-         screen = UNIFROG_FRONTEND_LVGL_STORAGE;
-      else if (fe->view == FRONTEND_VIEW_CORES ||
-          fe->view == FRONTEND_VIEW_CORE_INFO ||
-          fe->view == FRONTEND_VIEW_PACKAGE_CHECK)
-         screen = UNIFROG_FRONTEND_LVGL_STORAGE;
-      else if (fe->view == FRONTEND_VIEW_SYSINFO)
-         screen = UNIFROG_FRONTEND_LVGL_SYSINFO;
-      else if (fe->view == FRONTEND_VIEW_VISUAL)
-         screen = UNIFROG_FRONTEND_LVGL_VISUAL;
-      style = frontend_screen_style(fe, screen);
-      apply_frontend_style(fe, (int)screen, style);
-      for (unsigned i = 0; i < fe->item_count; i++) {
-         labels[i] = fe->items[i].name;
-         values[i] = fe->items[i].meta;
-      }
-      visible_item_range(fe->item_count, fe->selected,
-         visible_rows_for_style(style), &glyph_start, &glyph_stop);
-      fill_visible_item_glyphs(fe, lvgl_screen_module(screen), glyph_start,
-         glyph_stop,
-         fe->item_glyph_path, fe->item_glyph);
-      if (unifrog_frontend_lvgl_draw_menu(&fe->ui, fe->theme, screen, fe->title,
-            fe->selected, detail,
-            fe->status[0] ? fe->status : tr(fe, "A select  B back"), labels, values,
-            fe->item_glyph, fe->item_count) == 0)
-         return;
-   }
-   {
-      const char *labels[FRONTEND_MAX_ITEMS];
-      const char *values[FRONTEND_MAX_ITEMS];
-      const struct unifrog_frontend_lvgl_style *style;
-      const char *box = NULL;
-      const char *preview = NULL;
-      const char *description = NULL;
-      char theme_preview[FRONTEND_MAX_PATH];
-      unsigned glyph_start;
-      unsigned glyph_stop;
+       if (fe->view == FRONTEND_VIEW_CONNECT)
+          screen = UNIFROG_FRONTEND_LVGL_CONNECT;
+       else if (fe->view == FRONTEND_VIEW_CUSTOM)
+          screen = UNIFROG_FRONTEND_LVGL_CUSTOM;
+       else if (fe->view == FRONTEND_VIEW_INFO)
+          screen = UNIFROG_FRONTEND_LVGL_INFO;
+       else if (fe->view == FRONTEND_VIEW_POWER)
+          screen = UNIFROG_FRONTEND_LVGL_POWER;
+       else if (fe->view == FRONTEND_VIEW_STORAGE)
+          screen = UNIFROG_FRONTEND_LVGL_STORAGE;
+       else if (fe->view == FRONTEND_VIEW_UPDATES)
+          screen = UNIFROG_FRONTEND_LVGL_STORAGE;
+       else if (fe->view == FRONTEND_VIEW_CORES ||
+           fe->view == FRONTEND_VIEW_CORE_INFO ||
+           fe->view == FRONTEND_VIEW_PACKAGE_CHECK)
+          screen = UNIFROG_FRONTEND_LVGL_STORAGE;
+       else if (fe->view == FRONTEND_VIEW_SYSINFO)
+          screen = UNIFROG_FRONTEND_LVGL_SYSINFO;
+       else if (fe->view == FRONTEND_VIEW_VISUAL)
+          screen = UNIFROG_FRONTEND_LVGL_VISUAL;
+       style = frontend_screen_style(fe, screen);
+       apply_frontend_style(fe, (int)screen, style);
+       if (fe->item_count) {
+          labels = malloc(fe->item_count * sizeof(*labels));
+          values = malloc(fe->item_count * sizeof(*values));
+       }
+       if (!fe->item_count || (labels && values)) {
+          for (unsigned i = 0; i < fe->item_count; i++) {
+             labels[i] = fe->items[i].name;
+             values[i] = fe->items[i].meta;
+          }
+          visible_item_range(fe->item_count, fe->selected,
+             visible_rows_for_style(style), &glyph_start, &glyph_stop);
+          fill_visible_item_glyphs(fe, lvgl_screen_module(screen), glyph_start,
+             glyph_stop,
+             fe->item_glyph_path, fe->item_glyph);
+          drawn = unifrog_frontend_lvgl_draw_menu(&fe->ui, fe->theme, screen, fe->title,
+                fe->selected, detail,
+                fe->status[0] ? fe->status : tr(fe, "A select  B back"), labels, values,
+                fe->item_glyph, fe->item_count) == 0;
+       }
+       free(labels);
+       free(values);
+       if (drawn)
+          return;
+    }
+    {
+       const char **labels = NULL;
+       const char **values = NULL;
+       const struct unifrog_frontend_lvgl_style *style;
+       const char *box = NULL;
+       const char *preview = NULL;
+       const char *description = NULL;
+       char theme_preview[FRONTEND_MAX_PATH];
+       unsigned glyph_start;
+       unsigned glyph_stop;
+       int drawn = 0;
 
-      style = frontend_view_style(fe, fe->view);
-      apply_frontend_style(fe, 100 + (int)fe->view, style);
-      for (unsigned i = 0; i < fe->item_count; i++) {
-         labels[i] = fe->items[i].name;
-         values[i] = fe->items[i].meta;
-      }
-      visible_item_range(fe->item_count, fe->selected,
-         visible_rows_for_style(style), &glyph_start, &glyph_stop);
-      fill_visible_item_glyphs(fe, list_view_glyph_module(fe->view),
-         glyph_start, glyph_stop,
-         fe->item_glyph_path, fe->item_glyph);
-      theme_preview[0] = '\0';
-      if (selected_theme_preview(fe, theme_preview,
-          sizeof(theme_preview)) == 0) {
-         preview = theme_preview;
-      } else if (fe->selected < fe->item_count &&
-          fe->items[fe->selected].kind == FRONTEND_ITEM_GAME) {
-         refresh_selected_artwork(fe, &fe->items[fe->selected]);
-         box = fe->boxart_hidden ? NULL : fe->artwork_cache_paths.box;
-         preview = fe->artwork_cache_paths.preview;
-         description = fe->artwork_cache_text;
-      }
-      if ((box && box[0]) || (preview && preview[0]) ||
-          (description && description[0])) {
-         if (unifrog_frontend_lvgl_draw_list_preview(&fe->ui, fe->theme,
-               fe->title, fe->selected, detail,
-               fe->status[0] ? fe->status :
-               tr(fe, "A select  X open with  Y favorite"),
-               labels, values, fe->item_glyph, fe->item_count, box, preview,
-               description) == 0)
-            return;
-      }
-      if (unifrog_frontend_lvgl_draw_list(&fe->ui, fe->theme, fe->title,
-            fe->selected, detail,
-            fe->status[0] ? fe->status : tr(fe, "A select  L/R page  Y jump"),
-            labels, values, fe->item_glyph, fe->item_count) == 0)
-         return;
-   }
+       style = frontend_view_style(fe, fe->view);
+       apply_frontend_style(fe, 100 + (int)fe->view, style);
+       if (fe->item_count) {
+          labels = malloc(fe->item_count * sizeof(*labels));
+          values = malloc(fe->item_count * sizeof(*values));
+       }
+       if (!fe->item_count || (labels && values)) {
+          for (unsigned i = 0; i < fe->item_count; i++) {
+             labels[i] = fe->items[i].name;
+             values[i] = fe->items[i].meta;
+          }
+          visible_item_range(fe->item_count, fe->selected,
+             visible_rows_for_style(style), &glyph_start, &glyph_stop);
+          fill_visible_item_glyphs(fe, list_view_glyph_module(fe->view),
+             glyph_start, glyph_stop,
+             fe->item_glyph_path, fe->item_glyph);
+          theme_preview[0] = '\0';
+          if (selected_theme_preview(fe, theme_preview,
+              sizeof(theme_preview)) == 0) {
+             preview = theme_preview;
+          } else if (fe->selected < fe->item_count &&
+              fe->items[fe->selected].kind == FRONTEND_ITEM_GAME) {
+             refresh_selected_artwork(fe, &fe->items[fe->selected]);
+             box = fe->boxart_hidden ? NULL : fe->artwork_cache_paths.box;
+             preview = fe->artwork_cache_paths.preview;
+             description = fe->artwork_cache_text;
+          }
+          if ((box && box[0]) || (preview && preview[0]) ||
+              (description && description[0])) {
+             if (unifrog_frontend_lvgl_draw_list_preview(&fe->ui, fe->theme,
+                   fe->title, fe->selected, detail,
+                   fe->status[0] ? fe->status :
+                   tr(fe, "A select  X open with  Y favorite"),
+                   labels, values, fe->item_glyph, fe->item_count, box, preview,
+                   description) == 0)
+                drawn = 1;
+          }
+          if (!drawn) {
+             if (unifrog_frontend_lvgl_draw_list(&fe->ui, fe->theme, fe->title,
+                   fe->selected, detail,
+                   fe->status[0] ? fe->status : tr(fe, "A select  L/R page  Y jump"),
+                   labels, values, fe->item_glyph, fe->item_count) == 0)
+                drawn = 1;
+          }
+       }
+       free(labels);
+       free(values);
+       if (drawn)
+          return;
+    }
    unifrog_ui_begin(&fe->ui, fe->theme->background);
    unifrog_ui_header(&fe->ui, fe->theme, fe->title, detail);
    end = fe->scroll + FRONTEND_ROWS;
