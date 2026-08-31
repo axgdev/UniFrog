@@ -42,8 +42,12 @@ jobs:
           path: |
             .deps/cores
             .deps/support
-          key: unifrog-cores-${{ runner.os }}-${{ hashFiles('cores/manifest.mk', 'cores/patches/**/*.patch') }}
+          # Smoke runs only fetch the fast core set, so keep their snapshots on
+          # their own key: a partial .deps/cores must never be restored by the
+          # release sd-zip job (which needs every core checkout).
+          key: unifrog-cores-smoke-${{ runner.os }}-${{ hashFiles('cores/manifest.mk', 'cores/patches/**/*.patch') }}
           restore-keys: |
+            unifrog-cores-smoke-${{ runner.os }}-
             unifrog-cores-${{ runner.os }}-
 
       - name: Cache toolchain

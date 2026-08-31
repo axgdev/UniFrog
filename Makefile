@@ -464,7 +464,7 @@ CORE_BUILD_DEPS = $(CORES)/Makefile $(CORES)/manifest.mk $(CORE_REV_STAMP) $(TOO
 # Release packaging ships every core; plain iteration builds skip the slow
 # ones (SLOW_CORE_IDS in cores/manifest.mk). Defined before CORE_MAKE_ARGS
 # because that variable is simply expanded.
-RELEASE_CORE_GOALS := sdcard-package sd-zip install refresh-sd refresh-sd-clean
+RELEASE_CORE_GOALS := ci-sd-zip sdcard-package sd-zip install refresh-sd refresh-sd-clean
 CORE_BATCH_FAST := $(if $(filter $(RELEASE_CORE_GOALS),$(MAKECMDGOALS)),0,1)
 CORE_MAKE_ARGS := \
 	TOOLCHAIN=$(TOOLCHAIN) \
